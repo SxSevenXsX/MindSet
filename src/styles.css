@@ -15,6 +15,7 @@
   --selection-color: #0f6b58;
   --selection-soft: rgba(15, 107, 88, 0.16);
   --selection-border: rgba(15, 107, 88, 0.42);
+  --tree-guide-color: #c8ceca;
   --h1-size: 30px;
   --h2-size: 24px;
   --h3-size: 19px;
@@ -50,6 +51,7 @@
   --accent: #8aa88f;
   --accent-strong: #b8d0bd;
   --accent-soft: rgba(138, 168, 143, 0.14);
+  --tree-guide-color: #5a5a5a;
   --danger-soft: rgba(179, 59, 59, 0.18);
   --shadow: none;
   --shadow-soft: none;
@@ -812,13 +814,13 @@ body.is-resizing-nav {
 .tree-guide {
   width: 14px;
   height: 100%;
-  border-left: 1px solid var(--border-strong);
-  opacity: 0.68;
+  border-left: 1px solid var(--tree-guide-color);
+  opacity: 1;
   transform: translateX(7px);
 }
 
 :root[data-theme="dark"] .tree-guide {
-  opacity: 0.52;
+  opacity: 1;
 }
 
 .tree-row:hover,
@@ -1369,7 +1371,8 @@ body.is-marquee-selecting {
   flex: 0 0 27px;
 }
 
-.color-apply {
+.color-apply,
+.color-clear {
   width: 26px;
   height: 27px;
   background: var(--surface-soft);
@@ -1391,8 +1394,18 @@ body.is-marquee-selecting {
   cursor: pointer;
 }
 
+.quick-color.is-light {
+  border-color: rgba(0, 0, 0, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
 :root[data-theme="dark"] .quick-color {
   border-color: rgba(255, 255, 255, 0.24);
+}
+
+:root[data-theme="dark"] .quick-color.is-light {
+  border-color: rgba(255, 255, 255, 0.48);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.22);
 }
 
 .quick-color.is-active {
@@ -2045,6 +2058,11 @@ body.is-marquee-selecting {
   border-radius: 999px;
   background: var(--swatch);
   cursor: pointer;
+}
+
+.color-swatch.is-light {
+  border-color: var(--border-strong);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
 }
 
 .color-swatch.is-active,

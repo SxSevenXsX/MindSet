@@ -54,6 +54,7 @@
     check: '<path d="m5 12 4 4L19 6"/>',
     close: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
     edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"/>',
+    eraser: '<path d="m7 21-4-4a2 2 0 0 1 0-2.8L12.2 5a2 2 0 0 1 2.8 0l4 4a2 2 0 0 1 0 2.8L9.8 21H7Z"/><path d="m5 12 7 7"/><path d="M16 21h5"/>',
     alignLeft: '<path d="M4 6h16"/><path d="M4 10h10"/><path d="M4 14h16"/><path d="M4 18h10"/>',
     alignCenter: '<path d="M4 6h16"/><path d="M7 10h10"/><path d="M4 14h16"/><path d="M7 18h10"/>',
     alignRight: '<path d="M4 6h16"/><path d="M10 10h10"/><path d="M4 14h16"/><path d="M10 18h10"/>',
@@ -83,6 +84,7 @@
   ];
 
   const textColorPresets = [
+    { label: "Blanc", value: "#ffffff" },
     { label: "Noir", value: "#000000" },
     ...baseColorPresets,
   ];
@@ -164,12 +166,18 @@
     return [...new Set(colors.map((color) => cleanColor(color, "")).filter(Boolean))].slice(0, 8);
   }
 
+  function defaultTreeGuideColor(theme) {
+    return theme === "dark" ? "#5a5a5a" : "#c8ceca";
+  }
+
   function normalizeStateShape(value) {
     const previousSettings = value.settings || {};
     const previousHeadings = previousSettings.headingPresets || {};
+    const theme = previousSettings.theme === "dark" ? "dark" : "light";
     value.settings = {
-      theme: previousSettings.theme === "dark" ? "dark" : "light",
+      theme,
       selectionColor: previousSettings.selectionColor || "#0f6b58",
+      treeGuideColor: cleanColor(previousSettings.treeGuideColor, ""),
       rightPanelOpen: previousSettings.rightPanelOpen !== false,
       leftPanelOpen: previousSettings.leftPanelOpen !== false,
       navWidth: Math.min(Math.max(Number(previousSettings.navWidth) || 282, 218), 430),
@@ -198,11 +206,13 @@
   function applyAppearance() {
     const settings = state.settings || {};
     const selection = settings.selectionColor || "#0f6b58";
+    const treeGuide = cleanColor(settings.treeGuideColor, defaultTreeGuideColor(settings.theme));
     const headings = settings.headingPresets || headingDefaults;
     document.documentElement.dataset.theme = settings.theme === "dark" ? "dark" : "light";
     document.documentElement.style.setProperty("--selection-color", selection);
     document.documentElement.style.setProperty("--selection-soft", hexToRgba(selection, 0.16));
     document.documentElement.style.setProperty("--selection-border", hexToRgba(selection, 0.42));
+    document.documentElement.style.setProperty("--tree-guide-color", treeGuide);
     document.documentElement.style.setProperty("--nav", `${Math.min(Math.max(Number(settings.navWidth) || 282, 218), 430)}px`);
     ["h1", "h2", "h3"].forEach((key) => {
       const preset = { ...headingDefaults[key], ...(headings[key] || {}) };
@@ -1340,11 +1350,12 @@
         <div class="color-tool-main">
           <input class="toolbar-color" type="color" value="${escapeHtml(current)}" data-color-input="${kind}" title="${escapeHtml(label)}" />
           <button class="format-button color-apply" data-apply-color="${kind}" title="Appliquer ${escapeHtml(label)}" aria-label="Appliquer ${escapeHtml(label)}">${icon("check")}</button>
+          ${kind === "highlight" ? `<button class="format-button color-clear" data-clear-highlight title="Enlever le surlignage" aria-label="Enlever le surlignage">${icon("eraser")}</button>` : ""}
         </div>
         <div class="quick-colors" aria-label="${escapeHtml(label)}">
           ${swatches.map((color) => `
             <button
-              class="quick-color ${color.value === current ? "is-active" : ""} ${color.recent ? "is-recent" : ""}"
+              class="quick-color ${color.value === current ? "is-active" : ""} ${color.recent ? "is-recent" : ""} ${color.value === "#ffffff" ? "is-light" : ""}"
               style="--quick-color:${color.value}"
               data-color-swatch="${kind}"
               data-color-value="${color.value}"
@@ -1712,7 +1723,9 @@
     if (runtime.modal.type === "settings") {
       const settings = state.settings || {};
       const headings = settings.headingPresets || headingDefaults;
-      const colors = ["#0f6b58", "#7c5cff", "#d58f27", "#bf5b7a", "#3f7fbf", "#6f8f3a"];
+      const selectionColors = ["#0f6b58", "#7c5cff", "#d58f27", "#bf5b7a", "#3f7fbf", "#6f8f3a"];
+      const guideColors = ["#c8ceca", "#5a5a5a", "#ffffff", "#0f6b58", "#7c5cff", "#3f7fbf", "#d58f27"];
+      const treeGuideColor = cleanColor(settings.treeGuideColor, defaultTreeGuideColor(settings.theme));
       return `
         <div class="modal-backdrop">
           <div class="modal settings-modal">
@@ -1733,7 +1746,13 @@
                   <input class="modal-field color-field" type="color" value="${escapeHtml(settings.selectionColor || "#0f6b58")}" data-selection-color />
                 </label>
                 <div class="color-swatches">
-                  ${colors.map((color) => `<button class="color-swatch ${color === settings.selectionColor ? "is-active" : ""}" style="--swatch:${color}" data-selection-swatch="${color}" aria-label="Couleur ${color}"></button>`).join("")}
+                  ${selectionColors.map((color) => `<button class="color-swatch ${color === settings.selectionColor ? "is-active" : ""} ${color === "#ffffff" ? "is-light" : ""}" style="--swatch:${color}" data-selection-swatch="${color}" aria-label="Couleur ${color}"></button>`).join("")}
+                </div>
+                <label class="modal-label">Couleur des lignes d'indentation
+                  <input class="modal-field color-field" type="color" value="${escapeHtml(treeGuideColor)}" data-tree-guide-color />
+                </label>
+                <div class="color-swatches">
+                  ${guideColors.map((color) => `<button class="color-swatch ${color === treeGuideColor ? "is-active" : ""} ${color === "#ffffff" ? "is-light" : ""}" style="--swatch:${color}" data-tree-guide-swatch="${color}" aria-label="Couleur ${color}"></button>`).join("")}
                 </div>
               </section>
               <section class="settings-section">
@@ -2028,6 +2047,23 @@
     app.querySelectorAll("[data-selection-swatch]").forEach((button) => {
       button.addEventListener("click", () => {
         state.settings.selectionColor = button.dataset.selectionSwatch;
+        saveState();
+        render();
+      });
+    });
+
+    const treeGuideColor = app.querySelector("[data-tree-guide-color]");
+    if (treeGuideColor) {
+      treeGuideColor.addEventListener("input", () => {
+        state.settings.treeGuideColor = treeGuideColor.value;
+        saveState();
+        applyAppearance();
+      });
+    }
+
+    app.querySelectorAll("[data-tree-guide-swatch]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.settings.treeGuideColor = button.dataset.treeGuideSwatch;
         saveState();
         render();
       });
@@ -2404,6 +2440,14 @@
       });
     });
 
+    app.querySelectorAll("[data-clear-highlight]").forEach((button) => {
+      button.addEventListener("mousedown", (event) => {
+        saveEditorSelection(editor);
+        event.preventDefault();
+      });
+      button.addEventListener("click", () => clearEditorHighlight(editor, note, box));
+    });
+
     app.querySelectorAll("[data-color-swatch]").forEach((button) => {
       button.addEventListener("mousedown", (event) => {
         saveEditorSelection(editor);
@@ -2739,6 +2783,32 @@
     restoreEditorSelection(editor);
     document.execCommand(kind === "highlight" ? "hiliteColor" : "foreColor", false, clean);
     syncEditorContent(editor, note, box);
+  }
+
+  function clearEditorHighlight(editor, note, box) {
+    if (!editor || !note || !box) return;
+    restoreEditorSelection(editor);
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount || selection.isCollapsed) {
+      setToast("Sélectionne le texte à désurligner.");
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    if (!selectionInsideEditor(editor, range)) return;
+    document.execCommand("hiliteColor", false, "transparent");
+    cleanHighlightArtifacts(editor);
+    syncEditorContent(editor, note, box);
+  }
+
+  function cleanHighlightArtifacts(root) {
+    const elements = root.querySelectorAll ? [...root.querySelectorAll("*")] : [];
+    elements.forEach((element) => {
+      if (element.style?.backgroundColor && ["transparent", "rgba(0, 0, 0, 0)"].includes(element.style.backgroundColor)) {
+        element.style.removeProperty("background-color");
+      }
+      if (element.getAttribute("bgcolor")?.toLowerCase() === "transparent") element.removeAttribute("bgcolor");
+      if (element.hasAttribute("style") && !element.getAttribute("style").trim()) element.removeAttribute("style");
+    });
   }
 
   function applySpanStyle(editor, note, box, style) {
