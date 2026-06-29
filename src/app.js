@@ -16,6 +16,8 @@
     selectionAnchorId: null,
     focusedItemId: null,
     dragIds: [],
+    editorRange: null,
+    boxMenuOpen: false,
   };
 
   const icons = {
@@ -78,6 +80,11 @@
     { label: "Rose", value: "#d9578a" },
     { label: "Bleu clair", value: "#55a7e5" },
     { label: "Vert", value: "#4ca66a" },
+  ];
+
+  const textColorPresets = [
+    { label: "Noir", value: "#000000" },
+    ...baseColorPresets,
   ];
 
   const emojiChoices = ["⭐", "📌", "💡", "✅", "🔥", "🧠", "📘", "🗂️"];
@@ -166,7 +173,7 @@
       rightPanelOpen: previousSettings.rightPanelOpen !== false,
       leftPanelOpen: previousSettings.leftPanelOpen !== false,
       navWidth: Math.min(Math.max(Number(previousSettings.navWidth) || 282, 218), 430),
-      lastTextColor: cleanColor(previousSettings.lastTextColor, "#17201c"),
+      lastTextColor: cleanColor(previousSettings.lastTextColor, "#000000"),
       lastHighlightColor: cleanColor(previousSettings.lastHighlightColor, "#fff0a8"),
       recentTextColors: normalizeRecentColors(previousSettings.recentTextColors),
       recentHighlightColors: normalizeRecentColors(previousSettings.recentHighlightColors),
@@ -275,7 +282,7 @@
         selectionColor: "#0f6b58",
         rightPanelOpen: true,
         leftPanelOpen: true,
-        lastTextColor: "#17201c",
+        lastTextColor: "#000000",
         lastHighlightColor: "#fff0a8",
         recentTextColors: [],
         recentHighlightColors: [],
@@ -778,6 +785,19 @@
     render();
   }
 
+  function switchBoxById(id) {
+    const target = state.boxes.find((item) => item.id === id);
+    if (!target) return;
+    runtime.boxMenuOpen = false;
+    if (target.passwordHash && !runtime.unlockedBoxIds.has(target.id)) {
+      runtime.modal = { type: "unlock-box", boxId: target.id };
+    } else {
+      state.currentBoxId = target.id;
+    }
+    saveState();
+    render();
+  }
+
   function updateHeadingPreset(level, field, value) {
     if (!["h1", "h2", "h3"].includes(level)) return;
     state.settings.headingPresets = state.settings.headingPresets || {};
@@ -1150,16 +1170,24 @@
   function renderBoxSwitcher(box) {
     return `
       <div class="box-switcher">
-        <div class="box-switcher-main">
+        <button class="box-switcher-main" type="button" data-action="toggle-box-menu" aria-expanded="${runtime.boxMenuOpen ? "true" : "false"}">
           <span class="item-icon">${icon("box")}</span>
           <div class="box-switcher-text">
-            <input class="box-title-input" value="${escapeHtml(box.name)}" data-box-title aria-label="Renommer la boîte" />
+            <strong>${escapeHtml(box.name)}</strong>
             <span>${allItems(box).length} éléments</span>
           </div>
-          <select data-box-switcher aria-label="Changer de boîte">
-            ${state.boxes.map((item) => `<option value="${item.id}" ${item.id === box.id ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}
-          </select>
-        </div>
+          ${icon("chevron", runtime.boxMenuOpen ? "box-chevron is-open" : "box-chevron")}
+        </button>
+        ${runtime.boxMenuOpen ? `
+          <div class="box-switcher-menu" data-box-menu>
+            ${state.boxes.map((item) => `
+              <button class="box-option ${item.id === box.id ? "is-active" : ""}" type="button" data-box-option="${item.id}">
+                <span>${escapeHtml(item.name)}</span>
+                <small>${allItems(item).length} éléments</small>
+              </button>
+            `).join("")}
+          </div>
+        ` : ""}
         <button class="tool-button" data-action="create-box-modal" data-tooltip="Nouvelle boîte" aria-label="Nouvelle boîte">${icon("plus")}</button>
         <button class="tool-button" data-action="open-settings" data-tooltip="Paramètres" aria-label="Paramètres">${icon("settings")}</button>
       </div>
@@ -1298,11 +1326,12 @@
 
   function renderColorTool(kind, label, value) {
     const recentKey = kind === "highlight" ? "recentHighlightColors" : "recentTextColors";
-    const current = cleanColor(value, kind === "highlight" ? "#fff0a8" : "#17201c");
-    const presetValues = new Set(baseColorPresets.map((color) => color.value));
+    const presets = kind === "highlight" ? baseColorPresets : textColorPresets;
+    const current = cleanColor(value, kind === "highlight" ? "#fff0a8" : "#000000");
+    const presetValues = new Set(presets.map((color) => color.value));
     const recents = (state.settings?.[recentKey] || []).filter((color) => !presetValues.has(color));
     const swatches = [
-      ...baseColorPresets.map((color) => ({ ...color, recent: false })),
+      ...presets.map((color) => ({ ...color, recent: false })),
       ...recents.slice(0, 3).map((color) => ({ label: `Récent ${color}`, value: color, recent: true })),
     ];
 
@@ -1359,7 +1388,7 @@
             </select>
           </div>
           <div class="toolbar-group color-toolbar-group">
-            ${renderColorTool("text", "Couleur du texte", state.settings?.lastTextColor || "#17201c")}
+            ${renderColorTool("text", "Couleur du texte", state.settings?.lastTextColor || "#000000")}
             ${renderColorTool("highlight", "Surlignage", state.settings?.lastHighlightColor || "#fff0a8")}
           </div>
           <div class="toolbar-group">
@@ -1770,6 +1799,14 @@
       });
     });
 
+    app.querySelectorAll("[data-box-option]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        switchBoxById(button.dataset.boxOption);
+      });
+    });
+
     app.querySelectorAll("[data-icon-back]").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.preventDefault();
@@ -1970,21 +2007,6 @@
       });
     }
 
-    const boxSwitcher = app.querySelector("[data-box-switcher]");
-    if (boxSwitcher) {
-      boxSwitcher.addEventListener("change", () => {
-        const target = state.boxes.find((item) => item.id === boxSwitcher.value);
-        if (!target) return;
-        if (target.passwordHash && !runtime.unlockedBoxIds.has(target.id)) {
-          runtime.modal = { type: "unlock-box", boxId: target.id };
-        } else {
-          state.currentBoxId = target.id;
-        }
-        saveState();
-        render();
-      });
-    }
-
     const themeSelect = app.querySelector("[data-theme-select]");
     if (themeSelect) {
       themeSelect.addEventListener("change", () => {
@@ -2074,6 +2096,15 @@
       });
     }
 
+    if (runtime.boxMenuOpen) {
+      app.addEventListener("click", (event) => {
+        if (!event.target.closest(".box-switcher")) {
+          runtime.boxMenuOpen = false;
+          render();
+        }
+      });
+    }
+
     bindEditor();
     bindForms();
   }
@@ -2104,17 +2135,7 @@
       return;
     }
     if (action === "open-box") {
-      const target = state.boxes.find((item) => item.id === event.currentTarget.dataset.boxId);
-      if (!target) return;
-      if (target.passwordHash && !runtime.unlockedBoxIds.has(target.id)) {
-        runtime.modal = { type: "unlock-box", boxId: target.id };
-        render();
-      } else {
-        state.currentBoxId = target.id;
-        runtime.modal = null;
-        saveState();
-        render();
-      }
+      switchBoxById(event.currentTarget.dataset.boxId);
       return;
     }
     if (!box) return;
@@ -2127,6 +2148,10 @@
     if (action === "toggle-theme") {
       state.settings.theme = state.settings.theme === "dark" ? "light" : "dark";
       saveState();
+      render();
+    }
+    if (action === "toggle-box-menu") {
+      runtime.boxMenuOpen = !runtime.boxMenuOpen;
       render();
     }
     if (action === "toggle-right-panel") {
@@ -2305,20 +2330,27 @@
 
     if (editor) {
       prepareCollapsibleHeadings(editor, note, box);
+      ["keyup", "mouseup", "focus", "click"].forEach((eventName) => {
+        editor.addEventListener(eventName, () => saveEditorSelection(editor));
+      });
       editor.addEventListener("keydown", (event) => handleEditorAutomation(event, editor, note, box));
       editor.addEventListener("input", () => {
         note.content = editor.innerHTML;
         note.modifiedAt = now();
         touchBox(box);
         updateEditorStats(note);
+        saveEditorSelection(editor);
         saveState();
       });
     }
 
     app.querySelectorAll("[data-editor-cmd]").forEach((button) => {
-      button.addEventListener("mousedown", (event) => event.preventDefault());
+      button.addEventListener("mousedown", (event) => {
+        saveEditorSelection(editor);
+        event.preventDefault();
+      });
       button.addEventListener("click", () => {
-        editor.focus();
+        restoreEditorSelection(editor);
         document.execCommand(button.dataset.editorCmd, false, null);
         note.content = editor.innerHTML;
         note.modifiedAt = now();
@@ -2329,6 +2361,8 @@
 
     const formatBlock = app.querySelector("[data-format-block]");
     if (formatBlock) {
+      formatBlock.addEventListener("mousedown", () => saveEditorSelection(editor));
+      formatBlock.addEventListener("focus", () => saveEditorSelection(editor));
       formatBlock.addEventListener("change", () => {
         applyHeadingFormat(editor, note, box, formatBlock.value);
       });
@@ -2336,20 +2370,33 @@
 
     const size = app.querySelector("[data-font-size]");
     if (size) {
+      size.addEventListener("mousedown", () => saveEditorSelection(editor));
+      size.addEventListener("focus", () => saveEditorSelection(editor));
       size.addEventListener("change", () => applySpanStyle(editor, note, box, `font-size:${size.value}`));
     }
 
     const fontFamily = app.querySelector("[data-font-family]");
     if (fontFamily) {
+      fontFamily.addEventListener("mousedown", () => saveEditorSelection(editor));
+      fontFamily.addEventListener("focus", () => saveEditorSelection(editor));
       fontFamily.addEventListener("change", () => applySpanStyle(editor, note, box, `font-family:${fontFamily.value}`));
     }
 
     app.querySelectorAll("[data-color-input]").forEach((input) => {
-      input.addEventListener("input", () => applyEditorColor(editor, note, box, input.dataset.colorInput, input.value));
+      input.addEventListener("mousedown", () => saveEditorSelection(editor));
+      input.addEventListener("focus", () => saveEditorSelection(editor));
+      input.addEventListener("input", () => {
+        const clean = registerRecentColor(input.dataset.colorInput, input.value);
+        if (clean) input.value = clean;
+        saveState();
+      });
     });
 
     app.querySelectorAll("[data-apply-color]").forEach((button) => {
-      button.addEventListener("mousedown", (event) => event.preventDefault());
+      button.addEventListener("mousedown", (event) => {
+        saveEditorSelection(editor);
+        event.preventDefault();
+      });
       button.addEventListener("click", () => {
         const kind = button.dataset.applyColor;
         const input = app.querySelector(`[data-color-input="${kind}"]`);
@@ -2358,7 +2405,10 @@
     });
 
     app.querySelectorAll("[data-color-swatch]").forEach((button) => {
-      button.addEventListener("mousedown", (event) => event.preventDefault());
+      button.addEventListener("mousedown", (event) => {
+        saveEditorSelection(editor);
+        event.preventDefault();
+      });
       button.addEventListener("click", () => {
         const kind = button.dataset.colorSwatch;
         const input = app.querySelector(`[data-color-input="${kind}"]`);
@@ -2368,12 +2418,18 @@
     });
 
     app.querySelectorAll("[data-list-type]").forEach((button) => {
-      button.addEventListener("mousedown", (event) => event.preventDefault());
+      button.addEventListener("mousedown", (event) => {
+        saveEditorSelection(editor);
+        event.preventDefault();
+      });
       button.addEventListener("click", () => insertList(editor, note, box, button.dataset.listType));
     });
 
     app.querySelectorAll("[data-editor-action]").forEach((button) => {
-      button.addEventListener("mousedown", (event) => event.preventDefault());
+      button.addEventListener("mousedown", (event) => {
+        saveEditorSelection(editor);
+        event.preventDefault();
+      });
       button.addEventListener("click", () => {
         if (button.dataset.editorAction === "toggle-heading-collapse") {
           toggleCurrentHeading(editor, note, box);
@@ -2424,7 +2480,7 @@
   }
 
   function toggleCurrentHeading(editor, note, box) {
-    editor.focus();
+    restoreEditorSelection(editor);
     const selection = window.getSelection();
     let element = selection?.anchorNode || null;
     if (element?.nodeType === Node.TEXT_NODE) element = element.parentElement;
@@ -2575,6 +2631,33 @@
     selection.addRange(range);
   }
 
+  function selectionInsideEditor(editor, range) {
+    return !!editor && !!range && editor.contains(range.startContainer) && editor.contains(range.endContainer);
+  }
+
+  function saveEditorSelection(editor) {
+    const selection = window.getSelection();
+    if (!editor || !selection || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    if (selectionInsideEditor(editor, range)) {
+      runtime.editorRange = range.cloneRange();
+    }
+  }
+
+  function restoreEditorSelection(editor) {
+    if (!editor) return;
+    editor.focus({ preventScroll: true });
+    const selection = window.getSelection();
+    if (!selection || !runtime.editorRange) return;
+    try {
+      if (!selectionInsideEditor(editor, runtime.editorRange)) return;
+      selection.removeAllRanges();
+      selection.addRange(runtime.editorRange.cloneRange());
+    } catch (error) {
+      runtime.editorRange = null;
+    }
+  }
+
   function syncEditorContent(editor, note, box) {
     note.content = editor.innerHTML;
     note.modifiedAt = now();
@@ -2584,7 +2667,7 @@
   }
 
   function applyHeadingFormat(editor, note, box, value) {
-    editor.focus();
+    restoreEditorSelection(editor);
     const tag = ["h1", "h2", "h3"].includes(value) ? `<${value}>` : "<p>";
     document.execCommand("formatBlock", false, tag);
     prepareCollapsibleHeadings(editor, note, box);
@@ -2605,13 +2688,13 @@
   function applyEditorColor(editor, note, box, kind, color) {
     const clean = registerRecentColor(kind, color);
     if (!editor || !note || !box || !clean) return;
-    editor.focus();
+    restoreEditorSelection(editor);
     document.execCommand(kind === "highlight" ? "hiliteColor" : "foreColor", false, clean);
     syncEditorContent(editor, note, box);
   }
 
   function applySpanStyle(editor, note, box, style) {
-    editor.focus();
+    restoreEditorSelection(editor);
     const selection = window.getSelection();
     if (!selection || !selection.rangeCount || selection.isCollapsed) {
       document.execCommand("insertHTML", false, `<span style="${style}">texte</span>`);
@@ -2633,7 +2716,7 @@
   }
 
   function insertList(editor, note, box, type) {
-    editor.focus();
+    restoreEditorSelection(editor);
     const listMap = {
       bullet: '<ul><li>Nouvel élément</li></ul>',
       dash: '<ul class="dash-list"><li>Nouvel élément</li></ul>',
