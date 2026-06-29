@@ -2396,7 +2396,10 @@
     if (editor) {
       prepareCollapsibleHeadings(editor, note, box);
       ["keyup", "mouseup", "focus", "click"].forEach((eventName) => {
-        editor.addEventListener(eventName, () => saveEditorSelection(editor));
+        editor.addEventListener(eventName, () => {
+          saveEditorSelection(editor);
+          updateFormatBlockSelect(editor);
+        });
       });
       editor.addEventListener("keydown", (event) => handleEditorAutomation(event, editor, note, box));
       editor.addEventListener("input", () => {
@@ -2405,6 +2408,7 @@
         touchBox(box);
         updateEditorStats(note);
         saveEditorSelection(editor);
+        updateFormatBlockSelect(editor);
         saveState();
       });
     }
@@ -2624,6 +2628,13 @@
     }
 
     if (event.key === "Enter") {
+      const block = currentEditableBlock(editor);
+      if (!event.shiftKey && isHeadingBlock(block)) {
+        event.preventDefault();
+        exitHeadingBlock(editor, note, box, block);
+        return;
+      }
+
       const li = currentListItem(editor);
       if (li && (!li.textContent.trim() || isCaretAtStartOfListItem(li))) {
         event.preventDefault();
@@ -2676,6 +2687,19 @@
     if (!node || !editor.contains(node)) return null;
     if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
     return node?.closest?.("p, div, h1, h2, h3, li") || editor;
+  }
+
+  function isHeadingBlock(block) {
+    return !!block && ["H1", "H2", "H3"].includes(block.tagName);
+  }
+
+  function exitHeadingBlock(editor, note, box, heading) {
+    const paragraph = document.createElement("p");
+    paragraph.appendChild(document.createElement("br"));
+    heading.after(paragraph);
+    placeCaretInside(paragraph);
+    updateFormatBlockSelect(editor);
+    syncEditorContent(editor, note, box);
   }
 
   function currentLineMarker(editor) {
@@ -2792,7 +2816,16 @@
     const tag = ["h1", "h2", "h3"].includes(value) ? `<${value}>` : "<p>";
     document.execCommand("formatBlock", false, tag);
     prepareCollapsibleHeadings(editor, note, box);
+    updateFormatBlockSelect(editor);
     syncEditorContent(editor, note, box);
+  }
+
+  function updateFormatBlockSelect(editor) {
+    const select = app.querySelector("[data-format-block]");
+    if (!select || !editor) return;
+    const block = currentEditableBlock(editor);
+    const value = isHeadingBlock(block) ? block.tagName.toLowerCase() : "p";
+    if (select.value !== value) select.value = value;
   }
 
   function registerRecentColor(kind, color) {
