@@ -178,6 +178,7 @@
       theme,
       selectionColor: previousSettings.selectionColor || "#0f6b58",
       treeGuideColor: cleanColor(previousSettings.treeGuideColor, ""),
+      todoColor: cleanColor(previousSettings.todoColor, previousSettings.selectionColor || "#0f6b58"),
       rightPanelOpen: previousSettings.rightPanelOpen !== false,
       leftPanelOpen: previousSettings.leftPanelOpen !== false,
       navWidth: Math.min(Math.max(Number(previousSettings.navWidth) || 282, 218), 430),
@@ -207,12 +208,14 @@
     const settings = state.settings || {};
     const selection = settings.selectionColor || "#0f6b58";
     const treeGuide = cleanColor(settings.treeGuideColor, defaultTreeGuideColor(settings.theme));
+    const todoColor = cleanColor(settings.todoColor, selection);
     const headings = settings.headingPresets || headingDefaults;
     document.documentElement.dataset.theme = settings.theme === "dark" ? "dark" : "light";
     document.documentElement.style.setProperty("--selection-color", selection);
     document.documentElement.style.setProperty("--selection-soft", hexToRgba(selection, 0.16));
     document.documentElement.style.setProperty("--selection-border", hexToRgba(selection, 0.42));
     document.documentElement.style.setProperty("--tree-guide-color", treeGuide);
+    document.documentElement.style.setProperty("--todo-color", todoColor);
     document.documentElement.style.setProperty("--nav", `${Math.min(Math.max(Number(settings.navWidth) || 282, 218), 430)}px`);
     ["h1", "h2", "h3"].forEach((key) => {
       const preset = { ...headingDefaults[key], ...(headings[key] || {}) };
@@ -290,6 +293,7 @@
       settings: {
         theme: "light",
         selectionColor: "#0f6b58",
+        todoColor: "#0f6b58",
         rightPanelOpen: true,
         leftPanelOpen: true,
         lastTextColor: "#000000",
@@ -1725,7 +1729,9 @@
       const headings = settings.headingPresets || headingDefaults;
       const selectionColors = ["#0f6b58", "#7c5cff", "#d58f27", "#bf5b7a", "#3f7fbf", "#6f8f3a"];
       const guideColors = ["#c8ceca", "#5a5a5a", "#ffffff", "#0f6b58", "#7c5cff", "#3f7fbf", "#d58f27"];
+      const todoColors = ["#0f6b58", "#4ca66a", "#55a7e5", "#7c5cff", "#d94b4b", "#f08a24", "#ffffff"];
       const treeGuideColor = cleanColor(settings.treeGuideColor, defaultTreeGuideColor(settings.theme));
+      const todoColor = cleanColor(settings.todoColor, settings.selectionColor || "#0f6b58");
       return `
         <div class="modal-backdrop">
           <div class="modal settings-modal">
@@ -1753,6 +1759,12 @@
                 </label>
                 <div class="color-swatches">
                   ${guideColors.map((color) => `<button class="color-swatch ${color === treeGuideColor ? "is-active" : ""} ${color === "#ffffff" ? "is-light" : ""}" style="--swatch:${color}" data-tree-guide-swatch="${color}" aria-label="Couleur ${color}"></button>`).join("")}
+                </div>
+                <label class="modal-label">Couleur des tâches cochées
+                  <input class="modal-field color-field" type="color" value="${escapeHtml(todoColor)}" data-todo-color />
+                </label>
+                <div class="color-swatches">
+                  ${todoColors.map((color) => `<button class="color-swatch ${color === todoColor ? "is-active" : ""} ${color === "#ffffff" ? "is-light" : ""}" style="--swatch:${color}" data-todo-swatch="${color}" aria-label="Couleur ${color}"></button>`).join("")}
                 </div>
               </section>
               <section class="settings-section">
@@ -2064,6 +2076,23 @@
     app.querySelectorAll("[data-tree-guide-swatch]").forEach((button) => {
       button.addEventListener("click", () => {
         state.settings.treeGuideColor = button.dataset.treeGuideSwatch;
+        saveState();
+        render();
+      });
+    });
+
+    const todoColor = app.querySelector("[data-todo-color]");
+    if (todoColor) {
+      todoColor.addEventListener("input", () => {
+        state.settings.todoColor = todoColor.value;
+        saveState();
+        applyAppearance();
+      });
+    }
+
+    app.querySelectorAll("[data-todo-swatch]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.settings.todoColor = button.dataset.todoSwatch;
         saveState();
         render();
       });
