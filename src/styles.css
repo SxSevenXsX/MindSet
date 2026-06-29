@@ -1480,27 +1480,30 @@ body.is-marquee-selecting {
 
 .note-editor .collapsible-heading {
   position: relative;
-  margin-left: -16px;
-  padding-left: 16px;
-  cursor: pointer;
+  margin-left: -30px;
+  padding-left: 30px;
+  cursor: text;
 }
 
 .note-editor .collapsible-heading::before {
   content: "";
   position: absolute;
-  top: 0.55em;
-  left: 0;
-  width: 0;
-  height: 0;
-  border-top: 4px solid transparent;
-  border-bottom: 4px solid transparent;
-  border-left: 6px solid var(--faint);
-  transform: rotate(90deg);
-  transition: transform 120ms ease;
+  top: 0.58em;
+  left: 10px;
+  width: 7px;
+  height: 7px;
+  border-right: 1.6px solid var(--faint);
+  border-bottom: 1.6px solid var(--faint);
+  transform: rotate(45deg);
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+.note-editor .collapsible-heading:hover::before {
+  border-color: var(--muted);
 }
 
 .note-editor .collapsible-heading.is-heading-collapsed::before {
-  transform: rotate(0deg);
+  transform: rotate(-45deg);
 }
 
 .note-editor p {
@@ -1545,13 +1548,54 @@ body.is-marquee-selecting {
 
 .note-editor .check-list li::before {
   content: "";
-  display: inline-block;
+  position: absolute;
+  top: 0.45em;
+  left: 0;
+  display: block;
   width: 12px;
   height: 12px;
-  margin-right: 10px;
   border: 1.5px solid var(--accent);
   border-radius: 3px;
-  vertical-align: -1px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.note-editor .check-list li {
+  position: relative;
+  min-height: 1.7em;
+  padding-left: 26px;
+}
+
+.note-editor .check-list li::after {
+  content: "";
+  position: absolute;
+  top: calc(0.45em + 2px);
+  left: 4px;
+  width: 4px;
+  height: 8px;
+  border-right: 2px solid #ffffff;
+  border-bottom: 2px solid #ffffff;
+  opacity: 0;
+  pointer-events: none;
+  transform: rotate(42deg);
+}
+
+.note-editor .check-list li.is-checked,
+.note-editor .check-list li[data-checked="true"] {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.note-editor .check-list li.is-checked::before,
+.note-editor .check-list li[data-checked="true"]::before {
+  background: var(--selection-color);
+  border-color: var(--selection-color);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.note-editor .check-list li.is-checked::after,
+.note-editor .check-list li[data-checked="true"]::after {
+  opacity: 1;
 }
 
 .note-editor .triangle-list li::before {

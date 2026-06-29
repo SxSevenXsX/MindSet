@@ -2454,6 +2454,14 @@
     if (editor.dataset.headingHandlers === "true") return;
     editor.dataset.headingHandlers = "true";
     editor.addEventListener("click", (event) => {
+      const checkItem = event.target.closest("li");
+      if (checkItem && editor.contains(checkItem) && checkItem.parentElement?.classList.contains("check-list") && isChecklistToggleHit(event, checkItem)) {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleCheckListItem(editor, note, box, checkItem);
+        return;
+      }
+
       const heading = event.target.closest("h1, h2, h3");
       if (!heading || !editor.contains(heading) || !isHeadingToggleHit(event, heading)) return;
       event.preventDefault();
@@ -2470,7 +2478,19 @@
 
   function isHeadingToggleHit(event, heading) {
     const rect = heading.getBoundingClientRect();
-    return event.clientX - rect.left <= 24;
+    return event.clientX - rect.left <= 42;
+  }
+
+  function isChecklistToggleHit(event, li) {
+    const rect = li.getBoundingClientRect();
+    return event.clientX - rect.left <= 34;
+  }
+
+  function toggleCheckListItem(editor, note, box, li) {
+    const checked = !li.matches(".is-checked, [data-checked='true']");
+    li.classList.toggle("is-checked", checked);
+    checked ? li.setAttribute("data-checked", "true") : li.removeAttribute("data-checked");
+    syncEditorContent(editor, note, box);
   }
 
   function syncCollapsedHeadings(editor) {
@@ -2532,9 +2552,9 @@
 
     if (event.key === "Enter") {
       const li = currentListItem(editor);
-      if (li && !li.textContent.trim()) {
+      if (li && (!li.textContent.trim() || isCaretAtStartOfListItem(li))) {
         event.preventDefault();
-        exitEmptyListItem(editor, note, box, li);
+        exitListItem(editor, note, box, li);
       }
       return;
     }
@@ -2543,7 +2563,7 @@
       const li = currentListItem(editor);
       if (li && !li.textContent.trim()) {
         event.preventDefault();
-        exitEmptyListItem(editor, note, box, li);
+        exitListItem(editor, note, box, li);
       }
       return;
     }
@@ -2564,6 +2584,17 @@
     if (!node || !editor.contains(node)) return null;
     if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
     return node?.closest?.("li") || null;
+  }
+
+  function isCaretAtStartOfListItem(li) {
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
+    const range = selection.getRangeAt(0);
+    if (!li.contains(range.startContainer)) return false;
+    const before = range.cloneRange();
+    before.selectNodeContents(li);
+    before.setEnd(range.startContainer, range.startOffset);
+    return !before.toString().replace(/\u00a0/g, " ").trim();
   }
 
   function currentEditableBlock(editor) {
@@ -2611,13 +2642,30 @@
     syncEditorContent(editor, note, box);
   }
 
-  function exitEmptyListItem(editor, note, box, li) {
+  function exitListItem(editor, note, box, li) {
     const list = li.parentElement;
+    const afterList = list.cloneNode(false);
+    let sibling = li.nextSibling;
+    while (sibling) {
+      const next = sibling.nextSibling;
+      afterList.appendChild(sibling);
+      sibling = next;
+    }
+
     const paragraph = document.createElement("p");
-    paragraph.appendChild(document.createElement("br"));
-    list.after(paragraph);
+    while (li.firstChild) paragraph.appendChild(li.firstChild);
+    if (!paragraph.textContent.trim() && !paragraph.querySelector("br")) {
+      paragraph.textContent = "";
+      paragraph.appendChild(document.createElement("br"));
+    }
+
     li.remove();
-    if (!list.children.length) list.remove();
+    if (list.children.length) {
+      list.after(paragraph);
+    } else {
+      list.replaceWith(paragraph);
+    }
+    if (afterList.children.length) paragraph.after(afterList);
     placeCaretInside(paragraph);
     syncEditorContent(editor, note, box);
   }
