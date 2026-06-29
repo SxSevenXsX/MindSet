@@ -62,6 +62,7 @@
   };
 
   const headingDefaults = {
+    normal: { size: "17px", color: "#17201c", weight: "400", fontFamily: "Georgia, Times New Roman, serif" },
     h1: { size: "30px", color: "#17201c", weight: "820", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" },
     h2: { size: "24px", color: "#17201c", weight: "780", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" },
     h3: { size: "19px", color: "#17201c", weight: "740", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" },
@@ -187,6 +188,7 @@
       recentTextColors: normalizeRecentColors(previousSettings.recentTextColors),
       recentHighlightColors: normalizeRecentColors(previousSettings.recentHighlightColors),
       headingPresets: {
+        normal: { ...headingDefaults.normal, ...(previousHeadings.normal || {}) },
         h1: { ...headingDefaults.h1, ...(previousHeadings.h1 || {}) },
         h2: { ...headingDefaults.h2, ...(previousHeadings.h2 || {}) },
         h3: { ...headingDefaults.h3, ...(previousHeadings.h3 || {}) },
@@ -217,7 +219,7 @@
     document.documentElement.style.setProperty("--tree-guide-color", treeGuide);
     document.documentElement.style.setProperty("--todo-color", todoColor);
     document.documentElement.style.setProperty("--nav", `${Math.min(Math.max(Number(settings.navWidth) || 282, 218), 430)}px`);
-    ["h1", "h2", "h3"].forEach((key) => {
+    ["normal", "h1", "h2", "h3"].forEach((key) => {
       const preset = { ...headingDefaults[key], ...(headings[key] || {}) };
       document.documentElement.style.setProperty(`--${key}-size`, preset.size);
       const color = settings.theme === "dark" && preset.color === headingDefaults[key].color ? "#d8d8d8" : preset.color;
@@ -813,7 +815,7 @@
   }
 
   function updateHeadingPreset(level, field, value) {
-    if (!["h1", "h2", "h3"].includes(level)) return;
+    if (!["normal", "h1", "h2", "h3"].includes(level)) return;
     state.settings.headingPresets = state.settings.headingPresets || {};
     state.settings.headingPresets[level] = {
       ...headingDefaults[level],
@@ -1745,6 +1747,13 @@
     if (runtime.modal.type === "settings") {
       const settings = state.settings || {};
       const headings = settings.headingPresets || headingDefaults;
+      const presetRows = [
+        { level: "normal", label: "Normal", min: 12, max: 32 },
+        { level: "h1", label: "Titre 1", min: 14, max: 48 },
+        { level: "h2", label: "Titre 2", min: 14, max: 48 },
+        { level: "h3", label: "Titre 3", min: 14, max: 48 },
+      ];
+      const weightOptions = ["400", "500", "600", "650", "700", "740", "780", "820", "860"];
       const selectionColors = ["#0f6b58", "#7c5cff", "#d58f27", "#bf5b7a", "#3f7fbf", "#6f8f3a"];
       const guideColors = ["#c8ceca", "#5a5a5a", "#ffffff", "#0f6b58", "#7c5cff", "#3f7fbf", "#d58f27"];
       const todoColors = ["#0f6b58", "#4ca66a", "#55a7e5", "#7c5cff", "#d94b4b", "#f08a24", "#ffffff"];
@@ -1786,19 +1795,20 @@
                 </div>
               </section>
               <section class="settings-section">
-                <h3>Presets de titres</h3>
-                ${["h1", "h2", "h3"].map((level, index) => {
+                <h3>Presets de texte</h3>
+                ${presetRows.map((row) => {
+                  const level = row.level;
                   const preset = { ...headingDefaults[level], ...(headings[level] || {}) };
                   return `
                     <div class="heading-preset-row">
-                      <span>Titre ${index + 1}</span>
-                      <input class="modal-field compact-field" type="number" min="14" max="48" value="${Number.parseInt(preset.size, 10)}" data-heading-size="${level}" aria-label="Taille Titre ${index + 1}" />
-                      <input class="modal-field color-field compact-color" type="color" value="${escapeHtml(preset.color)}" data-heading-color="${level}" aria-label="Couleur Titre ${index + 1}" />
-                      <select class="modal-field compact-field heading-font-select" data-heading-font="${level}" aria-label="Police Titre ${index + 1}">
+                      <span>${escapeHtml(row.label)}</span>
+                      <input class="modal-field compact-field" type="number" min="${row.min}" max="${row.max}" value="${Number.parseInt(preset.size, 10)}" data-heading-size="${level}" aria-label="Taille ${escapeHtml(row.label)}" />
+                      <input class="modal-field color-field compact-color" type="color" value="${escapeHtml(preset.color)}" data-heading-color="${level}" aria-label="Couleur ${escapeHtml(row.label)}" />
+                      <select class="modal-field compact-field heading-font-select" data-heading-font="${level}" aria-label="Police ${escapeHtml(row.label)}">
                         ${fontOptions.map((font) => `<option value="${escapeHtml(font.value)}" ${preset.fontFamily === font.value ? "selected" : ""}>${escapeHtml(font.label)}</option>`).join("")}
                       </select>
-                      <select class="modal-field compact-field" data-heading-weight="${level}" aria-label="Graisse Titre ${index + 1}">
-                        ${["650", "700", "740", "780", "820", "860"].map((weight) => `<option value="${weight}" ${preset.weight === weight ? "selected" : ""}>${weight}</option>`).join("")}
+                      <select class="modal-field compact-field" data-heading-weight="${level}" aria-label="Graisse ${escapeHtml(row.label)}">
+                        ${weightOptions.map((weight) => `<option value="${weight}" ${preset.weight === weight ? "selected" : ""}>${weight}</option>`).join("")}
                       </select>
                     </div>
                   `;
@@ -2408,7 +2418,13 @@
         touchBox(box);
         saveState();
       });
-      title.addEventListener("blur", () => window.setTimeout(render, 0));
+      title.addEventListener("blur", () => {
+        window.setTimeout(() => {
+          const active = document.activeElement;
+          if (editor && (active === editor || editor.contains(active))) return;
+          render();
+        }, 0);
+      });
     }
 
     if (editor) {
@@ -2813,7 +2829,10 @@
     const selection = window.getSelection();
     if (!selection || !runtime.editorRange) return;
     try {
-      if (!selectionInsideEditor(editor, runtime.editorRange)) return;
+      if (!selectionInsideEditor(editor, runtime.editorRange)) {
+        runtime.editorRange = null;
+        return;
+      }
       selection.removeAllRanges();
       selection.addRange(runtime.editorRange.cloneRange());
     } catch (error) {

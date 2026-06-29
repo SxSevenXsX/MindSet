@@ -17,6 +17,10 @@
   --selection-border: rgba(15, 107, 88, 0.42);
   --tree-guide-color: #c8ceca;
   --todo-color: #0f6b58;
+  --normal-size: 17px;
+  --normal-color: var(--text);
+  --normal-weight: 400;
+  --normal-font: Georgia, "Times New Roman", serif;
   --h1-size: 30px;
   --h2-size: 24px;
   --h3-size: 19px;
@@ -1457,9 +1461,10 @@ body.is-marquee-selecting {
 .note-editor {
   min-height: 520px;
   padding: 6px 26px 48px;
-  color: var(--text);
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 17px;
+  color: var(--normal-color);
+  font-family: var(--normal-font);
+  font-size: var(--normal-size);
+  font-weight: var(--normal-weight);
   line-height: 1.72;
   outline: none;
 }
