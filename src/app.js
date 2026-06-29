@@ -1541,7 +1541,9 @@
           <button class="tool-button raised" data-action="close-graph" data-tooltip="Retour à la note" aria-label="Retour à la note">${icon("edit")}</button>
         </div>
         <div class="graph-canvas">
-          ${renderGraphNode(box, box.root, true)}
+          <div class="graph-map">
+            ${renderGraphNode(box, box.root, true)}
+          </div>
         </div>
       </section>
     `;
@@ -1549,19 +1551,35 @@
 
   function renderGraphNode(box, node, root = false) {
     const children = node.type === "folder" ? sortedChildren(box, node) : [];
+    const selected = (box.selectedIds || []).includes(node.id);
+    const active = node.id === box.activeItemId;
+    const words = node.type === "note" ? noteStats(node).words : 0;
+    const meta = root
+      ? "Boite"
+      : node.type === "folder"
+        ? `${children.length} element${children.length > 1 ? "s" : ""}`
+        : `${words} mot${words > 1 ? "s" : ""}`;
     return `
-      <div class="graph-branch">
-        <div class="graph-node ${root ? "root" : ""} ${node.type}" data-item-id="${node.id}">
-          ${root ? icon("box") : itemIconMarkup(node)}
-          <strong>${escapeHtml(node.title)}</strong>
-        </div>
+      <div class="graph-branch ${root ? "is-root" : ""} ${children.length ? "has-children" : "is-leaf"} ${children.length === 1 ? "has-single-child" : ""}">
+        <button class="graph-node ${root ? "root" : ""} ${node.type} ${active ? "is-active" : ""} ${selected ? "is-selected" : ""}" data-item-id="${node.id}" type="button">
+          <span class="graph-node-icon">${graphNodeIcon(node, root)}</span>
+          <span class="graph-node-copy">
+            <strong>${escapeHtml(node.title)}</strong>
+            <small>${escapeHtml(meta)}</small>
+          </span>
+        </button>
         ${children.length ? `
-          <div class="graph-children">
+          <div class="graph-children ${children.length === 1 ? "is-single-child" : ""}">
             ${children.map((child) => renderGraphNode(box, child)).join("")}
           </div>
         ` : ""}
       </div>
     `;
+  }
+
+  function graphNodeIcon(node, root = false) {
+    if (root) return icon("box");
+    return itemIconMarkup(node) || icon(node.type === "folder" ? "folder" : "note");
   }
 
   function renderContextMenu(box) {
