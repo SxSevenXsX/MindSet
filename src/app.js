@@ -59,7 +59,20 @@
     alignCenter: '<path d="M4 6h16"/><path d="M7 10h10"/><path d="M4 14h16"/><path d="M7 18h10"/>',
     alignRight: '<path d="M4 6h16"/><path d="M10 10h10"/><path d="M4 14h16"/><path d="M10 18h10"/>',
     alignJustify: '<path d="M4 6h16"/><path d="M4 10h16"/><path d="M4 14h16"/><path d="M4 18h16"/>',
+    arrowUp: '<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>',
+    arrowDown: '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
+    arrowLeft: '<path d="M19 12H5"/><path d="m12 5-7 7 7 7"/>',
+    arrowRight: '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+    zoomIn: '<circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/><path d="M11 8v6"/><path d="M8 11h6"/>',
+    zoomOut: '<circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/><path d="M8 11h6"/>',
   };
+
+  const graphDirections = [
+    { id: "up", label: "Branches vers le haut", icon: "arrowUp" },
+    { id: "right", label: "Branches vers la droite", icon: "arrowRight" },
+    { id: "down", label: "Branches vers le bas", icon: "arrowDown" },
+    { id: "left", label: "Branches vers la gauche", icon: "arrowLeft" },
+  ];
 
   const headingDefaults = {
     normal: { size: "17px", color: "#17201c", weight: "400", fontFamily: "Georgia, Times New Roman, serif" },
@@ -171,6 +184,19 @@
     return theme === "dark" ? "#5a5a5a" : "#c8ceca";
   }
 
+  function normalizeGraphDirection(value) {
+    return graphDirections.some((direction) => direction.id === value) ? value : "up";
+  }
+
+  function clampGraphZoom(value) {
+    const number = Number(value);
+    return Math.min(Math.max(Number.isFinite(number) ? number : 1, 0.35), 1.8);
+  }
+
+  function graphZoomLabel(value) {
+    return `${Math.round(clampGraphZoom(value) * 100)}%`;
+  }
+
   function normalizeStateShape(value) {
     const previousSettings = value.settings || {};
     const previousHeadings = previousSettings.headingPresets || {};
@@ -187,6 +213,8 @@
       lastHighlightColor: cleanColor(previousSettings.lastHighlightColor, "#fff0a8"),
       recentTextColors: normalizeRecentColors(previousSettings.recentTextColors),
       recentHighlightColors: normalizeRecentColors(previousSettings.recentHighlightColors),
+      graphDirection: normalizeGraphDirection(previousSettings.graphDirection),
+      graphZoom: clampGraphZoom(previousSettings.graphZoom || 1),
       headingPresets: {
         normal: { ...headingDefaults.normal, ...(previousHeadings.normal || {}) },
         h1: { ...headingDefaults.h1, ...(previousHeadings.h1 || {}) },
@@ -302,6 +330,8 @@
         lastHighlightColor: "#fff0a8",
         recentTextColors: [],
         recentHighlightColors: [],
+        graphDirection: "up",
+        graphZoom: 1,
       },
       boxes: [
         {
@@ -994,6 +1024,7 @@
     const box = activeBox();
     app.innerHTML = box ? renderApp(box) : renderLobby();
     bindEvents();
+    bindGraphCanvas();
   }
 
   function renderLobby() {
@@ -1533,6 +1564,8 @@
   }
 
   function renderGraphView(box) {
+    const direction = normalizeGraphDirection(state.settings?.graphDirection);
+    const zoom = clampGraphZoom(state.settings?.graphZoom || 1);
     return `
       <section class="graph-shell">
         <div class="graph-header">
@@ -1542,9 +1575,23 @@
           </div>
           <button class="tool-button raised" data-action="close-graph" data-tooltip="Retour à la note" aria-label="Retour à la note">${icon("edit")}</button>
         </div>
-        <div class="graph-canvas">
-          <div class="graph-map">
-            ${renderGraphNode(box, box.root, true)}
+        <div class="graph-controls graph-controls-row" aria-label="Controles de la vue graphique">
+          <div class="graph-control-group" aria-label="Sens du graphe">
+            ${graphDirections.map((item) => `
+              <button class="tool-button ${direction === item.id ? "is-active" : ""}" data-action="set-graph-direction" data-graph-direction="${item.id}" data-tooltip="${escapeHtml(item.label)}" aria-label="${escapeHtml(item.label)}">${icon(item.icon)}</button>
+            `).join("")}
+          </div>
+          <div class="graph-control-group" aria-label="Zoom du graphe">
+            <button class="tool-button" data-action="graph-zoom-out" data-tooltip="Dezoomer" aria-label="Dezoomer">${icon("zoomOut")}</button>
+            <button class="graph-zoom-value" data-action="graph-zoom-reset" data-graph-zoom-label data-tooltip="Reinitialiser le zoom" aria-label="Reinitialiser le zoom">${graphZoomLabel(zoom)}</button>
+            <button class="tool-button" data-action="graph-zoom-in" data-tooltip="Zoomer" aria-label="Zoomer">${icon("zoomIn")}</button>
+          </div>
+        </div>
+        <div class="graph-canvas" data-graph-canvas>
+          <div class="graph-viewport" data-graph-viewport style="--graph-zoom:${zoom}">
+            <div class="graph-map graph-${direction}">
+              ${renderGraphNode(box, box.root, true)}
+            </div>
           </div>
         </div>
       </section>
@@ -2202,6 +2249,43 @@
     bindForms();
   }
 
+  function updateGraphZoom(value, canvas = app.querySelector("[data-graph-canvas]"), anchor = null) {
+    const previous = clampGraphZoom(state.settings.graphZoom || 1);
+    const next = clampGraphZoom(value);
+    state.settings.graphZoom = next;
+    saveState();
+
+    const viewport = canvas?.querySelector("[data-graph-viewport]");
+    if (viewport) viewport.style.setProperty("--graph-zoom", next);
+    const label = app.querySelector("[data-graph-zoom-label]");
+    if (label) label.textContent = graphZoomLabel(next);
+
+    if (canvas && anchor && previous !== next) {
+      canvas.scrollLeft = anchor.contentX * next - anchor.pointerX;
+      canvas.scrollTop = anchor.contentY * next - anchor.pointerY;
+    }
+  }
+
+  function bindGraphCanvas() {
+    const canvas = app.querySelector("[data-graph-canvas]");
+    if (!canvas) return;
+    canvas.addEventListener("wheel", (event) => {
+      if (!event.deltaY) return;
+      event.preventDefault();
+      const previous = clampGraphZoom(state.settings.graphZoom || 1);
+      const factor = event.deltaY > 0 ? 0.92 : 1.08;
+      const rect = canvas.getBoundingClientRect();
+      const pointerX = event.clientX - rect.left;
+      const pointerY = event.clientY - rect.top;
+      updateGraphZoom(previous * factor, canvas, {
+        pointerX,
+        pointerY,
+        contentX: (canvas.scrollLeft + pointerX) / previous,
+        contentY: (canvas.scrollTop + pointerY) / previous,
+      });
+    }, { passive: false });
+  }
+
   function handleAction(event) {
     event.preventDefault();
     event.stopPropagation();
@@ -2313,6 +2397,14 @@
       runtime.modal = runtime.modal?.type === "graph-full" ? null : { type: "graph-full" };
       render();
     }
+    if (action === "set-graph-direction") {
+      state.settings.graphDirection = normalizeGraphDirection(event.currentTarget.dataset.graphDirection);
+      saveState();
+      render();
+    }
+    if (action === "graph-zoom-in") updateGraphZoom((state.settings.graphZoom || 1) * 1.12);
+    if (action === "graph-zoom-out") updateGraphZoom((state.settings.graphZoom || 1) / 1.12);
+    if (action === "graph-zoom-reset") updateGraphZoom(1);
     if (action === "close-graph") {
       runtime.modal = null;
       render();

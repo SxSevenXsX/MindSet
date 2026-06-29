@@ -1675,6 +1675,46 @@ body.is-marquee-selecting {
   font-weight: 590;
 }
 
+.graph-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.graph-controls-row {
+  justify-content: space-between;
+  margin-top: -8px;
+}
+
+.graph-control-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+  background: var(--surface);
+}
+
+.graph-zoom-value {
+  min-width: 48px;
+  height: 30px;
+  border-radius: 6px;
+  padding: 0 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 780;
+  cursor: pointer;
+}
+
+.graph-zoom-value:hover {
+  background: var(--surface-soft);
+  color: var(--selection-color);
+}
+
 .folder-content {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(188px, 1fr));
@@ -1825,7 +1865,11 @@ body.is-marquee-selecting {
 
 .graph-canvas {
   --graph-line: var(--border-strong);
+  --graph-link: 38px;
+  --graph-level-gap: 76px;
+  --graph-sibling-gap: 22px;
   overflow: auto;
+  overscroll-behavior: contain;
   flex: 1 1 auto;
   width: 100%;
   max-width: 100%;
@@ -1847,6 +1891,13 @@ body.is-marquee-selecting {
     var(--bg);
 }
 
+.graph-viewport {
+  display: inline-flex;
+  min-width: max-content;
+  min-height: 100%;
+  zoom: var(--graph-zoom, 1);
+}
+
 .graph-map {
   display: inline-flex;
   align-items: center;
@@ -1866,8 +1917,8 @@ body.is-marquee-selecting {
   content: "";
   position: absolute;
   top: 50%;
-  right: -38px;
-  width: 38px;
+  right: calc(var(--graph-link) * -1);
+  width: var(--graph-link);
   border-top: 2px solid var(--graph-line);
 }
 
@@ -1972,8 +2023,8 @@ body.is-marquee-selecting {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 22px;
-  margin-left: 76px;
+  gap: var(--graph-sibling-gap);
+  margin-left: var(--graph-level-gap);
   padding: 4px 0;
 }
 
@@ -1982,7 +2033,7 @@ body.is-marquee-selecting {
   position: absolute;
   top: 34px;
   bottom: 34px;
-  left: -38px;
+  left: calc(var(--graph-link) * -1);
   border-left: 2px solid var(--graph-line);
 }
 
@@ -1994,9 +2045,125 @@ body.is-marquee-selecting {
   content: "";
   position: absolute;
   top: 50%;
-  left: -38px;
-  width: 38px;
+  left: calc(var(--graph-link) * -1);
+  width: var(--graph-link);
   border-top: 2px solid var(--graph-line);
+}
+
+.graph-map.graph-left .graph-branch {
+  flex-direction: row-reverse;
+}
+
+.graph-map.graph-left .graph-children {
+  margin-right: var(--graph-level-gap);
+  margin-left: 0;
+}
+
+.graph-map.graph-left .graph-branch.has-children > .graph-node::after {
+  right: auto;
+  left: calc(var(--graph-link) * -1);
+}
+
+.graph-map.graph-left .graph-children::before,
+.graph-map.graph-left .graph-children > .graph-branch::before {
+  right: calc(var(--graph-link) * -1);
+  left: auto;
+}
+
+.graph-map.graph-up,
+.graph-map.graph-down {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 100%;
+}
+
+.graph-map.graph-up {
+  justify-content: flex-end;
+}
+
+.graph-map.graph-down {
+  justify-content: flex-start;
+}
+
+.graph-map.graph-up .graph-branch,
+.graph-map.graph-down .graph-branch {
+  align-items: center;
+}
+
+.graph-map.graph-up .graph-branch {
+  flex-direction: column-reverse;
+}
+
+.graph-map.graph-down .graph-branch {
+  flex-direction: column;
+}
+
+.graph-map.graph-up .graph-children,
+.graph-map.graph-down .graph-children {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 30px;
+  margin-left: 0;
+  padding: 0;
+}
+
+.graph-map.graph-up .graph-children {
+  margin-bottom: var(--graph-level-gap);
+}
+
+.graph-map.graph-down .graph-children {
+  margin-top: var(--graph-level-gap);
+}
+
+.graph-map.graph-up .graph-branch.has-children > .graph-node::after,
+.graph-map.graph-down .graph-branch.has-children > .graph-node::after,
+.graph-map.graph-up .graph-children > .graph-branch::before,
+.graph-map.graph-down .graph-children > .graph-branch::before {
+  right: auto;
+  left: 50%;
+  width: 0;
+  height: var(--graph-link);
+  border-top: 0;
+  border-left: 2px solid var(--graph-line);
+}
+
+.graph-map.graph-up .graph-branch.has-children > .graph-node::after {
+  top: calc(var(--graph-link) * -1);
+  bottom: auto;
+}
+
+.graph-map.graph-down .graph-branch.has-children > .graph-node::after {
+  top: auto;
+  bottom: calc(var(--graph-link) * -1);
+}
+
+.graph-map.graph-up .graph-children::before,
+.graph-map.graph-down .graph-children::before {
+  right: 34px;
+  left: 34px;
+  border-top: 2px solid var(--graph-line);
+  border-left: 0;
+}
+
+.graph-map.graph-up .graph-children::before {
+  top: auto;
+  bottom: calc(var(--graph-link) * -1);
+}
+
+.graph-map.graph-down .graph-children::before {
+  top: calc(var(--graph-link) * -1);
+  bottom: auto;
+}
+
+.graph-map.graph-up .graph-children > .graph-branch::before {
+  top: auto;
+  bottom: calc(var(--graph-link) * -1);
+}
+
+.graph-map.graph-down .graph-children > .graph-branch::before {
+  top: calc(var(--graph-link) * -1);
+  bottom: auto;
 }
 
 .lobby {
@@ -2468,6 +2635,77 @@ body.is-marquee-selecting {
   .graph-children::before,
   .graph-children > .graph-branch::before {
     left: -31px;
+  }
+
+  .graph-canvas {
+    --graph-link: 31px;
+    --graph-level-gap: 62px;
+    --graph-sibling-gap: 18px;
+  }
+
+  .graph-children {
+    gap: var(--graph-sibling-gap);
+    margin-left: var(--graph-level-gap);
+  }
+
+  .graph-branch.has-children > .graph-node::after,
+  .graph-children > .graph-branch::before {
+    width: var(--graph-link);
+  }
+
+  .graph-branch.has-children > .graph-node::after {
+    right: calc(var(--graph-link) * -1);
+  }
+
+  .graph-children::before,
+  .graph-children > .graph-branch::before {
+    left: calc(var(--graph-link) * -1);
+  }
+
+  .graph-map.graph-left .graph-children {
+    margin-right: var(--graph-level-gap);
+    margin-left: 0;
+  }
+
+  .graph-map.graph-left .graph-branch.has-children > .graph-node::after {
+    right: auto;
+    left: calc(var(--graph-link) * -1);
+  }
+
+  .graph-map.graph-left .graph-children::before,
+  .graph-map.graph-left .graph-children > .graph-branch::before {
+    right: calc(var(--graph-link) * -1);
+    left: auto;
+  }
+
+  .graph-map.graph-up .graph-children,
+  .graph-map.graph-down .graph-children {
+    gap: 22px;
+    margin-left: 0;
+  }
+
+  .graph-map.graph-up .graph-children {
+    margin-bottom: var(--graph-level-gap);
+  }
+
+  .graph-map.graph-down .graph-children {
+    margin-top: var(--graph-level-gap);
+  }
+
+  .graph-map.graph-up .graph-branch.has-children > .graph-node::after,
+  .graph-map.graph-down .graph-branch.has-children > .graph-node::after,
+  .graph-map.graph-up .graph-children > .graph-branch::before,
+  .graph-map.graph-down .graph-children > .graph-branch::before {
+    right: auto;
+    left: 50%;
+    width: 0;
+    height: var(--graph-link);
+  }
+
+  .graph-map.graph-up .graph-children::before,
+  .graph-map.graph-down .graph-children::before {
+    right: 30px;
+    left: 30px;
   }
 
   .lobby {
