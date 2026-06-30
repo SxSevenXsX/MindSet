@@ -67,6 +67,7 @@
     zoomIn: '<circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/><path d="M11 8v6"/><path d="M8 11h6"/>',
     zoomOut: '<circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/><path d="M8 11h6"/>',
     bookOpen: '<path d="M12 7v14"/><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v18H6.5A2.5 2.5 0 0 1 4 18.5v-13Z"/><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H12v18h5.5A2.5 2.5 0 0 0 20 18.5v-13Z"/>',
+    splitColumns: '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M12 5v14"/><path d="M8 9h1"/><path d="M8 13h1"/><path d="M15 9h1"/><path d="M15 13h1"/>',
   };
 
   const graphDirections = [
@@ -113,7 +114,12 @@
   const state = loadState();
 
   function normalizeEditorViewMode(value) {
-    return value === "pages" ? "pages" : "flow";
+    return ["pages", "split"].includes(value) ? value : "flow";
+  }
+
+  function clampPageZoom(value) {
+    const number = Number(value);
+    return Math.min(Math.max(Number.isFinite(number) ? number : 1, 0.55), 1.25);
   }
 
   function normalizeLocalFontName(name) {
@@ -266,6 +272,7 @@
       graphDirection: normalizeGraphDirection(previousSettings.graphDirection),
       graphZoom: clampGraphZoom(previousSettings.graphZoom || 1),
       editorViewMode: normalizeEditorViewMode(previousSettings.editorViewMode),
+      pageZoom: clampPageZoom(previousSettings.pageZoom || 1),
       localFonts: normalizeLocalFonts(previousSettings.localFonts),
       headingPresets: {
         normal: { ...headingDefaults.normal, ...(previousHeadings.normal || {}) },
@@ -449,6 +456,7 @@
         graphDirection: "up",
         graphZoom: 1,
         editorViewMode: "flow",
+        pageZoom: 1,
         localFonts: [],
       },
       boxes: [
@@ -1558,7 +1566,10 @@
   function renderEditor(box, note) {
     const stats = noteStats(note);
     const bookmarked = (box.bookmarkedIds || []).includes(note.id);
-    const pageMode = state.settings?.editorViewMode === "pages";
+    const viewMode = normalizeEditorViewMode(state.settings?.editorViewMode);
+    const pageMode = viewMode === "pages";
+    const splitMode = viewMode === "split";
+    const pageZoom = clampPageZoom(state.settings?.pageZoom || 1);
     const fonts = availableFontOptions();
     return `
       <article class="editor-shell">
@@ -1607,14 +1618,21 @@
             <button class="format-button" data-list-type="square" title="Carré">□</button>
           </div>
           <div class="toolbar-group">
-            <button class="format-button ${pageMode ? "is-active" : ""}" data-action="toggle-editor-view" data-tooltip="${pageMode ? "Mode ecriture simple" : "Mode pages livre"}" aria-label="${pageMode ? "Mode ecriture simple" : "Mode pages livre"}">${icon("bookOpen")}</button>
+            <button class="format-button ${pageMode ? "is-active" : ""}" data-action="toggle-editor-view" data-tooltip="${pageMode ? "Mode ecriture simple" : "Mode feuilles"}" aria-label="${pageMode ? "Mode ecriture simple" : "Mode feuilles"}">${icon("bookOpen")}</button>
+            <button class="format-button ${splitMode ? "is-active" : ""}" data-action="toggle-editor-split-view" data-tooltip="${splitMode ? "Mode ecriture simple" : "Tableau coupe en 2"}" aria-label="${splitMode ? "Mode ecriture simple" : "Tableau coupe en 2"}">${icon("splitColumns")}</button>
+            ${pageMode ? `
+              <button class="format-button" data-action="page-zoom-out" data-tooltip="Dezoomer les feuilles" aria-label="Dezoomer les feuilles">${icon("zoomOut")}</button>
+              <button class="format-button" data-action="page-zoom-in" data-tooltip="Zoomer les feuilles" aria-label="Zoomer les feuilles">${icon("zoomIn")}</button>
+            ` : ""}
             <button class="format-button" data-editor-action="toggle-heading-collapse" title="Replier / deplier le titre">${icon("collapse")}</button>
             <button class="format-button ${bookmarked ? "is-active" : ""}" data-action="toggle-bookmark" data-tooltip="${bookmarked ? "Retirer des signets" : "Ajouter aux signets"}" aria-label="${bookmarked ? "Retirer des signets" : "Ajouter aux signets"}">${icon(bookmarked ? "bookmarkFilled" : "bookmark")}</button>
           </div>
         </div>
-        <section class="editor-page ${pageMode ? "is-page-mode" : ""}">
+        <section class="editor-page ${pageMode ? "is-page-mode" : ""} ${splitMode ? "is-split-mode" : ""}" style="${pageMode ? `--page-zoom:${pageZoom}` : ""}">
           <input class="title-input" data-note-title value="${escapeHtml(note.title)}" aria-label="Titre de la note" />
-          <div class="note-editor" data-note-editor contenteditable="true" spellcheck="true">${note.content || ""}</div>
+          ${pageMode
+            ? `<div class="page-editor-viewport" data-page-viewport><div class="page-editor-scale" data-page-scale><div class="note-editor" data-note-editor contenteditable="true" spellcheck="true">${note.content || ""}</div></div></div>`
+            : `<div class="note-editor" data-note-editor contenteditable="true" spellcheck="true">${note.content || ""}</div>`}
           <div class="editor-status" aria-live="polite">
             <span data-word-count>${stats.words} mots</span>
             <span data-char-count>${stats.chars} caractères</span>
@@ -2562,6 +2580,21 @@
       saveState();
       render();
     }
+    if (action === "toggle-editor-split-view") {
+      state.settings.editorViewMode = state.settings.editorViewMode === "split" ? "flow" : "split";
+      saveState();
+      render();
+    }
+    if (action === "page-zoom-out") {
+      state.settings.pageZoom = clampPageZoom((state.settings.pageZoom || 1) * 0.82);
+      saveState();
+      render();
+    }
+    if (action === "page-zoom-in") {
+      state.settings.pageZoom = clampPageZoom((state.settings.pageZoom || 1) * 1.12);
+      saveState();
+      render();
+    }
     if (action === "new-note") createNote(box);
     if (action === "new-folder") createFolder(box);
     if (action === "collapse-all") expandAll(box, false);
@@ -2722,6 +2755,50 @@
     }
   }
 
+  function cssNumber(element, name, fallback) {
+    const value = Number.parseFloat(getComputedStyle(element).getPropertyValue(name));
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  function syncPagedEditorMetrics(editor) {
+    const page = editor?.closest?.(".editor-page.is-page-mode");
+    const scale = page?.querySelector?.("[data-page-scale]");
+    if (!page || !scale) return;
+
+    const pageWidth = cssNumber(page, "--page-width", 620);
+    const pageHeight = cssNumber(page, "--page-height", 877);
+    const pageGap = cssNumber(page, "--page-gap", 30);
+    const zoom = clampPageZoom(state.settings?.pageZoom || 1);
+    const pageSpan = pageWidth + pageGap;
+
+    editor.style.width = `${pageWidth}px`;
+    editor.style.height = `${pageHeight}px`;
+    editor.style.minHeight = `${pageHeight}px`;
+    editor.offsetWidth;
+
+    const pageCount = Math.max(1, Math.ceil((Math.max(editor.scrollWidth, pageWidth) + pageGap) / pageSpan));
+    const stripWidth = pageCount * pageWidth + Math.max(pageCount - 1, 0) * pageGap;
+    page.style.setProperty("--page-count", String(pageCount));
+    page.style.setProperty("--page-zoom", String(zoom));
+    editor.style.width = `${stripWidth}px`;
+    scale.style.width = `${stripWidth * zoom}px`;
+    scale.style.height = `${pageHeight * zoom}px`;
+  }
+
+  function bindPagedEditor(editor) {
+    const viewport = editor?.closest?.("[data-page-viewport]");
+    if (!viewport) return;
+    requestAnimationFrame(() => syncPagedEditorMetrics(editor));
+    viewport.addEventListener("wheel", (event) => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      const factor = event.deltaY > 0 ? 0.92 : 1.08;
+      state.settings.pageZoom = clampPageZoom((state.settings.pageZoom || 1) * factor);
+      saveState();
+      syncPagedEditorMetrics(editor);
+    }, { passive: false });
+  }
+
   function bindEditor() {
     const box = activeBox();
     const note = box ? findItem(box, box.activeItemId) : null;
@@ -2743,6 +2820,7 @@
 
     if (editor) {
       prepareCollapsibleHeadings(editor, note, box);
+      bindPagedEditor(editor);
       editor.addEventListener("pointerdown", () => {
         if (document.activeElement !== editor) editor.focus({ preventScroll: true });
       });
@@ -2761,6 +2839,7 @@
         saveEditorSelection(editor);
         updateFormatBlockSelect(editor);
         saveState();
+        syncPagedEditorMetrics(editor);
       });
     }
 
@@ -2776,6 +2855,7 @@
         note.modifiedAt = now();
         touchBox(box);
         saveState();
+        syncPagedEditorMetrics(editor);
       });
     });
 
@@ -3162,6 +3242,7 @@
     note.modifiedAt = now();
     touchBox(box);
     updateEditorStats(note);
+    syncPagedEditorMetrics(editor);
     saveState();
   }
 

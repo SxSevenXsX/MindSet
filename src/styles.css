@@ -1499,7 +1499,7 @@ body.is-marquee-selecting {
   outline: none;
 }
 
-.editor-page.is-page-mode {
+.editor-page.is-split-mode {
   min-height: calc(100vh - 112px);
   margin: 6px -8px 0;
   padding: 18px 22px 70px;
@@ -1508,13 +1508,13 @@ body.is-marquee-selecting {
     var(--surface-soft);
 }
 
-:root[data-theme="dark"] .editor-page.is-page-mode {
+:root[data-theme="dark"] .editor-page.is-split-mode {
   background:
     radial-gradient(circle at 50% 0, rgba(138, 168, 143, 0.08), transparent 34%),
     #161616;
 }
 
-.editor-page.is-page-mode .title-input {
+.editor-page.is-split-mode .title-input {
   display: block;
   width: min(100%, 1040px);
   margin: 0 auto;
@@ -1525,7 +1525,7 @@ body.is-marquee-selecting {
   background: var(--surface);
 }
 
-.editor-page.is-page-mode .note-editor {
+.editor-page.is-split-mode .note-editor {
   width: min(100%, 1040px);
   min-height: 720px;
   margin: 0 auto;
@@ -1543,14 +1543,125 @@ body.is-marquee-selecting {
   column-width: 420px;
 }
 
-:root[data-theme="dark"] .editor-page.is-page-mode .note-editor {
+:root[data-theme="dark"] .editor-page.is-split-mode .note-editor {
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.32);
 }
 
-.editor-page.is-page-mode .editor-status {
+.editor-page.is-split-mode .editor-status {
   max-width: 1040px;
   margin: 0 auto;
   padding-top: 10px;
+}
+
+.editor-page.is-page-mode {
+  --page-width: 620px;
+  --page-height: 877px;
+  --page-gap: 30px;
+  --page-margin-x: 62px;
+  --page-margin-y: 68px;
+  min-height: calc(100vh - 112px);
+  margin: 6px -8px 0;
+  padding: 18px 0 70px;
+  background: var(--surface-soft);
+}
+
+:root[data-theme="dark"] .editor-page.is-page-mode {
+  background: #161616;
+}
+
+.editor-page.is-page-mode .title-input {
+  display: block;
+  width: min(100%, var(--page-width));
+  margin: 0 auto 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 18px 26px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.page-editor-viewport {
+  overflow: auto;
+  padding: 4px 28px 44px;
+}
+
+.page-editor-scale {
+  position: relative;
+  margin: 0 auto;
+  min-width: var(--scaled-strip-width, var(--page-width));
+  min-height: var(--scaled-page-height, var(--page-height));
+}
+
+.editor-page.is-page-mode .note-editor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--page-width);
+  height: var(--page-height);
+  min-height: var(--page-height);
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  padding: var(--page-margin-y) var(--page-margin-x);
+  overflow: visible;
+  background:
+    linear-gradient(90deg,
+      rgba(35, 48, 43, 0.16) 0 1px,
+      var(--surface) 1px calc(var(--page-width) - 1px),
+      rgba(35, 48, 43, 0.16) calc(var(--page-width) - 1px) var(--page-width),
+      transparent var(--page-width) calc(var(--page-width) + var(--page-gap)))
+      0 0 / calc(var(--page-width) + var(--page-gap)) var(--page-height) repeat-x;
+  box-shadow: none;
+  column-fill: auto;
+  column-gap: calc(var(--page-gap) + var(--page-margin-x) + var(--page-margin-x));
+  column-rule: 0;
+  column-width: calc(var(--page-width) - var(--page-margin-x) - var(--page-margin-x));
+  transform: scale(var(--page-zoom, 1));
+  transform-origin: top left;
+}
+
+.editor-page.is-page-mode .note-editor::before,
+.editor-page.is-page-mode .note-editor::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: calc(100% - var(--page-gap));
+  height: 1px;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg,
+      rgba(35, 48, 43, 0.16) 0 var(--page-width),
+      transparent var(--page-width) calc(var(--page-width) + var(--page-gap)))
+      0 0 / calc(var(--page-width) + var(--page-gap)) 1px repeat-x;
+}
+
+.editor-page.is-page-mode .note-editor::after {
+  top: calc(var(--page-height) - 1px);
+}
+
+:root[data-theme="dark"] .editor-page.is-page-mode .note-editor {
+  background:
+    linear-gradient(90deg,
+      rgba(255, 255, 255, 0.18) 0 1px,
+      var(--surface) 1px calc(var(--page-width) - 1px),
+      rgba(255, 255, 255, 0.18) calc(var(--page-width) - 1px) var(--page-width),
+      transparent var(--page-width) calc(var(--page-width) + var(--page-gap)))
+      0 0 / calc(var(--page-width) + var(--page-gap)) var(--page-height) repeat-x;
+}
+
+:root[data-theme="dark"] .editor-page.is-page-mode .note-editor::before,
+:root[data-theme="dark"] .editor-page.is-page-mode .note-editor::after {
+  background:
+    linear-gradient(90deg,
+      rgba(255, 255, 255, 0.18) 0 var(--page-width),
+      transparent var(--page-width) calc(var(--page-width) + var(--page-gap)))
+      0 0 / calc(var(--page-width) + var(--page-gap)) 1px repeat-x;
+}
+
+.editor-page.is-page-mode .editor-status {
+  max-width: var(--page-width);
+  margin: 0 auto;
+  padding-top: 12px;
 }
 
 .note-editor h1,
@@ -2753,21 +2864,34 @@ body.is-marquee-selecting {
     font-size: 16px;
   }
 
-  .editor-page.is-page-mode {
+  .editor-page.is-split-mode {
     margin: 6px -14px 0;
     padding: 14px;
   }
 
-  .editor-page.is-page-mode .title-input,
-  .editor-page.is-page-mode .note-editor {
+  .editor-page.is-split-mode .title-input,
+  .editor-page.is-split-mode .note-editor {
     width: 100%;
   }
 
-  .editor-page.is-page-mode .note-editor {
+  .editor-page.is-split-mode .note-editor {
     column-count: 1;
     column-width: auto;
     background: var(--surface);
     padding: 30px 24px;
+  }
+
+  .editor-page.is-page-mode {
+    --page-width: 520px;
+    --page-height: 735px;
+    --page-margin-x: 42px;
+    --page-margin-y: 50px;
+    margin: 6px -14px 0;
+    padding-top: 14px;
+  }
+
+  .editor-page.is-page-mode .title-input {
+    width: min(100%, var(--page-width));
   }
 
   .graph-canvas {
