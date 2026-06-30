@@ -306,6 +306,47 @@
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }
 
+  function editableTarget(element) {
+    return element?.closest?.("input, textarea, select, [contenteditable='true']") || null;
+  }
+
+  function activeEditableTarget() {
+    const active = document.activeElement;
+    return active && active !== document.body && document.body.contains(active) ? editableTarget(active) : null;
+  }
+
+  function scheduleRenderWhenIdle() {
+    window.setTimeout(() => {
+      if (activeEditableTarget()) return;
+      render();
+    }, 0);
+  }
+
+  function focusAutofocusTarget() {
+    const target = app.querySelector("[autofocus]");
+    const active = activeEditableTarget();
+    if (!target || (active && active !== target)) return;
+    window.requestAnimationFrame(() => {
+      const nextActive = activeEditableTarget();
+      if (!document.body.contains(target) || (nextActive && nextActive !== target)) return;
+      target.focus({ preventScroll: true });
+      placeAutofocusCaret(target);
+      window.setTimeout(() => placeAutofocusCaret(target), 0);
+    });
+  }
+
+  function placeAutofocusCaret(target) {
+    if (!document.body.contains(target) || document.activeElement !== target || typeof target.value !== "string") return;
+    if (typeof target.setSelectionRange !== "function") return;
+    if (target.dataset.selectAutofocus === "true") {
+      target.setSelectionRange(0, target.value.length);
+      if (typeof target.select === "function") target.select();
+    } else {
+      const end = target.value.length;
+      target.setSelectionRange(end, end);
+    }
+  }
+
   function createSeedState() {
     const createdAt = now();
     const boxId = uid("box");
@@ -1025,6 +1066,7 @@
     app.innerHTML = box ? renderApp(box) : renderLobby();
     bindEvents();
     bindGraphCanvas();
+    focusAutofocusTarget();
   }
 
   function renderLobby() {
@@ -1675,7 +1717,7 @@
             </div>
             <div class="modal-body modal-grid">
               <label class="modal-label">Nom
-                <input class="modal-field" name="name" value="Nouvelle boîte" required />
+                <input class="modal-field" name="name" value="Nouvelle boîte" required autofocus data-select-autofocus="true" />
               </label>
               <label class="modal-label">Mot de passe optionnel
                 <input class="modal-field" name="password" type="password" placeholder="Laisser vide pour une boîte libre" />
@@ -2099,7 +2141,7 @@
         touchBox(box);
         saveState();
       });
-      boxTitle.addEventListener("blur", () => window.setTimeout(render, 0));
+      boxTitle.addEventListener("blur", scheduleRenderWhenIdle);
     }
 
     const sortMode = app.querySelector("[data-sort-mode]");
@@ -2510,17 +2552,14 @@
         touchBox(box);
         saveState();
       });
-      title.addEventListener("blur", () => {
-        window.setTimeout(() => {
-          const active = document.activeElement;
-          if (editor && (active === editor || editor.contains(active))) return;
-          render();
-        }, 0);
-      });
+      title.addEventListener("blur", scheduleRenderWhenIdle);
     }
 
     if (editor) {
       prepareCollapsibleHeadings(editor, note, box);
+      editor.addEventListener("pointerdown", () => {
+        if (document.activeElement !== editor) editor.focus({ preventScroll: true });
+      });
       ["keyup", "mouseup", "focus", "click"].forEach((eventName) => {
         editor.addEventListener(eventName, () => {
           saveEditorSelection(editor);
@@ -3043,7 +3082,7 @@
   }
 
   document.addEventListener("keydown", (event) => {
-    const editingTarget = event.target.closest?.("input, textarea, select, [contenteditable='true']");
+    const editingTarget = editableTarget(event.target);
     if (!editingTarget && !runtime.modal && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
       const box = activeBox();
       if (box) moveKeyboardSelection(box, event.key === "ArrowDown" ? 1 : -1, event);
