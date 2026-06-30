@@ -315,8 +315,9 @@ body.is-resizing-nav {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-width: 120px;
-  max-width: 260px;
+  width: 168px;
+  min-width: 168px;
+  max-width: 168px;
   height: 36px;
   border-right: 1px solid var(--border);
   border-radius: 0;
@@ -328,11 +329,39 @@ body.is-resizing-nav {
   cursor: pointer;
 }
 
-.doc-tab span:first-child {
+.doc-tab-title {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.doc-tab-title-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+  will-change: transform;
+}
+
+.doc-tab.is-title-overflowing:hover .doc-tab-title-text,
+.doc-tab.is-title-overflowing:focus-visible .doc-tab-title-text,
+.doc-tab.is-title-overflowing.is-active .doc-tab-title-text {
+  max-width: none;
+  padding-right: 18px;
+  animation: tab-title-marquee var(--tab-marquee-duration, 7s) ease-in-out infinite alternate;
+}
+
+@keyframes tab-title-marquee {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(calc(-1 * var(--tab-marquee-distance, 0px)));
+  }
 }
 
 .doc-tab.is-active {
@@ -359,6 +388,7 @@ body.is-resizing-nav {
 .new-tab-button {
   min-width: 36px;
   width: 36px;
+  max-width: 36px;
   padding: 0;
   justify-content: center;
 }
@@ -1469,6 +1499,60 @@ body.is-marquee-selecting {
   outline: none;
 }
 
+.editor-page.is-page-mode {
+  min-height: calc(100vh - 112px);
+  margin: 6px -8px 0;
+  padding: 18px 22px 70px;
+  background:
+    radial-gradient(circle at 50% 0, rgba(15, 107, 88, 0.07), transparent 32%),
+    var(--surface-soft);
+}
+
+:root[data-theme="dark"] .editor-page.is-page-mode {
+  background:
+    radial-gradient(circle at 50% 0, rgba(138, 168, 143, 0.08), transparent 34%),
+    #161616;
+}
+
+.editor-page.is-page-mode .title-input {
+  display: block;
+  width: min(100%, 1040px);
+  margin: 0 auto;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  padding: 22px 34px 10px;
+  background: var(--surface);
+}
+
+.editor-page.is-page-mode .note-editor {
+  width: min(100%, 1040px);
+  min-height: 720px;
+  margin: 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 0 0 8px 8px;
+  padding: 48px;
+  background:
+    linear-gradient(90deg,
+      var(--surface) 0 calc(50% - 38px),
+      transparent calc(50% - 38px) calc(50% + 38px),
+      var(--surface) calc(50% + 38px) 100%);
+  box-shadow: 0 18px 42px rgba(35, 48, 43, 0.12);
+  column-gap: 76px;
+  column-rule: 1px solid var(--border);
+  column-width: 420px;
+}
+
+:root[data-theme="dark"] .editor-page.is-page-mode .note-editor {
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.32);
+}
+
+.editor-page.is-page-mode .editor-status {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding-top: 10px;
+}
+
 .note-editor h1,
 .note-editor h2,
 .note-editor h3 {
@@ -2331,6 +2415,60 @@ body.is-marquee-selecting {
   font-weight: 820;
 }
 
+.settings-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.font-import-button {
+  position: relative;
+  width: fit-content;
+  cursor: pointer;
+}
+
+.font-import-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.local-font-list {
+  display: grid;
+  gap: 6px;
+}
+
+.local-font-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 30px;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 4px 4px 4px 10px;
+  background: var(--surface);
+}
+
+.local-font-row span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-font-row small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 720;
+}
+
 .color-field {
   padding: 4px;
   cursor: pointer;
@@ -2520,6 +2658,12 @@ body.is-marquee-selecting {
   font-weight: 680;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .doc-tab.is-title-overflowing .doc-tab-title-text {
+    animation: none;
+  }
+}
+
 @media (max-width: 1120px) {
   .app-shell {
     grid-template-columns: var(--rail) minmax(230px, 280px) minmax(0, 1fr);
@@ -2607,6 +2751,23 @@ body.is-marquee-selecting {
     min-height: 430px;
     padding: 8px 18px 36px;
     font-size: 16px;
+  }
+
+  .editor-page.is-page-mode {
+    margin: 6px -14px 0;
+    padding: 14px;
+  }
+
+  .editor-page.is-page-mode .title-input,
+  .editor-page.is-page-mode .note-editor {
+    width: 100%;
+  }
+
+  .editor-page.is-page-mode .note-editor {
+    column-count: 1;
+    column-width: auto;
+    background: var(--surface);
+    padding: 30px 24px;
   }
 
   .graph-canvas {

@@ -18,6 +18,7 @@
     dragIds: [],
     editorRange: null,
     boxMenuOpen: false,
+    loadedFontIds: new Set(),
   };
 
   const icons = {
@@ -65,6 +66,7 @@
     arrowRight: '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
     zoomIn: '<circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/><path d="M11 8v6"/><path d="M8 11h6"/>',
     zoomOut: '<circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/><path d="M8 11h6"/>',
+    bookOpen: '<path d="M12 7v14"/><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v18H6.5A2.5 2.5 0 0 1 4 18.5v-13Z"/><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H12v18h5.5A2.5 2.5 0 0 0 20 18.5v-13Z"/>',
   };
 
   const graphDirections = [
@@ -89,6 +91,9 @@
     { label: "Courier", value: "Courier New, Courier, monospace" },
   ];
 
+  const supportedFontExtensions = [".ttf", ".otf", ".woff", ".woff2"];
+  const localFontLimit = 12;
+
   const baseColorPresets = [
     { label: "Rouge", value: "#d94b4b" },
     { label: "Orange", value: "#f08a24" },
@@ -106,6 +111,51 @@
   const emojiChoices = ["⭐", "📌", "💡", "✅", "🔥", "🧠", "📘", "🗂️"];
 
   const state = loadState();
+
+  function normalizeEditorViewMode(value) {
+    return value === "pages" ? "pages" : "flow";
+  }
+
+  function normalizeLocalFontName(name) {
+    return String(name || "Police locale").replace(/\.[^.]+$/, "").trim().slice(0, 60) || "Police locale";
+  }
+
+  function normalizeFontFamily(value, fallbackId) {
+    const raw = String(value || fallbackId || uid("font")).replace(/^["']|["']$/g, "");
+    const safe = raw.replace(/[^a-zA-Z0-9_-]/g, "_") || String(fallbackId || uid("font"));
+    return safe.startsWith("MindSetLocal_") ? safe : `MindSetLocal_${safe}`;
+  }
+
+  function normalizeLocalFonts(fonts) {
+    if (!Array.isArray(fonts)) return [];
+    const seen = new Set();
+    return fonts.map((font) => {
+      const id = String(font?.id || uid("font"));
+      const dataUrl = String(font?.dataUrl || "");
+      if (!dataUrl.startsWith("data:")) return null;
+      const normalized = {
+        id,
+        name: normalizeLocalFontName(font?.name),
+        family: normalizeFontFamily(font?.family, id),
+        format: String(font?.format || "").toLowerCase(),
+        dataUrl,
+      };
+      const key = `${normalized.family}:${normalized.dataUrl.slice(0, 120)}`;
+      if (seen.has(key)) return null;
+      seen.add(key);
+      return normalized;
+    }).filter(Boolean).slice(0, localFontLimit);
+  }
+
+  function availableFontOptions() {
+    return [
+      ...fontOptions,
+      ...(state.settings?.localFonts || []).map((font) => ({
+        label: font.name,
+        value: font.family,
+      })),
+    ];
+  }
 
   function icon(name, extraClass = "") {
     return `<svg class="icon ${extraClass}" viewBox="0 0 24 24" aria-hidden="true">${icons[name] || ""}</svg>`;
@@ -215,6 +265,8 @@
       recentHighlightColors: normalizeRecentColors(previousSettings.recentHighlightColors),
       graphDirection: normalizeGraphDirection(previousSettings.graphDirection),
       graphZoom: clampGraphZoom(previousSettings.graphZoom || 1),
+      editorViewMode: normalizeEditorViewMode(previousSettings.editorViewMode),
+      localFonts: normalizeLocalFonts(previousSettings.localFonts),
       headingPresets: {
         normal: { ...headingDefaults.normal, ...(previousHeadings.normal || {}) },
         h1: { ...headingDefaults.h1, ...(previousHeadings.h1 || {}) },
@@ -254,6 +306,29 @@
       document.documentElement.style.setProperty(`--${key}-color`, color);
       document.documentElement.style.setProperty(`--${key}-weight`, preset.weight);
       document.documentElement.style.setProperty(`--${key}-font`, preset.fontFamily || headingDefaults[key].fontFamily);
+    });
+    applyLocalFonts();
+  }
+
+  function applyLocalFonts() {
+    if (!("FontFace" in window) || !document.fonts) return;
+    (state.settings?.localFonts || []).forEach((font) => {
+      if (!font?.id || !font.dataUrl || runtime.loadedFontIds.has(font.id)) return;
+      try {
+        runtime.loadedFontIds.add(font.id);
+        const face = new FontFace(font.family, `url(${font.dataUrl})`);
+        face.load()
+          .then((loaded) => {
+            document.fonts.add(loaded);
+          })
+          .catch((error) => {
+            runtime.loadedFontIds.delete(font.id);
+            console.warn("MindSet font ignored", error);
+          });
+      } catch (error) {
+        runtime.loadedFontIds.delete(font.id);
+        console.warn("MindSet font ignored", error);
+      }
     });
   }
 
@@ -373,6 +448,8 @@
         recentHighlightColors: [],
         graphDirection: "up",
         graphZoom: 1,
+        editorViewMode: "flow",
+        localFonts: [],
       },
       boxes: [
         {
@@ -829,6 +906,8 @@
     folder.modifiedAt = createdAt;
     box.activeItemId = note.id;
     box.selectedIds = [note.id];
+    if (!Array.isArray(box.openTabIds)) box.openTabIds = [];
+    if (!box.openTabIds.includes(note.id)) box.openTabIds.push(note.id);
     if (!box.expandedIds.includes(folder.id)) box.expandedIds.push(folder.id);
     touchBox(box);
     saveState();
@@ -1066,6 +1145,7 @@
     app.innerHTML = box ? renderApp(box) : renderLobby();
     bindEvents();
     bindGraphCanvas();
+    bindTabMarquees();
     focusAutofocusTarget();
   }
 
@@ -1146,7 +1226,7 @@
         <div class="tabs-strip" aria-label="Onglets ouverts">
           ${tabs.map((tab) => `
             <button class="doc-tab ${tab.id === activeId ? "is-active" : ""}" data-tab-id="${tab.id}" aria-label="${escapeHtml(tab.title)}">
-              <span>${escapeHtml(tab.title)}</span>
+              <span class="doc-tab-title"><span class="doc-tab-title-text">${escapeHtml(tab.title)}</span></span>
               <span class="tab-close" data-close-tab-id="${tab.id}" aria-label="Fermer">${icon("close")}</span>
             </button>
           `).join("")}
@@ -1157,6 +1237,28 @@
         </div>
       </div>
     `;
+  }
+
+  function bindTabMarquees() {
+    app.querySelectorAll(".doc-tab").forEach((tab) => {
+      const title = tab.querySelector(".doc-tab-title");
+      const text = tab.querySelector(".doc-tab-title-text");
+      if (!title || !text) return;
+      const overflow = Math.max(text.scrollWidth - title.clientWidth, 0);
+      tab.classList.toggle("is-title-overflowing", overflow > 4);
+      tab.style.setProperty("--tab-marquee-distance", `${overflow + 14}px`);
+      tab.style.setProperty("--tab-marquee-duration", `${Math.min(Math.max(overflow / 18, 4), 10)}s`);
+    });
+  }
+
+  function updateTabTitle(id, title) {
+    app.querySelectorAll("[data-tab-id]").forEach((tab) => {
+      if (tab.dataset.tabId !== id) return;
+      tab.setAttribute("aria-label", title);
+      const text = tab.querySelector(".doc-tab-title-text");
+      if (text) text.textContent = title;
+    });
+    bindTabMarquees();
   }
 
   function renderPathBar(box) {
@@ -1456,6 +1558,8 @@
   function renderEditor(box, note) {
     const stats = noteStats(note);
     const bookmarked = (box.bookmarkedIds || []).includes(note.id);
+    const pageMode = state.settings?.editorViewMode === "pages";
+    const fonts = availableFontOptions();
     return `
       <article class="editor-shell">
         <div class="editor-toolbar" aria-label="Barre de mise en forme">
@@ -1467,7 +1571,7 @@
               <option value="h3">Titre 3</option>
             </select>
             <select class="toolbar-select font-select" data-font-family title="Police">
-              ${fontOptions.map((font, index) => `<option value="${escapeHtml(font.value)}" ${index === 0 ? "selected" : ""}>${escapeHtml(font.label)}</option>`).join("")}
+              ${fonts.map((font, index) => `<option value="${escapeHtml(font.value)}" ${index === 0 ? "selected" : ""}>${escapeHtml(font.label)}</option>`).join("")}
             </select>
             <select class="toolbar-select" data-font-size title="Taille">
               <option value="14px">14</option>
@@ -1503,11 +1607,12 @@
             <button class="format-button" data-list-type="square" title="Carré">□</button>
           </div>
           <div class="toolbar-group">
+            <button class="format-button ${pageMode ? "is-active" : ""}" data-action="toggle-editor-view" data-tooltip="${pageMode ? "Mode ecriture simple" : "Mode pages livre"}" aria-label="${pageMode ? "Mode ecriture simple" : "Mode pages livre"}">${icon("bookOpen")}</button>
             <button class="format-button" data-editor-action="toggle-heading-collapse" title="Replier / deplier le titre">${icon("collapse")}</button>
             <button class="format-button ${bookmarked ? "is-active" : ""}" data-action="toggle-bookmark" data-tooltip="${bookmarked ? "Retirer des signets" : "Ajouter aux signets"}" aria-label="${bookmarked ? "Retirer des signets" : "Ajouter aux signets"}">${icon(bookmarked ? "bookmarkFilled" : "bookmark")}</button>
           </div>
         </div>
-        <section class="editor-page">
+        <section class="editor-page ${pageMode ? "is-page-mode" : ""}">
           <input class="title-input" data-note-title value="${escapeHtml(note.title)}" aria-label="Titre de la note" />
           <div class="note-editor" data-note-editor contenteditable="true" spellcheck="true">${note.content || ""}</div>
           <div class="editor-status" aria-live="polite">
@@ -1836,6 +1941,8 @@
     if (runtime.modal.type === "settings") {
       const settings = state.settings || {};
       const headings = settings.headingPresets || headingDefaults;
+      const localFonts = normalizeLocalFonts(settings.localFonts);
+      const fontChoices = availableFontOptions();
       const presetRows = [
         { level: "normal", label: "Normal", min: 12, max: 32 },
         { level: "h1", label: "Titre 1", min: 14, max: 48 },
@@ -1894,7 +2001,7 @@
                       <input class="modal-field compact-field" type="number" min="${row.min}" max="${row.max}" value="${Number.parseInt(preset.size, 10)}" data-heading-size="${level}" aria-label="Taille ${escapeHtml(row.label)}" />
                       <input class="modal-field color-field compact-color" type="color" value="${escapeHtml(preset.color)}" data-heading-color="${level}" aria-label="Couleur ${escapeHtml(row.label)}" />
                       <select class="modal-field compact-field heading-font-select" data-heading-font="${level}" aria-label="Police ${escapeHtml(row.label)}">
-                        ${fontOptions.map((font) => `<option value="${escapeHtml(font.value)}" ${preset.fontFamily === font.value ? "selected" : ""}>${escapeHtml(font.label)}</option>`).join("")}
+                        ${fontChoices.map((font) => `<option value="${escapeHtml(font.value)}" ${preset.fontFamily === font.value ? "selected" : ""}>${escapeHtml(font.label)}</option>`).join("")}
                       </select>
                       <select class="modal-field compact-field" data-heading-weight="${level}" aria-label="Graisse ${escapeHtml(row.label)}">
                         ${weightOptions.map((weight) => `<option value="${weight}" ${preset.weight === weight ? "selected" : ""}>${weight}</option>`).join("")}
@@ -1902,6 +2009,23 @@
                     </div>
                   `;
                 }).join("")}
+              </section>
+              <section class="settings-section">
+                <h3>Polices locales</h3>
+                <p class="settings-hint">Formats acceptes : .ttf, .otf, .woff, .woff2. En prototype web, importe directement le fichier; dans l'app Windows, ce raccourci pourra ouvrir le dossier des polices.</p>
+                <label class="button font-import-button">
+                  ${icon("plus")} Ajouter une police
+                  <input type="file" accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2" data-font-import multiple />
+                </label>
+                <div class="local-font-list">
+                  ${localFonts.length ? localFonts.map((font) => `
+                    <div class="local-font-row">
+                      <span style="font-family:${escapeHtml(font.family)}">${escapeHtml(font.name)}</span>
+                      <small>${escapeHtml(font.format || "font")}</small>
+                      <button class="tool-button" type="button" data-remove-local-font="${escapeHtml(font.id)}" data-tooltip="Retirer" aria-label="Retirer ${escapeHtml(font.name)}">${icon("close")}</button>
+                    </div>
+                  `).join("") : '<p class="settings-hint">Aucune police importee pour le moment.</p>'}
+                </div>
               </section>
             </div>
           </div>
@@ -2231,6 +2355,19 @@
       select.addEventListener("change", () => updateHeadingPreset(select.dataset.headingWeight, "weight", select.value));
     });
 
+    const fontImport = app.querySelector("[data-font-import]");
+    if (fontImport) {
+      fontImport.addEventListener("change", () => importLocalFonts(fontImport.files));
+    }
+
+    app.querySelectorAll("[data-remove-local-font]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.settings.localFonts = (state.settings.localFonts || []).filter((font) => font.id !== button.dataset.removeLocalFont);
+        saveState();
+        render();
+      });
+    });
+
     app.querySelectorAll("[data-view-mode]").forEach((button) => {
       button.addEventListener("click", () => {
         const box = activeBox();
@@ -2420,6 +2557,11 @@
         render();
       }
     }
+    if (action === "toggle-editor-view") {
+      state.settings.editorViewMode = state.settings.editorViewMode === "pages" ? "flow" : "pages";
+      saveState();
+      render();
+    }
     if (action === "new-note") createNote(box);
     if (action === "new-folder") createFolder(box);
     if (action === "collapse-all") expandAll(box, false);
@@ -2451,6 +2593,49 @@
       runtime.modal = null;
       render();
     }
+  }
+
+  function fontFormatFromFileName(name) {
+    const lower = String(name || "").toLowerCase();
+    return supportedFontExtensions.find((extension) => lower.endsWith(extension)) || "";
+  }
+
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error || new Error("Font read failed"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function importLocalFonts(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    const nextFonts = [...(state.settings.localFonts || [])];
+    let added = 0;
+
+    for (const file of files) {
+      const format = fontFormatFromFileName(file.name);
+      if (!format || nextFonts.length >= localFontLimit) continue;
+      try {
+        const id = uid("font");
+        nextFonts.push({
+          id,
+          name: normalizeLocalFontName(file.name),
+          family: normalizeFontFamily("", id),
+          format,
+          dataUrl: await readFileAsDataUrl(file),
+        });
+        added += 1;
+      } catch (error) {
+        console.warn("MindSet font import failed", error);
+      }
+    }
+
+    state.settings.localFonts = normalizeLocalFonts(nextFonts);
+    saveState();
+    setToast(added ? `${added} police${added > 1 ? "s" : ""} ajoutee${added > 1 ? "s" : ""}.` : "Format de police non reconnu.");
   }
 
   function bindForms() {
@@ -2550,6 +2735,7 @@
         note.title = title.value || "Sans titre";
         note.modifiedAt = now();
         touchBox(box);
+        updateTabTitle(note.id, note.title);
         saveState();
       });
       title.addEventListener("blur", scheduleRenderWhenIdle);
