@@ -19,6 +19,8 @@
     editorRange: null,
     boxMenuOpen: false,
     loadedFontIds: new Set(),
+    pagePaginationTimer: 0,
+    activePageIndex: 0,
   };
 
   const icons = {
@@ -2760,34 +2762,100 @@
     return Number.isFinite(value) ? value : fallback;
   }
 
+  function createPageEditor(scale, index) {
+    const sheet = document.createElement("div");
+    sheet.className = "page-sheet";
+    sheet.dataset.pageSheet = String(index);
+
+    const content = document.createElement("div");
+    content.className = "note-editor";
+    content.dataset.noteEditor = "true";
+    content.dataset.pageIndex = String(index);
+    content.contentEditable = "true";
+    content.spellcheck = true;
+
+    sheet.appendChild(content);
+    scale.appendChild(sheet);
+    return content;
+  }
+
+  function editableBlocksFromHtml(html) {
+    const source = document.createElement("div");
+    source.innerHTML = html || "<p><br></p>";
+    const blocks = [];
+    source.childNodes.forEach((node) => {
+      if (node.nodeType === Node.TEXT_NODE && !node.textContent.trim()) return;
+      if (node.nodeType === Node.TEXT_NODE) {
+        const paragraph = document.createElement("p");
+        paragraph.textContent = node.textContent;
+        blocks.push(paragraph);
+        return;
+      }
+      blocks.push(node);
+    });
+    if (!blocks.length) {
+      const paragraph = document.createElement("p");
+      paragraph.appendChild(document.createElement("br"));
+      blocks.push(paragraph);
+    }
+    return blocks;
+  }
+
+  function mergePageEditorHtml() {
+    return [...app.querySelectorAll(".editor-page.is-page-mode [data-note-editor]")]
+      .map((editor) => editor.innerHTML)
+      .join("")
+      .trim() || "<p><br></p>";
+  }
+
+  function updatePagedLayout(page) {
+    const viewport = page?.querySelector?.("[data-page-viewport]");
+    const pageCount = page?.querySelectorAll?.(".page-sheet").length || 1;
+    if (!page || !viewport) return;
+    const pageWidth = cssNumber(page, "--page-width", 560);
+    const pageGap = cssNumber(page, "--page-gap", 28);
+    const zoom = clampPageZoom(state.settings?.pageZoom || 1);
+    const twoPagesWidth = ((pageWidth * 2) + pageGap) * zoom;
+    const pagesPerRow = twoPagesWidth <= Math.max(viewport.clientWidth - 32, pageWidth * zoom) ? 2 : 1;
+    page.style.setProperty("--page-count", String(pageCount));
+    page.style.setProperty("--page-rows", String(Math.ceil(pageCount / pagesPerRow)));
+    page.style.setProperty("--pages-per-row", String(Math.min(2, pagesPerRow)));
+    page.style.setProperty("--page-zoom", String(zoom));
+  }
+
+  function paginateNoteIntoPages(note) {
+    const page = app.querySelector(".editor-page.is-page-mode");
+    const scale = page?.querySelector?.("[data-page-scale]");
+    if (!page || !scale) return [];
+
+    const blocks = editableBlocksFromHtml(note.content);
+    scale.innerHTML = "";
+    const editors = [];
+    let editor = createPageEditor(scale, 0);
+    editors.push(editor);
+
+    blocks.forEach((block) => {
+      editor.appendChild(block);
+      if (editor.scrollHeight <= editor.clientHeight + 2 || editor.childNodes.length <= 1) return;
+      editor.removeChild(block);
+      editor = createPageEditor(scale, editors.length);
+      editors.push(editor);
+      editor.appendChild(block);
+    });
+
+    updatePagedLayout(page);
+    return editors;
+  }
+
   function syncPagedEditorMetrics(editor) {
     const page = editor?.closest?.(".editor-page.is-page-mode");
-    const scale = page?.querySelector?.("[data-page-scale]");
-    if (!page || !scale) return;
-
-    const pageWidth = cssNumber(page, "--page-width", 620);
-    const pageHeight = cssNumber(page, "--page-height", 877);
-    const pageGap = cssNumber(page, "--page-gap", 30);
-    const zoom = clampPageZoom(state.settings?.pageZoom || 1);
-    const pageSpan = pageWidth + pageGap;
-
-    editor.style.width = `${pageWidth}px`;
-    editor.style.height = `${pageHeight}px`;
-    editor.style.minHeight = `${pageHeight}px`;
-    editor.offsetWidth;
-
-    const pageCount = Math.max(1, Math.ceil((Math.max(editor.scrollWidth, pageWidth) + pageGap) / pageSpan));
-    const stripWidth = pageCount * pageWidth + Math.max(pageCount - 1, 0) * pageGap;
-    page.style.setProperty("--page-count", String(pageCount));
-    page.style.setProperty("--page-zoom", String(zoom));
-    editor.style.width = `${stripWidth}px`;
-    scale.style.width = `${stripWidth * zoom}px`;
-    scale.style.height = `${pageHeight * zoom}px`;
+    if (page) updatePagedLayout(page);
   }
 
   function bindPagedEditor(editor) {
     const viewport = editor?.closest?.("[data-page-viewport]");
-    if (!viewport) return;
+    if (!viewport || viewport.dataset.pageWheelBound === "true") return;
+    viewport.dataset.pageWheelBound = "true";
     requestAnimationFrame(() => syncPagedEditorMetrics(editor));
     viewport.addEventListener("wheel", (event) => {
       if (!event.ctrlKey) return;
@@ -2805,7 +2873,7 @@
     if (!box || !note || note.type !== "note") return;
 
     const title = app.querySelector("[data-note-title]");
-    const editor = app.querySelector("[data-note-editor]");
+    let editor = app.querySelector("[data-note-editor]");
 
     if (title) {
       title.addEventListener("input", () => {
@@ -2818,73 +2886,144 @@
       title.addEventListener("blur", scheduleRenderWhenIdle);
     }
 
-    if (editor) {
-      prepareCollapsibleHeadings(editor, note, box);
-      bindPagedEditor(editor);
-      editor.addEventListener("pointerdown", () => {
-        if (document.activeElement !== editor) editor.focus({ preventScroll: true });
+    if (normalizeEditorViewMode(state.settings?.editorViewMode) === "pages") {
+      paginateNoteIntoPages(note);
+    }
+
+    const editors = [...app.querySelectorAll("[data-note-editor]")];
+    const activeEditor = () => {
+      const active = document.activeElement?.closest?.("[data-note-editor]");
+      if (active && app.contains(active)) return active;
+      return editors.find((item) => Number(item.dataset.pageIndex || 0) === runtime.activePageIndex) || editors[0] || null;
+    };
+    editor = activeEditor();
+
+    editors.forEach((boundEditor) => {
+      prepareCollapsibleHeadings(boundEditor, note, box);
+      bindPagedEditor(boundEditor);
+      boundEditor.addEventListener("pointerdown", () => {
+        runtime.activePageIndex = Number(boundEditor.dataset.pageIndex || 0);
+        if (document.activeElement !== boundEditor) boundEditor.focus({ preventScroll: true });
       });
       ["keyup", "mouseup", "focus", "click"].forEach((eventName) => {
-        editor.addEventListener(eventName, () => {
-          saveEditorSelection(editor);
-          updateFormatBlockSelect(editor);
+        boundEditor.addEventListener(eventName, () => {
+          runtime.activePageIndex = Number(boundEditor.dataset.pageIndex || 0);
+          saveEditorSelection(boundEditor);
+          updateFormatBlockSelect(boundEditor);
         });
       });
-      editor.addEventListener("keydown", (event) => handleEditorAutomation(event, editor, note, box));
-      editor.addEventListener("input", () => {
-        note.content = editor.innerHTML;
+      boundEditor.addEventListener("keydown", (event) => handleEditorAutomation(event, boundEditor, note, box));
+      boundEditor.addEventListener("input", () => {
+        note.content = normalizeEditorViewMode(state.settings?.editorViewMode) === "pages"
+          ? mergePageEditorHtml()
+          : boundEditor.innerHTML;
         note.modifiedAt = now();
         touchBox(box);
         updateEditorStats(note);
-        saveEditorSelection(editor);
-        updateFormatBlockSelect(editor);
+        saveEditorSelection(boundEditor);
+        updateFormatBlockSelect(boundEditor);
         saveState();
-        syncPagedEditorMetrics(editor);
+        syncPagedEditorMetrics(boundEditor);
+        if (normalizeEditorViewMode(state.settings?.editorViewMode) === "pages" && boundEditor.scrollHeight > boundEditor.clientHeight + 8) {
+          window.clearTimeout(runtime.pagePaginationTimer);
+          runtime.pagePaginationTimer = window.setTimeout(() => {
+            note.content = mergePageEditorHtml();
+            saveState();
+            render();
+            requestAnimationFrame(() => {
+              const nextEditors = [...app.querySelectorAll(".editor-page.is-page-mode [data-note-editor]")];
+              const target = nextEditors[nextEditors.length - 1] || nextEditors[0];
+              if (target) {
+                target.focus({ preventScroll: true });
+                placeCaretAtEnd(target);
+              }
+            });
+          }, 260);
+        }
       });
-    }
+      boundEditor.addEventListener("blur", () => {
+        if (normalizeEditorViewMode(state.settings?.editorViewMode) !== "pages") return;
+        note.content = mergePageEditorHtml();
+        saveState();
+      });
+    });
 
     app.querySelectorAll("[data-editor-cmd]").forEach((button) => {
       button.addEventListener("mousedown", (event) => {
-        saveEditorSelection(editor);
+        const current = activeEditor();
+        if (current) saveEditorSelection(current);
         event.preventDefault();
       });
       button.addEventListener("click", () => {
-        restoreEditorSelection(editor);
+        const current = activeEditor();
+        if (!current) return;
+        restoreEditorSelection(current);
         document.execCommand(button.dataset.editorCmd, false, null);
-        note.content = editor.innerHTML;
+        note.content = normalizeEditorViewMode(state.settings?.editorViewMode) === "pages" ? mergePageEditorHtml() : current.innerHTML;
         note.modifiedAt = now();
         touchBox(box);
         saveState();
-        syncPagedEditorMetrics(editor);
+        syncPagedEditorMetrics(current);
       });
     });
 
     const formatBlock = app.querySelector("[data-format-block]");
     if (formatBlock) {
-      formatBlock.addEventListener("mousedown", () => saveEditorSelection(editor));
-      formatBlock.addEventListener("focus", () => saveEditorSelection(editor));
+      formatBlock.addEventListener("mousedown", () => {
+        const current = activeEditor();
+        if (current) saveEditorSelection(current);
+      });
+      formatBlock.addEventListener("focus", () => {
+        const current = activeEditor();
+        if (current) saveEditorSelection(current);
+      });
       formatBlock.addEventListener("change", () => {
-        applyHeadingFormat(editor, note, box, formatBlock.value);
+        const current = activeEditor();
+        if (current) applyHeadingFormat(current, note, box, formatBlock.value);
       });
     }
 
     const size = app.querySelector("[data-font-size]");
     if (size) {
-      size.addEventListener("mousedown", () => saveEditorSelection(editor));
-      size.addEventListener("focus", () => saveEditorSelection(editor));
-      size.addEventListener("change", () => applySpanStyle(editor, note, box, `font-size:${size.value}`));
+      size.addEventListener("mousedown", () => {
+        const current = activeEditor();
+        if (current) saveEditorSelection(current);
+      });
+      size.addEventListener("focus", () => {
+        const current = activeEditor();
+        if (current) saveEditorSelection(current);
+      });
+      size.addEventListener("change", () => {
+        const current = activeEditor();
+        if (current) applySpanStyle(current, note, box, `font-size:${size.value}`);
+      });
     }
 
     const fontFamily = app.querySelector("[data-font-family]");
     if (fontFamily) {
-      fontFamily.addEventListener("mousedown", () => saveEditorSelection(editor));
-      fontFamily.addEventListener("focus", () => saveEditorSelection(editor));
-      fontFamily.addEventListener("change", () => applySpanStyle(editor, note, box, `font-family:${fontFamily.value}`));
+      fontFamily.addEventListener("mousedown", () => {
+        const current = activeEditor();
+        if (current) saveEditorSelection(current);
+      });
+      fontFamily.addEventListener("focus", () => {
+        const current = activeEditor();
+        if (current) saveEditorSelection(current);
+      });
+      fontFamily.addEventListener("change", () => {
+        const current = activeEditor();
+        if (current) applySpanStyle(current, note, box, `font-family:${fontFamily.value}`);
+      });
     }
 
     app.querySelectorAll("[data-color-input]").forEach((input) => {
-      input.addEventListener("mousedown", () => saveEditorSelection(editor));
-      input.addEventListener("focus", () => saveEditorSelection(editor));
+      input.addEventListener("mousedown", () => {
+        const current = activeEditor();
+        if (current) saveEditorSelection(current);
+      });
+      input.addEventListener("focus", () => {
+        const current = activeEditor();
+        if (current) saveEditorSelection(current);
+      });
       input.addEventListener("input", () => {
         const clean = registerRecentColor(input.dataset.colorInput, input.value);
         if (clean) input.value = clean;
@@ -2894,60 +3033,79 @@
 
     app.querySelectorAll("[data-apply-color]").forEach((button) => {
       button.addEventListener("mousedown", (event) => {
-        saveEditorSelection(editor);
+        const current = activeEditor();
+        if (current) saveEditorSelection(current);
         event.preventDefault();
       });
       button.addEventListener("click", () => {
+        const current = activeEditor();
+        if (!current) return;
         const kind = button.dataset.applyColor;
         const input = app.querySelector(`[data-color-input="${kind}"]`);
-        applyEditorColor(editor, note, box, kind, input?.value || "");
+        applyEditorColor(current, note, box, kind, input?.value || "");
       });
     });
 
     app.querySelectorAll("[data-clear-highlight]").forEach((button) => {
       button.addEventListener("mousedown", (event) => {
-        saveEditorSelection(editor);
+        const current = activeEditor();
+        if (current) saveEditorSelection(current);
         event.preventDefault();
       });
-      button.addEventListener("click", () => clearEditorHighlight(editor, note, box));
+      button.addEventListener("click", () => {
+        const current = activeEditor();
+        if (current) clearEditorHighlight(current, note, box);
+      });
     });
 
     app.querySelectorAll("[data-color-swatch]").forEach((button) => {
       button.addEventListener("mousedown", (event) => {
-        saveEditorSelection(editor);
+        const current = activeEditor();
+        if (current) saveEditorSelection(current);
         event.preventDefault();
       });
       button.addEventListener("click", () => {
+        const current = activeEditor();
+        if (!current) return;
         const kind = button.dataset.colorSwatch;
         const input = app.querySelector(`[data-color-input="${kind}"]`);
         if (input) input.value = button.dataset.colorValue;
-        applyEditorColor(editor, note, box, kind, button.dataset.colorValue);
+        applyEditorColor(current, note, box, kind, button.dataset.colorValue);
       });
     });
 
     app.querySelectorAll("[data-list-type]").forEach((button) => {
       button.addEventListener("mousedown", (event) => {
-        saveEditorSelection(editor);
+        const current = activeEditor();
+        if (current) saveEditorSelection(current);
         event.preventDefault();
       });
-      button.addEventListener("click", () => insertList(editor, note, box, button.dataset.listType));
+      button.addEventListener("click", () => {
+        const current = activeEditor();
+        if (current) insertList(current, note, box, button.dataset.listType);
+      });
     });
 
     app.querySelectorAll("[data-editor-action]").forEach((button) => {
       button.addEventListener("mousedown", (event) => {
-        saveEditorSelection(editor);
+        const current = activeEditor();
+        if (current) saveEditorSelection(current);
         event.preventDefault();
       });
       button.addEventListener("click", () => {
+        const current = activeEditor();
+        if (!current) return;
         if (button.dataset.editorAction === "toggle-heading-collapse") {
-          toggleCurrentHeading(editor, note, box);
+          toggleCurrentHeading(current, note, box);
         }
       });
     });
 
     app.querySelectorAll("[data-heading-index]").forEach((button) => {
       button.addEventListener("click", () => {
-        const headings = [...editor.querySelectorAll("h1, h2, h3")];
+        const current = activeEditor();
+        if (!current) return;
+        const headings = [...current.querySelectorAll("h1, h2, h3")];
         headings[Number(button.dataset.headingIndex)]?.scrollIntoView({ behavior: "smooth", block: "center" });
       });
     });
@@ -3026,10 +3184,11 @@
     heading.classList.toggle("is-heading-collapsed", collapsed);
     setHeadingSectionVisibility(heading, collapsed);
     if (!collapsed) syncCollapsedHeadings(editor);
-    note.content = editor.innerHTML;
+    note.content = normalizeEditorViewMode(state.settings?.editorViewMode) === "pages" ? mergePageEditorHtml() : editor.innerHTML;
     note.modifiedAt = now();
     touchBox(box);
     updateEditorStats(note);
+    syncPagedEditorMetrics(editor);
     saveState();
   }
 
@@ -3207,6 +3366,15 @@
     selection.addRange(range);
   }
 
+  function placeCaretAtEnd(element) {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
   function selectionInsideEditor(editor, range) {
     return !!editor && !!range && editor.contains(range.startContainer) && editor.contains(range.endContainer);
   }
@@ -3238,7 +3406,7 @@
   }
 
   function syncEditorContent(editor, note, box) {
-    note.content = editor.innerHTML;
+    note.content = normalizeEditorViewMode(state.settings?.editorViewMode) === "pages" ? mergePageEditorHtml() : editor.innerHTML;
     note.modifiedAt = now();
     touchBox(box);
     updateEditorStats(note);
@@ -3324,10 +3492,7 @@
       nextRange.selectNodeContents(span);
       selection.addRange(nextRange);
     }
-    note.content = editor.innerHTML;
-    note.modifiedAt = now();
-    touchBox(box);
-    saveState();
+    syncEditorContent(editor, note, box);
   }
 
   function insertList(editor, note, box, type) {
@@ -3342,10 +3507,7 @@
       square: '<ul class="square-list"><li>Nouvel élément</li></ul>',
     };
     document.execCommand("insertHTML", false, listMap[type] || listMap.bullet);
-    note.content = editor.innerHTML;
-    note.modifiedAt = now();
-    touchBox(box);
-    saveState();
+    syncEditorContent(editor, note, box);
   }
 
   document.addEventListener("keydown", (event) => {
