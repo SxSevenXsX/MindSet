@@ -2801,11 +2801,86 @@
     return blocks;
   }
 
+  function isMeaningfulEditorHtml(html) {
+    const source = document.createElement("div");
+    source.innerHTML = html || "";
+    if (source.textContent.replace(/\u00a0/g, " ").trim()) return true;
+    return !!source.querySelector("h1, h2, h3, li, img, video, audio, iframe, table, hr");
+  }
+
+  function isEditorPageBlank(editor) {
+    return !isMeaningfulEditorHtml(editor?.innerHTML || "");
+  }
+
   function mergePageEditorHtml() {
-    return [...app.querySelectorAll(".editor-page.is-page-mode [data-note-editor]")]
-      .map((editor) => editor.innerHTML)
+    const pages = [...app.querySelectorAll(".editor-page.is-page-mode [data-note-editor]")]
+      .map((editor) => ({
+        html: editor.innerHTML,
+        meaningful: isMeaningfulEditorHtml(editor.innerHTML),
+      }));
+    const keptPages = pages.filter((page) => page.meaningful);
+    return (keptPages.length ? keptPages : pages.slice(0, 1))
+      .map((page) => page.html)
       .join("")
       .trim() || "<p><br></p>";
+  }
+
+  function capturePagedViewport(editor) {
+    const viewport = editor?.closest?.("[data-page-viewport]") || app.querySelector("[data-page-viewport]");
+    const contentArea = editor?.closest?.(".content-area") || app.querySelector(".content-area");
+    const documentScroller = document.scrollingElement || document.documentElement;
+    return {
+      viewportTop: viewport?.scrollTop || 0,
+      viewportLeft: viewport?.scrollLeft || 0,
+      contentTop: contentArea?.scrollTop || 0,
+      contentLeft: contentArea?.scrollLeft || 0,
+      documentTop: documentScroller?.scrollTop || 0,
+      documentLeft: documentScroller?.scrollLeft || 0,
+    };
+  }
+
+  function scrollContainerToPage(container, target) {
+    const sheet = target?.closest?.(".page-sheet");
+    if (!container || !sheet) return false;
+    const canScrollY = container.scrollHeight > container.clientHeight + 1;
+    const canScrollX = container.scrollWidth > container.clientWidth + 1;
+    if (!canScrollY && !canScrollX) return false;
+
+    const containerRect = container.getBoundingClientRect();
+    const sheetRect = sheet.getBoundingClientRect();
+    if (canScrollY) {
+      container.scrollTop = Math.max(container.scrollTop + sheetRect.top - containerRect.top - 24, 0);
+    }
+    if (canScrollX) {
+      container.scrollLeft = Math.max(container.scrollLeft + sheetRect.left - containerRect.left - 24, 0);
+    }
+    return true;
+  }
+
+  function restorePagedViewport(snapshot, target, mode = "preserve") {
+    const viewport = app.querySelector("[data-page-viewport]");
+    const contentArea = app.querySelector(".content-area");
+    const documentScroller = document.scrollingElement || document.documentElement;
+    if (mode === "target" && target) {
+      const movedContent = scrollContainerToPage(contentArea, target);
+      const movedViewport = scrollContainerToPage(viewport, target);
+      if (!movedContent && !movedViewport) {
+        target.closest(".page-sheet")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+      return;
+    }
+    if (viewport) {
+      viewport.scrollTop = snapshot?.viewportTop || 0;
+      viewport.scrollLeft = snapshot?.viewportLeft || 0;
+    }
+    if (contentArea) {
+      contentArea.scrollTop = snapshot?.contentTop || 0;
+      contentArea.scrollLeft = snapshot?.contentLeft || 0;
+    }
+    if (documentScroller) {
+      documentScroller.scrollTop = snapshot?.documentTop || 0;
+      documentScroller.scrollLeft = snapshot?.documentLeft || 0;
+    }
   }
 
   function updatePagedLayout(page) {
@@ -2894,11 +2969,42 @@
     const activeEditor = () => {
       const active = document.activeElement?.closest?.("[data-note-editor]");
       if (active && app.contains(active)) return active;
-      return editors.find((item) => Number(item.dataset.pageIndex || 0) === runtime.activePageIndex) || editors[0] || null;
+      const liveEditors = [...app.querySelectorAll("[data-note-editor]")];
+      return liveEditors.find((item) => Number(item.dataset.pageIndex || 0) === runtime.activePageIndex) || liveEditors[0] || null;
     };
     editor = activeEditor();
 
-    editors.forEach((boundEditor) => {
+    function repaginatePagesInPlace(sourceEditor, options = {}) {
+      if (normalizeEditorViewMode(state.settings?.editorViewMode) !== "pages") return;
+      const snapshot = capturePagedViewport(sourceEditor);
+      note.content = mergePageEditorHtml();
+      const nextEditors = paginateNoteIntoPages(note);
+      nextEditors.forEach(bindSingleEditor);
+      const maxIndex = Math.max(nextEditors.length - 1, 0);
+      const targetIndex = Math.max(0, Math.min(Number(options.targetIndex ?? runtime.activePageIndex) || 0, maxIndex));
+      const target = nextEditors[targetIndex] || nextEditors[maxIndex] || nextEditors[0];
+      if (target && options.focus !== false) {
+        runtime.activePageIndex = Number(target.dataset.pageIndex || 0);
+        target.focus({ preventScroll: true });
+        options.caret === "start" ? placeCaretInside(target) : placeCaretAtEnd(target);
+        saveEditorSelection(target);
+        updateFormatBlockSelect(target);
+      }
+      updateEditorStats(note);
+      saveState();
+      requestAnimationFrame(() => restorePagedViewport(snapshot, target, options.scroll || "preserve"));
+    }
+
+    function schedulePageRepagination(sourceEditor, options = {}) {
+      window.clearTimeout(runtime.pagePaginationTimer);
+      runtime.pagePaginationTimer = window.setTimeout(() => {
+        repaginatePagesInPlace(sourceEditor, options);
+      }, options.delay ?? 180);
+    }
+
+    function bindSingleEditor(boundEditor) {
+      if (!boundEditor || boundEditor.dataset.editorBound === "true") return;
+      boundEditor.dataset.editorBound = "true";
       prepareCollapsibleHeadings(boundEditor, note, box);
       bindPagedEditor(boundEditor);
       boundEditor.addEventListener("pointerdown", () => {
@@ -2913,6 +3019,14 @@
         });
       });
       boundEditor.addEventListener("keydown", (event) => handleEditorAutomation(event, boundEditor, note, box));
+      boundEditor.addEventListener("page-boundary-edit", () => {
+        const index = Number(boundEditor.dataset.pageIndex || 0);
+        repaginatePagesInPlace(boundEditor, {
+          targetIndex: Math.max(index - 1, 0),
+          caret: "end",
+          scroll: "target",
+        });
+      });
       boundEditor.addEventListener("input", () => {
         note.content = normalizeEditorViewMode(state.settings?.editorViewMode) === "pages"
           ? mergePageEditorHtml()
@@ -2924,21 +3038,23 @@
         updateFormatBlockSelect(boundEditor);
         saveState();
         syncPagedEditorMetrics(boundEditor);
-        if (normalizeEditorViewMode(state.settings?.editorViewMode) === "pages" && boundEditor.scrollHeight > boundEditor.clientHeight + 8) {
-          window.clearTimeout(runtime.pagePaginationTimer);
-          runtime.pagePaginationTimer = window.setTimeout(() => {
-            note.content = mergePageEditorHtml();
-            saveState();
-            render();
-            requestAnimationFrame(() => {
-              const nextEditors = [...app.querySelectorAll(".editor-page.is-page-mode [data-note-editor]")];
-              const target = nextEditors[nextEditors.length - 1] || nextEditors[0];
-              if (target) {
-                target.focus({ preventScroll: true });
-                placeCaretAtEnd(target);
-              }
+        if (normalizeEditorViewMode(state.settings?.editorViewMode) === "pages") {
+          const pageIndex = Number(boundEditor.dataset.pageIndex || 0);
+          const pageCount = app.querySelectorAll(".editor-page.is-page-mode [data-note-editor]").length;
+          if (boundEditor.scrollHeight > boundEditor.clientHeight + 8) {
+            schedulePageRepagination(boundEditor, {
+              targetIndex: pageIndex + 1,
+              caret: "end",
+              scroll: "target",
+              delay: 220,
             });
-          }, 260);
+          } else if (pageCount > 1 && isEditorPageBlank(boundEditor)) {
+            schedulePageRepagination(boundEditor, {
+              targetIndex: Math.max(pageIndex - 1, 0),
+              caret: "end",
+              scroll: "target",
+            });
+          }
         }
       });
       boundEditor.addEventListener("blur", () => {
@@ -2946,7 +3062,9 @@
         note.content = mergePageEditorHtml();
         saveState();
       });
-    });
+    }
+
+    editors.forEach(bindSingleEditor);
 
     app.querySelectorAll("[data-editor-cmd]").forEach((button) => {
       button.addEventListener("mousedown", (event) => {
@@ -3238,7 +3356,18 @@
       if (li && !li.textContent.trim()) {
         event.preventDefault();
         exitListItem(editor, note, box, li);
+        return;
       }
+      if (normalizeEditorViewMode(state.settings?.editorViewMode) === "pages" && Number(editor.dataset.pageIndex || 0) > 0 && isCaretAtStartOfEditor(editor)) {
+        event.preventDefault();
+        editor.dispatchEvent(new CustomEvent("page-boundary-edit"));
+      }
+      return;
+    }
+
+    if (event.key === "Delete" && normalizeEditorViewMode(state.settings?.editorViewMode) === "pages" && Number(editor.dataset.pageIndex || 0) > 0 && isEditorPageBlank(editor)) {
+      event.preventDefault();
+      editor.dispatchEvent(new CustomEvent("page-boundary-edit"));
       return;
     }
 
@@ -3267,6 +3396,17 @@
     if (!li.contains(range.startContainer)) return false;
     const before = range.cloneRange();
     before.selectNodeContents(li);
+    before.setEnd(range.startContainer, range.startOffset);
+    return !before.toString().replace(/\u00a0/g, " ").trim();
+  }
+
+  function isCaretAtStartOfEditor(editor) {
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
+    const range = selection.getRangeAt(0);
+    if (!editor.contains(range.startContainer)) return false;
+    const before = range.cloneRange();
+    before.selectNodeContents(editor);
     before.setEnd(range.startContainer, range.startOffset);
     return !before.toString().replace(/\u00a0/g, " ").trim();
   }
