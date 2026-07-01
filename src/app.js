@@ -24,6 +24,8 @@
     independentPageSnapshot: null,
     pageFullNoticeTimer: 0,
     idleRenderTimer: 0,
+    suppressIdleRenderUntil: 0,
+    lastEditorPointerAt: 0,
     undoStack: [],
     redoStack: [],
     noteHistories: new Map(),
@@ -691,10 +693,29 @@
     return active && active !== document.body && document.body.contains(active) ? editableTarget(active) : null;
   }
 
+  function cancelDeferredEditorWork(options = {}) {
+    window.clearTimeout(runtime.idleRenderTimer);
+    runtime.idleRenderTimer = 0;
+    window.clearTimeout(runtime.pagePaginationTimer);
+    runtime.pagePaginationTimer = 0;
+    if (options.suppressIdleMs) {
+      runtime.suppressIdleRenderUntil = Date.now() + options.suppressIdleMs;
+    }
+  }
+
+  function markEditorPointerIntent() {
+    runtime.lastEditorPointerAt = Date.now();
+    window.clearTimeout(runtime.idleRenderTimer);
+    runtime.idleRenderTimer = 0;
+  }
+
   function scheduleRenderWhenIdle() {
     window.clearTimeout(runtime.idleRenderTimer);
     runtime.idleRenderTimer = window.setTimeout(() => {
       window.requestAnimationFrame(() => {
+        const nowTime = Date.now();
+        if (nowTime < runtime.suppressIdleRenderUntil) return;
+        if (nowTime - runtime.lastEditorPointerAt < 650) return;
         if (activeEditableTarget()) return;
         render();
       });
@@ -983,6 +1004,7 @@
   }
 
   function setActiveItem(box, id, event) {
+    cancelDeferredEditorWork({ suppressIdleMs: 350 });
     box.activeItemId = id;
     runtime.focusedItemId = id;
     if (!Array.isArray(box.openTabIds)) box.openTabIds = [];
@@ -1289,6 +1311,9 @@
   function switchBoxById(id) {
     const target = state.boxes.find((item) => item.id === id);
     if (!target) return;
+    cancelDeferredEditorWork({ suppressIdleMs: 650 });
+    runtime.editorRange = null;
+    runtime.contextMenu = null;
     runtime.boxMenuOpen = false;
     if (target.passwordHash && !runtime.unlockedBoxIds.has(target.id)) {
       runtime.modal = { type: "unlock-box", boxId: target.id };
@@ -3194,6 +3219,9 @@
       return;
     }
     if (action === "show-lobby") {
+      if (box) flushActiveEditorContent();
+      cancelDeferredEditorWork({ suppressIdleMs: 650 });
+      runtime.editorRange = null;
       state.currentBoxId = null;
       runtime.modal = null;
       saveState();
@@ -4381,11 +4409,31 @@
       prepareCollapsibleHeadings(boundEditor, note, box);
       bindPagedEditor(boundEditor);
       boundEditor.addEventListener("pointerdown", (event) => {
+        markEditorPointerIntent();
         const sheet = event?.target?.closest?.(".page-sheet");
         runtime.activePageIndex = Number(sheet?.dataset.pageSheet || 0);
       });
+      boundEditor.addEventListener("pointerup", (event) => {
+        markEditorPointerIntent();
+        const fallbackTarget = event.target?.closest?.("p, h1, h2, h3, li, blockquote, div:not(.page-sheet)") || currentPageSheet(boundEditor) || boundEditor;
+        window.requestAnimationFrame(() => {
+          if (!document.body.contains(boundEditor)) return;
+          const active = activeEditableTarget();
+          if (active?.closest?.("[data-note-editor]")) return;
+          const selection = window.getSelection();
+          const selectionInside = selection && selection.rangeCount && selectionInsideEditor(boundEditor, selection.getRangeAt(0));
+          if (selectionInside) return;
+          const focusTarget = isIndependentPageMode()
+            ? (fallbackTarget?.closest?.(".page-sheet") || currentPageSheet(boundEditor) || boundEditor)
+            : boundEditor;
+          focusTarget.focus({ preventScroll: true });
+          if (fallbackTarget && fallbackTarget !== boundEditor) placeCaretAtEnd(fallbackTarget);
+          saveEditorSelection(boundEditor);
+        });
+      });
       ["keyup", "mouseup", "focus", "focusin", "click"].forEach((eventName) => {
         boundEditor.addEventListener(eventName, (event) => {
+          if (eventName === "click") markEditorPointerIntent();
           runtime.activePageIndex = Number(event?.target?.closest?.(".page-sheet")?.dataset.pageSheet || runtime.activePageIndex || 0);
           saveEditorSelection(boundEditor);
           updateFormatBlockSelect(boundEditor);
