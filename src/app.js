@@ -3496,6 +3496,7 @@
 
     const renameForm = app.querySelector("[data-rename-item-form]");
     if (renameForm) {
+      const renameField = renameForm.querySelector("input[name='name']");
       const commitRename = () => {
         const box = activeBox();
         const item = box ? findItem(box, runtime.modal?.itemId) : null;
@@ -3520,7 +3521,12 @@
         event.stopPropagation();
         commitRename();
       });
-      renameForm.querySelector("input[name='name']")?.addEventListener("keydown", (event) => {
+      ["pointerdown", "mousedown", "click", "selectstart"].forEach((eventName) => {
+        renameField?.addEventListener(eventName, (event) => {
+          event.stopPropagation();
+        });
+      });
+      renameField?.addEventListener("keydown", (event) => {
         if (event.key !== "Enter" || event.isComposing) return;
         event.preventDefault();
         event.stopPropagation();
@@ -3694,6 +3700,20 @@
     selection.removeAllRanges();
     selection.addRange(range);
     sheet.focus({ preventScroll: true });
+    saveEditorSelection(editor);
+    return true;
+  }
+
+  function selectEditorContents(editor) {
+    if (!editor) return false;
+    if (isIndependentPageMode()) return selectIndependentPageContents(editor);
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    const selection = window.getSelection();
+    if (!selection) return false;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    editor.focus({ preventScroll: true });
     saveEditorSelection(editor);
     return true;
   }
@@ -4002,8 +4022,9 @@
 
   function keepOverflowOnNextSheets(sheet, sheets, editor) {
     let currentSheet = sheet;
+    const maxPages = 600;
     let guard = 0;
-    while (sheetOverflows(currentSheet) && guard < 80) {
+    while (sheetOverflows(currentSheet) && guard < maxPages) {
       guard += 1;
       const block = currentSheet.lastElementChild;
       const remainder = splitBlockToFit(block, currentSheet);
@@ -4389,7 +4410,7 @@
         if (normalizeEditorViewMode(state.settings?.editorViewMode) === "pages") {
           if (isContinuousPageFlow()) {
             if (needsPagedLayoutRefresh(boundEditor)) {
-              schedulePageRepagination(boundEditor, { scroll: "preserve", delay: 220 });
+              schedulePageRepagination(boundEditor, { scroll: "target", delay: 140 });
             } else {
               syncPagedEditorMetrics(boundEditor);
             }
@@ -4699,9 +4720,9 @@
   function handleEditorAutomation(event, editor, note, box) {
     if ((event.ctrlKey || event.metaKey) && !event.altKey) {
       const key = event.key.toLowerCase();
-      if (key === "a" && isIndependentPageMode()) {
+      if (key === "a") {
         event.preventDefault();
-        selectIndependentPageContents(editor);
+        selectEditorContents(editor);
         return;
       }
       if (key === "z" || key === "y") {

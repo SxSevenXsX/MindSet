@@ -2605,6 +2605,8 @@ body.is-graph-panning {
   padding: 0 11px;
   font-size: 13px;
   font-weight: 620;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .modal-actions {
