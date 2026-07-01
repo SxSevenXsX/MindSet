@@ -4518,6 +4518,7 @@
       boundEditor.addEventListener("keydown", (event) => handleEditorAutomation(event, boundEditor, note, box, repaginatePagesInPlace));
       boundEditor.addEventListener("input", () => {
         if (enforceIndependentPageLimit(boundEditor, note, box)) return;
+        if (ensureFirstContinuousPage(boundEditor, note, box)) return;
         if (removeCurrentEmptyContinuousPageIfNeeded(boundEditor, note, box)) return;
         note.content = editorSnapshotContent(boundEditor);
         note.modifiedAt = now();
@@ -5034,6 +5035,39 @@
     saveState();
     syncPagedEditorMetrics(editor);
     requestAnimationFrame(() => restorePagedViewport(snapshot, paragraph, "target"));
+    return true;
+  }
+
+  function ensureFirstContinuousPage(editor, note, box) {
+    if (normalizeEditorViewMode(state.settings?.editorViewMode) !== "pages" || !isContinuousPageFlow() || !editor) return false;
+    const sheets = [...(editor.querySelectorAll?.(".page-sheet") || [])];
+    if (sheets.length > 1) return false;
+
+    let firstSheet = sheets[0] || null;
+    if (firstSheet && sheetHasUserStructure(firstSheet)) return false;
+
+    if (!firstSheet) {
+      editor.innerHTML = "";
+      firstSheet = createPageSheet(editor, 0);
+    } else {
+      firstSheet.innerHTML = "";
+      configurePageSheet(firstSheet, 0, { editable: false });
+    }
+
+    const paragraph = blankParagraph();
+    firstSheet.appendChild(paragraph);
+    runtime.activePageIndex = 0;
+    editor.focus({ preventScroll: true });
+    placeCaretInside(paragraph);
+    note.content = editorSnapshotContent(editor);
+    note.modifiedAt = now();
+    touchBox(box);
+    updateEditorStats(note);
+    saveEditorSelection(editor);
+    updateFormatBlockSelect(editor);
+    commitEditorHistoryChange(note, note.content);
+    saveState();
+    syncPagedEditorMetrics(editor);
     return true;
   }
 
