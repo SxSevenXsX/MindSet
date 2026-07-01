@@ -30,6 +30,7 @@
     redoStack: [],
     noteHistories: new Map(),
     restoringEditorHistory: false,
+    itemClipboard: null,
   };
 
   const icons = {
@@ -57,6 +58,7 @@
     collapse: '<path d="m8 9 4-4 4 4"/><path d="m16 15-4 4-4-4"/>',
     collapseIn: '<path d="m8 5 4 4 4-4"/><path d="m16 19-4-4-4 4"/>',
     trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 15h10l1-15"/><path d="M10 11v6"/><path d="M14 11v6"/>',
+    copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
     lock: '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
     unlock: '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 7.4-2.1"/>',
     bolt: '<path d="m13 2-8 12h7l-1 8 8-12h-7l1-8Z"/>',
@@ -1399,6 +1401,138 @@
     render();
   }
 
+  function topLevelItemIds(box, ids = []) {
+    const uniqueIds = [...new Set(ids)]
+      .filter((id) => id && id !== box.root.id && findItem(box, id));
+    const selected = new Set(uniqueIds);
+    return uniqueIds.filter((id) => {
+      let parent = findParent(box, id);
+      while (parent && parent.id !== box.root.id) {
+        if (selected.has(parent.id)) return false;
+        parent = findParent(box, parent.id);
+      }
+      return true;
+    });
+  }
+
+  function cloneItemTree(item, options = {}) {
+    const timestamp = options.timestamp || now();
+    const clone = {
+      id: uid(item.type),
+      type: item.type,
+      title: options.prefixTitle ? `Copie - ${item.title}` : item.title,
+      iconKind: item.iconKind || "none",
+      emoji: item.emoji || "",
+      createdAt: timestamp,
+      modifiedAt: timestamp,
+    };
+    if (item.type === "folder") {
+      clone.children = (item.children || []).map((child) => cloneItemTree(child, { timestamp }));
+    } else {
+      clone.content = item.content || "<p><br></p>";
+    }
+    return clone;
+  }
+
+  function selectItemsAfterInsert(box, items, parent) {
+    const ids = items.map((item) => item.id);
+    box.selectedIds = ids;
+    box.activeItemId = ids[0] || box.root.id;
+    runtime.selectionAnchorId = ids[0] || null;
+    runtime.focusedItemId = ids[0] || null;
+    if (!Array.isArray(box.openTabIds)) box.openTabIds = [];
+    if (ids[0] && !box.openTabIds.includes(ids[0])) box.openTabIds.push(ids[0]);
+    if (parent?.id && !box.expandedIds.includes(parent.id)) box.expandedIds.push(parent.id);
+  }
+
+  function duplicateItems(box, idsToDuplicate = box.selectedIds || []) {
+    const ids = topLevelItemIds(box, idsToDuplicate);
+    if (!ids.length) return false;
+    rememberState("Duplication");
+    const timestamp = now();
+    const clones = [];
+    ids.forEach((id) => {
+      const item = findItem(box, id);
+      const parent = findParent(box, id);
+      if (!item || !parent?.children) return;
+      const clone = cloneItemTree(item, { prefixTitle: true, timestamp });
+      const index = parent.children.findIndex((child) => child.id === id);
+      parent.children.splice(index >= 0 ? index + 1 : parent.children.length, 0, clone);
+      parent.modifiedAt = timestamp;
+      clones.push(clone);
+    });
+    if (!clones.length) return false;
+    selectItemsAfterInsert(box, clones, findParent(box, clones[0].id));
+    runtime.contextMenu = null;
+    touchBox(box);
+    saveState();
+    render();
+    return true;
+  }
+
+  function copySelectedItems(box, mode = "copy") {
+    const ids = topLevelItemIds(box, box.selectedIds || []);
+    if (!ids.length) {
+      setToast("Selectionne un dossier ou une note.");
+      return false;
+    }
+    runtime.itemClipboard = {
+      mode: mode === "cut" ? "cut" : "copy",
+      boxId: box.id,
+      ids,
+    };
+    setToast(mode === "cut" ? "Selection coupee." : "Selection copiee.");
+    return true;
+  }
+
+  function pasteItemClipboard(box) {
+    const clipboard = runtime.itemClipboard;
+    if (!clipboard?.ids?.length) {
+      setToast("Rien a coller.");
+      return false;
+    }
+    const sourceBox = state.boxes.find((item) => item.id === clipboard.boxId);
+    const target = creationFolder(box);
+    if (!sourceBox || !target?.children) {
+      setToast("Impossible de coller ici.");
+      return false;
+    }
+
+    if (clipboard.mode === "cut") {
+      if (sourceBox.id !== box.id) {
+        setToast("Le deplacement entre boites n'est pas encore disponible.");
+        return false;
+      }
+      const moved = moveItemsToFolder(box, clipboard.ids, target.id);
+      if (moved) {
+        runtime.itemClipboard = null;
+      } else {
+        setToast("Impossible de deplacer ici.");
+      }
+      return moved;
+    }
+
+    const ids = topLevelItemIds(sourceBox, clipboard.ids);
+    const timestamp = now();
+    const clones = ids
+      .map((id) => findItem(sourceBox, id))
+      .filter(Boolean)
+      .map((item) => cloneItemTree(item, { prefixTitle: true, timestamp }));
+    if (!clones.length) {
+      setToast("Rien a coller.");
+      return false;
+    }
+
+    rememberState("Collage");
+    target.children.push(...clones);
+    target.modifiedAt = timestamp;
+    selectItemsAfterInsert(box, clones, target);
+    touchBox(box);
+    saveState();
+    render();
+    return true;
+  }
+
   function isDescendant(box, parentId, childId) {
     const parent = findItem(box, parentId);
     let found = false;
@@ -2238,6 +2372,10 @@
         <button class="context-row" data-action="rename-item" data-rename-target="${item.id}">
           ${icon("edit")}
           <span>Renommer</span>
+        </button>
+        <button class="context-row" data-action="duplicate-context-item" data-duplicate-target="${item.id}">
+          ${icon("copy")}
+          <span>Dupliquer</span>
         </button>
         <button class="context-row danger" data-action="delete-context-item" data-delete-target="${item.id}">
           ${icon("trash")}
@@ -3288,6 +3426,12 @@
       runtime.contextMenu = null;
       runtime.modal = { type: "rename-item", itemId: event.currentTarget.dataset.renameTarget, returnToGraph };
       render();
+    }
+    if (action === "duplicate-context-item") {
+      const id = event.currentTarget.dataset.duplicateTarget;
+      runtime.contextMenu = null;
+      duplicateItems(box, [id]);
+      return;
     }
     if (action === "delete-context-item") {
       const id = event.currentTarget.dataset.deleteTarget;
@@ -5500,6 +5644,18 @@
     }
     if ((event.ctrlKey || event.metaKey) && !editingTarget && !modalBlocksGlobalShortcuts()) {
       const key = event.key.toLowerCase();
+      if (key === "c" || key === "x" || key === "v") {
+        const box = activeBox();
+        if (box) {
+          event.preventDefault();
+          if (key === "v") {
+            pasteItemClipboard(box);
+          } else {
+            copySelectedItems(box, key === "x" ? "cut" : "copy");
+          }
+        }
+        return;
+      }
       if (key === "z" || key === "y") {
         event.preventDefault();
         const restored = key === "y" || event.shiftKey ? redoStateChange() : undoStateChange();
