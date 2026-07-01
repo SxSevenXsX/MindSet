@@ -443,15 +443,27 @@
     return {
       words: text ? text.split(" ").length : 0,
       chars: text.length,
+      pages: 1,
     };
+  }
+
+  function visibleEditorPageCount() {
+    const page = app.querySelector(".editor-page.is-page-mode");
+    if (!page) return 1;
+    return Math.max(page.querySelectorAll(".page-sheet").length, 1);
   }
 
   function updateEditorStats(note) {
     const stats = noteStats(note);
     const words = app.querySelector("[data-word-count]");
     const chars = app.querySelector("[data-char-count]");
+    const pages = app.querySelector("[data-page-count]");
     if (words) words.textContent = `${stats.words} mots`;
-    if (chars) chars.textContent = `${stats.chars} caractères`;
+    if (pages) {
+      const pageCount = visibleEditorPageCount();
+      pages.textContent = `${pageCount} page${pageCount > 1 ? "s" : ""}`;
+    }
+    if (chars) chars.textContent = `${stats.chars} caracteres`;
   }
 
   function isHexColor(value) {
@@ -1962,6 +1974,7 @@
     return `
       <article class="editor-shell">
         <div class="editor-toolbar" aria-label="Barre de mise en forme">
+          <div class="toolbar-row toolbar-main-row">
           <div class="toolbar-group">
             <select class="toolbar-select" data-format-block title="Style de titre">
               <option value="p">Normal</option>
@@ -2005,6 +2018,13 @@
             <button class="format-button" data-list-type="triangle" title="Triangle">△</button>
             <button class="format-button" data-list-type="square" title="Carré">□</button>
           </div>
+          <div class="toolbar-stats" aria-live="polite">
+            <span data-char-count>${stats.chars} caracteres</span>
+            <span data-word-count>${stats.words} mots</span>
+            <span data-page-count>1 page</span>
+          </div>
+          </div>
+          <div class="toolbar-row toolbar-secondary-row">
           <div class="toolbar-group">
             <button class="format-button ${pageMode ? "is-active" : ""}" data-action="toggle-editor-view" data-tooltip="${pageMode ? "Mode ecriture simple" : "Mode feuilles"}" aria-label="${pageMode ? "Mode ecriture simple" : "Mode feuilles"}">${icon("bookOpen")}</button>
             ${pageMode ? `<button class="format-button" data-action="cycle-page-margins" data-page-layout-button data-tooltip="${escapeHtml(marginLabel)} - clic droit : personnaliser" aria-label="${escapeHtml(marginLabel)}">${icon("ruler")}</button>` : ""}
@@ -2018,6 +2038,7 @@
             <button class="format-button" data-editor-action="toggle-heading-collapse" title="Replier / deplier le titre">${icon("collapse")}</button>
             <button class="format-button ${bookmarked ? "is-active" : ""}" data-action="toggle-bookmark" data-tooltip="${bookmarked ? "Retirer des signets" : "Ajouter aux signets"}" aria-label="${bookmarked ? "Retirer des signets" : "Ajouter aux signets"}">${icon(bookmarked ? "bookmarkFilled" : "bookmark")}</button>
           </div>
+        </div>
         </div>
         <section class="editor-page ${pageMode ? "is-page-mode" : ""} ${splitMode ? "is-split-mode" : ""}" style="${pageStyle}">
           <input class="title-input" data-note-title value="${escapeHtml(note.title)}" aria-label="Titre de la note" />
@@ -3597,6 +3618,48 @@
     return sheet;
   }
 
+  function renumberPageSheets(editor) {
+    const sheets = [...(editor?.querySelectorAll?.(".page-sheet") || [])];
+    sheets.forEach((sheet, index) => configurePageSheet(sheet, index, { editable: isIndependentPageMode() }));
+    return sheets;
+  }
+
+  function createPageSheetAfter(editor, sheet) {
+    const nextSheet = document.createElement("div");
+    nextSheet.className = "page-sheet";
+    if (sheet?.parentElement === editor) {
+      sheet.after(nextSheet);
+    } else {
+      editor.appendChild(nextSheet);
+    }
+    renumberPageSheets(editor);
+    return nextSheet;
+  }
+
+  const paginationBlockSelector = "p, div, blockquote, h1, h2, h3, ul, ol";
+
+  function appendEditableNodeAsBlocks(node, blocks) {
+    if (node.nodeType === Node.TEXT_NODE && !node.textContent.trim()) return;
+    if (node.nodeType === Node.TEXT_NODE) {
+      const paragraph = document.createElement("p");
+      paragraph.textContent = node.textContent;
+      blocks.push(paragraph);
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    if (node.classList.contains("page-sheet")) {
+      [...node.childNodes].forEach((child) => appendEditableNodeAsBlocks(child, blocks));
+      return;
+    }
+    const directText = [...node.childNodes].some((child) => child.nodeType === Node.TEXT_NODE && child.textContent.trim());
+    const nestedBlocks = [...node.children].filter((child) => child.matches?.(paginationBlockSelector));
+    if (node.tagName === "DIV" && nestedBlocks.length && !directText) {
+      [...node.childNodes].forEach((child) => appendEditableNodeAsBlocks(child, blocks));
+      return;
+    }
+    blocks.push(node);
+  }
+
   function editableBlocksFromHtml(html) {
     const source = document.createElement("div");
     source.innerHTML = html || "<p><br></p>";
@@ -3605,16 +3668,7 @@
       ? pageSheets.flatMap((sheet) => [...sheet.childNodes])
       : [...source.childNodes];
     const blocks = [];
-    sourceNodes.forEach((node) => {
-      if (node.nodeType === Node.TEXT_NODE && !node.textContent.trim()) return;
-      if (node.nodeType === Node.TEXT_NODE) {
-        const paragraph = document.createElement("p");
-        paragraph.textContent = node.textContent;
-        blocks.push(paragraph);
-        return;
-      }
-      blocks.push(node);
-    });
+    sourceNodes.forEach((node) => appendEditableNodeAsBlocks(node, blocks));
     if (!blocks.length) {
       const paragraph = document.createElement("p");
       paragraph.appendChild(document.createElement("br"));
@@ -3635,7 +3689,16 @@
     source.innerHTML = html || "";
     const blocks = source.querySelectorAll("p, div, blockquote, li, h1, h2, h3").length;
     const breaks = source.querySelectorAll("br").length;
-    return blocks > 1 || breaks > 1;
+    return blocks > 0 || breaks > 1;
+  }
+
+  function sheetHasUserStructure(sheet) {
+    if (!sheet) return false;
+    const clone = sheet.cloneNode(true);
+    removeEditorSelectionMarkers(clone);
+    clone.querySelectorAll("[data-pagination-probe]").forEach((probe) => probe.remove());
+    const html = clone.classList?.contains("page-sheet") ? clone.innerHTML : clone.outerHTML;
+    return isMeaningfulEditorHtml(html) || hasIntentionalBlankStructure(html);
   }
 
   function isEditorPageBlank(editor) {
@@ -3658,9 +3721,8 @@
   function needsPagedLayoutRefresh(editor) {
     const sheets = [...(editor?.querySelectorAll?.(".page-sheet") || [])];
     if (!sheets.length) return true;
-    const activeSheet = currentPageSheet(editor);
     return sheets.some((sheet) => sheet.scrollHeight > sheet.clientHeight + 2)
-      || sheets.slice(1).some((sheet) => sheet !== activeSheet && isPageSheetBlank(sheet) && !hasIntentionalBlankStructure(sheet.innerHTML));
+      || sheets.slice(1).some((sheet) => !sheetHasUserStructure(sheet));
   }
 
   function sheetOverflows(sheet) {
@@ -3773,21 +3835,18 @@
 
   function mergePageEditorHtml(options = {}) {
     const keepMarkers = !!options.keepMarkers;
-    const keepActiveBlankSheet = !!options.keepActiveBlankSheet;
     const keepSheets = !!options.keepSheets;
     const editor = app.querySelector(".editor-page.is-page-mode [data-note-editor]");
     if (!editor) return "<p><br></p>";
-    const activeSheet = keepActiveBlankSheet ? currentPageSheet(editor) : null;
     const parts = [...editor.childNodes].map((node) => {
       if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains("page-sheet")) {
-        const containsMarker = !!node.querySelector("[data-editor-selection-marker]");
         const source = cleanNodeForMerge(node, keepMarkers);
+        const structureSource = cleanNodeForMerge(node, false);
+        const structureHtml = structureSource.innerHTML;
+        const hasStructure = isMeaningfulEditorHtml(structureHtml) || hasIntentionalBlankStructure(structureHtml);
         return {
           html: keepSheets ? source.outerHTML : source.innerHTML,
-          meaningful: isMeaningfulEditorHtml(source.innerHTML)
-            || hasIntentionalBlankStructure(source.innerHTML)
-            || containsMarker
-            || node === activeSheet,
+          meaningful: hasStructure,
         };
       }
       if (node.nodeType === Node.TEXT_NODE) {
@@ -4061,7 +4120,7 @@
 
   function keepOverflowOnNextSheets(sheet, sheets, editor) {
     let currentSheet = sheet;
-    const maxPages = 600;
+    const maxPages = 2000;
     let guard = 0;
     while (sheetOverflows(currentSheet) && guard < maxPages) {
       guard += 1;
@@ -4309,7 +4368,7 @@
     const restored = markers ? restoreEditorSelectionMarkers(editor, markers) : false;
     if (!restored) restoreEditorSelectionOffsets(editor, selectionOffsets);
     removeEditorSelectionMarkers(editor);
-    note.content = mergePageEditorHtml({ keepActiveBlankSheet: isIndependentPageFlow() });
+    note.content = mergePageEditorHtml({ keepActiveBlankSheet: true });
     const target = currentSelectionScrollTarget(editor)
       || markerTarget
       || pageSheetForTextOffset(editor, selectionOffsets?.end ?? selectionOffsets?.start)
@@ -4355,6 +4414,7 @@
 
     if (normalizeEditorViewMode(state.settings?.editorViewMode) === "pages") {
       paginateNoteIntoPages(note);
+      updateEditorStats(note);
     }
 
     const editors = [...app.querySelectorAll("[data-note-editor]")];
@@ -4458,6 +4518,7 @@
       boundEditor.addEventListener("keydown", (event) => handleEditorAutomation(event, boundEditor, note, box, repaginatePagesInPlace));
       boundEditor.addEventListener("input", () => {
         if (enforceIndependentPageLimit(boundEditor, note, box)) return;
+        if (removeCurrentEmptyContinuousPageIfNeeded(boundEditor, note, box)) return;
         note.content = editorSnapshotContent(boundEditor);
         note.modifiedAt = now();
         touchBox(box);
@@ -4890,6 +4951,48 @@
     return paragraph;
   }
 
+  function directSheetChildForBlock(block, sheet) {
+    let node = block;
+    while (node?.parentElement && node.parentElement !== sheet) {
+      node = node.parentElement;
+    }
+    return node?.parentElement === sheet ? node : null;
+  }
+
+  function isCaretAtEndOfBlock(block) {
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount || !selection.isCollapsed || !block) return false;
+    const range = selection.getRangeAt(0);
+    if (!block.contains(range.endContainer)) return false;
+    const after = range.cloneRange();
+    after.selectNodeContents(block);
+    after.setStart(range.endContainer, range.endOffset);
+    const fragment = after.cloneContents();
+    if (fragment.querySelector?.("img, video, audio, iframe, table, hr")) return false;
+    return !after.toString().replace(/\u00a0/g, " ").trim();
+  }
+
+  function isLastEditableBlockInSheet(block, sheet) {
+    const directChild = directSheetChildForBlock(block, sheet);
+    if (!directChild) return false;
+    const children = [...sheet.children].filter((child) => {
+      if (child.dataset.paginationProbe === "true") return false;
+      return sheetHasUserStructure(child);
+    });
+    return children[children.length - 1] === directChild;
+  }
+
+  function canInsertImmediatePageBreak(editor, block) {
+    if (normalizeEditorViewMode(state.settings?.editorViewMode) !== "pages" || !isContinuousPageFlow()) return false;
+    const sheet = currentPageSheet(editor);
+    return !!sheet
+      && !!block
+      && block !== editor
+      && sheet.contains(block)
+      && isCaretAtEndOfBlock(block)
+      && isLastEditableBlockInSheet(block, sheet);
+  }
+
   function insertBlankParagraphInCurrentSheet(editor, note, box) {
     const sheet = currentPageSheet(editor) || editor.querySelector?.(".page-sheet");
     if (!sheet) return false;
@@ -4905,6 +5008,59 @@
     commitEditorHistoryChange(note, note.content);
     saveState();
     syncPagedEditorMetrics(editor);
+    return true;
+  }
+
+  function insertImmediatePageBreak(editor, note, box, block) {
+    if (!canInsertImmediatePageBreak(editor, block)) return false;
+    const currentSheet = currentPageSheet(editor);
+    if (!currentSheet) return false;
+    rememberEditorSnapshot(note, editor);
+    const snapshot = capturePagedViewport(editor);
+    const nextSheet = createPageSheetAfter(editor, currentSheet);
+    configurePageSheet(nextSheet, Number(nextSheet.dataset.pageSheet || 0), { editable: false });
+    const paragraph = blankParagraph();
+    nextSheet.appendChild(paragraph);
+    runtime.activePageIndex = Number(nextSheet.dataset.pageSheet || 0);
+    editor.focus({ preventScroll: true });
+    placeCaretInside(paragraph);
+    note.content = editorSnapshotContent(editor);
+    note.modifiedAt = now();
+    touchBox(box);
+    updateEditorStats(note);
+    saveEditorSelection(editor);
+    updateFormatBlockSelect(editor);
+    commitEditorHistoryChange(note, note.content);
+    saveState();
+    syncPagedEditorMetrics(editor);
+    requestAnimationFrame(() => restorePagedViewport(snapshot, paragraph, "target"));
+    return true;
+  }
+
+  function removeCurrentEmptyContinuousPageIfNeeded(editor, note, box) {
+    if (normalizeEditorViewMode(state.settings?.editorViewMode) !== "pages" || !isContinuousPageFlow()) return false;
+    const sheet = currentPageSheet(editor);
+    const sheets = [...(editor?.querySelectorAll?.(".page-sheet") || [])];
+    const index = sheets.indexOf(sheet);
+    if (!sheet || index <= 0 || sheetHasUserStructure(sheet)) return false;
+    const snapshot = capturePagedViewport(editor);
+    const previousSheet = sheets[index - 1];
+    sheet.remove();
+    renumberPageSheets(editor);
+    const target = previousSheet.lastElementChild || previousSheet.appendChild(blankParagraph());
+    runtime.activePageIndex = Number(previousSheet.dataset.pageSheet || 0);
+    editor.focus({ preventScroll: true });
+    placeCaretAtEnd(target);
+    note.content = editorSnapshotContent(editor);
+    note.modifiedAt = now();
+    touchBox(box);
+    updateEditorStats(note);
+    saveEditorSelection(editor);
+    updateFormatBlockSelect(editor);
+    commitEditorHistoryChange(note, note.content);
+    saveState();
+    syncPagedEditorMetrics(editor);
+    requestAnimationFrame(() => restorePagedViewport(snapshot, target, "target"));
     return true;
   }
 
@@ -4927,6 +5083,8 @@
   }
 
   function insertPredictivePageBreak(editor, note, box, repaginateNow) {
+    const block = currentEditableBlock(editor);
+    if (insertImmediatePageBreak(editor, note, box, block)) return;
     rememberEditorSnapshot(note, editor);
     editor.focus({ preventScroll: true });
     document.execCommand("insertParagraph", false, null);
