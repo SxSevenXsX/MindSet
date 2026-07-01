@@ -2925,8 +2925,9 @@
   function needsPagedLayoutRefresh(editor) {
     const sheets = [...(editor?.querySelectorAll?.(".page-sheet") || [])];
     if (!sheets.length) return true;
+    const activeSheet = currentPageSheet(editor);
     return sheets.some((sheet) => sheet.scrollHeight > sheet.clientHeight + 2)
-      || sheets.slice(1).some((sheet) => isPageSheetBlank(sheet));
+      || sheets.slice(1).some((sheet) => sheet !== activeSheet && isPageSheetBlank(sheet));
   }
 
   function sheetOverflows(sheet) {
@@ -2947,12 +2948,18 @@
 
   function mergePageEditorHtml(options = {}) {
     const keepMarkers = !!options.keepMarkers;
+    const keepActiveBlankSheet = !!options.keepActiveBlankSheet;
     const editor = app.querySelector(".editor-page.is-page-mode [data-note-editor]");
     if (!editor) return "<p><br></p>";
+    const activeSheet = keepActiveBlankSheet ? currentPageSheet(editor) : null;
     const parts = [...editor.childNodes].map((node) => {
       if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains("page-sheet")) {
+        const containsMarker = !!node.querySelector("[data-editor-selection-marker]");
         const source = cleanNodeForMerge(node, keepMarkers);
-        return { html: source.innerHTML, meaningful: isMeaningfulEditorHtml(source.innerHTML) };
+        return {
+          html: source.innerHTML,
+          meaningful: isMeaningfulEditorHtml(source.innerHTML) || containsMarker || node === activeSheet,
+        };
       }
       if (node.nodeType === Node.TEXT_NODE) {
         return { html: escapeHtml(node.textContent), meaningful: !!node.textContent.replace(/\u00a0/g, " ").trim() };
@@ -3139,6 +3146,14 @@
     return sheets[sheets.length - 1];
   }
 
+  function currentSelectionScrollTarget(editor) {
+    const selection = window.getSelection();
+    let node = selection?.focusNode || selection?.anchorNode || null;
+    if (!node || !editor?.contains?.(node)) return currentPageSheet(editor);
+    if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+    return node?.closest?.("p, h1, h2, h3, li, blockquote, div, .page-sheet") || currentPageSheet(editor);
+  }
+
   function splittableTextBlock(block) {
     if (!block || block.nodeType !== Node.ELEMENT_NODE) return false;
     if (!["P", "DIV", "BLOCKQUOTE", "LI"].includes(block.tagName)) return false;
@@ -3244,22 +3259,41 @@
     };
   }
 
-  function scrollContainerToPage(container, target) {
-    const sheet = target?.closest?.(".page-sheet");
-    if (!container || !sheet) return false;
+  function scrollContainerToTarget(container, target) {
+    const targetElement = target?.nodeType === Node.ELEMENT_NODE ? target : target?.parentElement;
+    const sheet = targetElement?.closest?.(".page-sheet");
+    const element = targetElement && sheet && targetElement !== sheet ? targetElement : sheet;
+    if (!container || !element) return false;
     const canScrollY = container.scrollHeight > container.clientHeight + 1;
     const canScrollX = container.scrollWidth > container.clientWidth + 1;
     if (!canScrollY && !canScrollX) return false;
 
     const containerRect = container.getBoundingClientRect();
-    const sheetRect = sheet.getBoundingClientRect();
+    const targetRect = element.getBoundingClientRect();
+    let moved = false;
     if (canScrollY) {
-      container.scrollTop = Math.max(container.scrollTop + sheetRect.top - containerRect.top - 24, 0);
+      const topGap = targetRect.top - containerRect.top;
+      const bottomGap = targetRect.bottom - containerRect.bottom;
+      if (topGap < 72) {
+        container.scrollTop = Math.max(container.scrollTop + topGap - 92, 0);
+        moved = true;
+      } else if (bottomGap > -96) {
+        container.scrollTop = Math.max(container.scrollTop + bottomGap + 120, 0);
+        moved = true;
+      }
     }
     if (canScrollX) {
-      container.scrollLeft = Math.max(container.scrollLeft + sheetRect.left - containerRect.left - 24, 0);
+      const leftGap = targetRect.left - containerRect.left;
+      const rightGap = targetRect.right - containerRect.right;
+      if (leftGap < 28) {
+        container.scrollLeft = Math.max(container.scrollLeft + leftGap - 36, 0);
+        moved = true;
+      } else if (rightGap > -28) {
+        container.scrollLeft = Math.max(container.scrollLeft + rightGap + 36, 0);
+        moved = true;
+      }
     }
-    return true;
+    return moved;
   }
 
   function restorePagedViewport(snapshot, target, mode = "preserve") {
@@ -3267,8 +3301,8 @@
     const contentArea = app.querySelector(".content-area");
     const documentScroller = document.scrollingElement || document.documentElement;
     if (mode === "target" && target) {
-      const movedContent = scrollContainerToPage(contentArea, target);
-      const movedViewport = scrollContainerToPage(viewport, target);
+      const movedContent = scrollContainerToTarget(contentArea, target);
+      const movedViewport = scrollContainerToTarget(viewport, target);
       if (!movedContent && !movedViewport) {
         target.closest(".page-sheet")?.scrollIntoView({ block: "nearest", inline: "nearest" });
       }
@@ -3374,8 +3408,13 @@
     const restored = markers ? restoreEditorSelectionMarkers(editor, markers) : false;
     if (!restored) restoreEditorSelectionOffsets(editor, selectionOffsets);
     removeEditorSelectionMarkers(editor);
-    note.content = mergePageEditorHtml();
-    const target = markerTarget || pageSheetForTextOffset(editor, selectionOffsets?.end ?? selectionOffsets?.start) || currentPageSheet(editor) || editor.querySelector(".page-sheet") || editor;
+    note.content = mergePageEditorHtml({ keepActiveBlankSheet: true });
+    const target = currentSelectionScrollTarget(editor)
+      || markerTarget
+      || pageSheetForTextOffset(editor, selectionOffsets?.end ?? selectionOffsets?.start)
+      || currentPageSheet(editor)
+      || editor.querySelector(".page-sheet")
+      || editor;
     requestAnimationFrame(() => restorePagedViewport(snapshot, target, scrollMode));
   }
 
@@ -3439,8 +3478,13 @@
       const restored = markers ? restoreEditorSelectionMarkers(targetEditor, markers) : false;
       if (!restored) restoreEditorSelectionOffsets(targetEditor, selectionOffsets);
       removeEditorSelectionMarkers(targetEditor);
-      note.content = mergePageEditorHtml();
-      const targetSheet = markerTarget || pageSheetForTextOffset(targetEditor, selectionOffsets?.end ?? selectionOffsets?.start) || currentPageSheet(targetEditor) || targetEditor?.querySelector?.(".page-sheet") || targetEditor;
+      note.content = mergePageEditorHtml({ keepActiveBlankSheet: true });
+      const targetSheet = currentSelectionScrollTarget(targetEditor)
+        || markerTarget
+        || pageSheetForTextOffset(targetEditor, selectionOffsets?.end ?? selectionOffsets?.start)
+        || currentPageSheet(targetEditor)
+        || targetEditor?.querySelector?.(".page-sheet")
+        || targetEditor;
       if (targetEditor && options.focus !== false) {
         targetEditor.focus({ preventScroll: true });
         saveEditorSelection(targetEditor);
@@ -4000,7 +4044,7 @@
 
   function editorSnapshotContent(editor) {
     return normalizeEditorViewMode(state.settings?.editorViewMode) === "pages"
-      ? mergePageEditorHtml()
+      ? mergePageEditorHtml({ keepActiveBlankSheet: true })
       : (editor?.innerHTML || "<p><br></p>");
   }
 
