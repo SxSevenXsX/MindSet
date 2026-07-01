@@ -75,6 +75,8 @@
     bookOpen: '<path d="M12 7v14"/><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v18H6.5A2.5 2.5 0 0 1 4 18.5v-13Z"/><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H12v18h5.5A2.5 2.5 0 0 0 20 18.5v-13Z"/>',
     splitColumns: '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M12 5v14"/><path d="M8 9h1"/><path d="M8 13h1"/><path d="M15 9h1"/><path d="M15 13h1"/>',
     ruler: '<path d="M4 18 18 4l2 2L6 20H4v-2Z"/><path d="m14 8 2 2"/><path d="m11 11 2 2"/><path d="m8 14 2 2"/>',
+    linkedPages: '<path d="M7 7h4v10H7a3 3 0 0 1-3-3v-4a3 3 0 0 1 3-3Z"/><path d="M13 7h4a3 3 0 0 1 3 3v4a3 3 0 0 1-3 3h-4V7Z"/><path d="M10 12h4"/>',
+    splitPages: '<path d="M7 7h4v10H7a3 3 0 0 1-3-3v-4a3 3 0 0 1 3-3Z"/><path d="M13 7h4a3 3 0 0 1 3 3v4a3 3 0 0 1-3 3h-4V7Z"/><path d="M12 5v14"/>',
   };
 
   const graphDirections = [
@@ -120,7 +122,13 @@
     wide: { label: "Marges larges", margins: { top: 2.7, right: 2.7, bottom: 2.7, left: 2.7 } },
   };
 
-  const pageMarginOrder = ["compact", "normal", "wide"];
+  const pageCustomMarginDefaults = {
+    custom1: { label: "Personnalise 1", margins: { top: 1.8, right: 1.8, bottom: 1.8, left: 1.8 } },
+    custom2: { label: "Personnalise 2", margins: { top: 2.4, right: 2.4, bottom: 2.4, left: 2.4 } },
+  };
+
+  const pageCustomMarginIds = ["custom1", "custom2"];
+  const pageMarginOrder = ["compact", "normal", "wide", ...pageCustomMarginIds];
 
   const baseColorPresets = [
     { label: "Rouge", value: "#d94b4b" },
@@ -144,6 +152,14 @@
     return ["pages", "split"].includes(value) ? value : "flow";
   }
 
+  function normalizePageFlowMode(value) {
+    return value === "independent" ? "independent" : "continuous";
+  }
+
+  function isContinuousPageFlow() {
+    return normalizePageFlowMode(state.settings?.pageFlowMode) === "continuous";
+  }
+
   function clampPageZoom(value) {
     const number = Number(value);
     return Math.min(Math.max(Number.isFinite(number) ? number : 1, 0.55), 1.25);
@@ -165,6 +181,41 @@
 
   function cm(value) {
     return `${roundCm(value).toFixed(1)} cm`;
+  }
+
+  function cleanMarginSet(margins = {}, fallback = pageMarginPresets.normal.margins) {
+    return {
+      top: Math.max(roundCm(margins.top ?? fallback.top), minPageMarginCm),
+      right: Math.max(roundCm(margins.right ?? fallback.right), minPageMarginCm),
+      bottom: Math.max(roundCm(margins.bottom ?? fallback.bottom), minPageMarginCm),
+      left: Math.max(roundCm(margins.left ?? fallback.left), minPageMarginCm),
+    };
+  }
+
+  function normalizePageCustomMarginPresets(value = {}) {
+    return pageCustomMarginIds.reduce((acc, id) => {
+      const preset = value?.[id] || {};
+      const fallback = pageCustomMarginDefaults[id];
+      acc[id] = {
+        label: fallback.label,
+        margins: cleanMarginSet(preset.margins, fallback.margins),
+      };
+      return acc;
+    }, {});
+  }
+
+  function pageMarginPreset(id, settings = null) {
+    if (pageMarginPresets[id]) return pageMarginPresets[id];
+    if (!pageCustomMarginIds.includes(id)) return null;
+    return normalizePageCustomMarginPresets(settings?.customPageMarginPresets)[id];
+  }
+
+  function pageMarginPresetMargins(id, settings = null) {
+    return pageMarginPreset(id, settings)?.margins || null;
+  }
+
+  function pageMarginPresetLabel(id, settings = null) {
+    return pageMarginPreset(id, settings)?.label || "Marges personnalisees";
   }
 
   function pageSizePreset(id) {
@@ -199,15 +250,16 @@
     return [a, b];
   }
 
-  function normalizePageSetup(value = {}, fallbackPreset = "normal") {
+  function normalizePageSetup(value = {}, fallbackPreset = "normal", settings = null) {
     value = value || {};
+    const fallbackMargins = pageMarginPresetMargins(fallbackPreset, settings) || pageMarginPresets.normal.margins;
     const presetId = pageSizePreset(value.sizeId)?.id || "a4";
     const setup = {
       sizeId: presetId,
       orientation: value.orientation === "landscape" ? "landscape" : "portrait",
       margins: {
         ...pageMarginPresets.normal.margins,
-        ...(pageMarginPresets[fallbackPreset]?.margins || {}),
+        ...fallbackMargins,
         ...(value.margins || {}),
       },
     };
@@ -218,17 +270,18 @@
     return setup;
   }
 
-  function marginPresetForSetup(setup) {
-    const normalized = normalizePageSetup(setup);
+  function marginPresetForSetup(setup, settings = null) {
+    const normalized = normalizePageSetup(setup, "normal", settings);
     const match = pageMarginOrder.find((id) => {
-      const preset = pageMarginPresets[id].margins;
+      const preset = pageMarginPresetMargins(id, settings);
+      if (!preset) return false;
       return ["top", "right", "bottom", "left"].every((side) => Math.abs(preset[side] - normalized.margins[side]) < 0.05);
     });
     return match || "custom";
   }
 
   function pageSetupStyle(settings = state.settings) {
-    const setup = normalizePageSetup(settings?.pageSetup, settings?.pageMarginPreset);
+    const setup = normalizePageSetup(settings?.pageSetup, settings?.pageMarginPreset, settings);
     const dimensions = pageSizeDimensions(setup);
     return [
       `--page-width:${dimensions.widthCm * cmToPx}px`,
@@ -258,14 +311,18 @@
 
   function pageMarginLabel(settings = state.settings) {
     const preset = normalizePageMarginPreset(settings?.pageMarginPreset);
-    if (pageMarginPresets[preset]) return pageMarginPresets[preset].label;
-    const margins = normalizePageSetup(settings?.pageSetup, settings?.pageMarginPreset).margins;
+    if (pageMarginPreset(preset, settings)) return pageMarginPresetLabel(preset, settings);
+    const margins = normalizePageSetup(settings?.pageSetup, settings?.pageMarginPreset, settings).margins;
     return `Marges ${cm(margins.top)} / ${cm(margins.right)} / ${cm(margins.bottom)} / ${cm(margins.left)}`;
   }
 
-  function updatePageSetup(nextSetup, preset = "custom") {
-    state.settings.pageSetup = normalizePageSetup(nextSetup, preset);
-    state.settings.pageMarginPreset = preset === "custom" ? marginPresetForSetup(state.settings.pageSetup) : preset;
+  function updatePageSetup(nextSetup, preset = "custom", options = {}) {
+    state.settings.customPageMarginPresets = normalizePageCustomMarginPresets(state.settings.customPageMarginPresets);
+    state.settings.pageSetup = normalizePageSetup(nextSetup, preset, state.settings);
+    if (pageCustomMarginIds.includes(preset) && options.rememberCustom !== false) {
+      state.settings.customPageMarginPresets[preset].margins = { ...state.settings.pageSetup.margins };
+    }
+    state.settings.pageMarginPreset = preset === "custom" ? marginPresetForSetup(state.settings.pageSetup, state.settings) : preset;
     saveState();
   }
 
@@ -415,6 +472,8 @@
   function normalizeStateShape(value) {
     const previousSettings = value.settings || {};
     const previousHeadings = previousSettings.headingPresets || {};
+    const previousCustomMargins = normalizePageCustomMarginPresets(previousSettings.customPageMarginPresets);
+    const previousMarginPreset = normalizePageMarginPreset(previousSettings.pageMarginPreset || "normal");
     const theme = previousSettings.theme === "dark" ? "dark" : "light";
     value.settings = {
       theme,
@@ -431,9 +490,11 @@
       graphDirection: normalizeGraphDirection(previousSettings.graphDirection),
       graphZoom: clampGraphZoom(previousSettings.graphZoom || 1),
       editorViewMode: normalizeEditorViewMode(previousSettings.editorViewMode),
+      pageFlowMode: normalizePageFlowMode(previousSettings.pageFlowMode),
       pageZoom: clampPageZoom(previousSettings.pageZoom || 1),
-      pageMarginPreset: normalizePageMarginPreset(previousSettings.pageMarginPreset || "normal"),
-      pageSetup: normalizePageSetup(previousSettings.pageSetup, normalizePageMarginPreset(previousSettings.pageMarginPreset || "normal")),
+      pageMarginPreset: previousMarginPreset,
+      customPageMarginPresets: previousCustomMargins,
+      pageSetup: normalizePageSetup(previousSettings.pageSetup, previousMarginPreset, { customPageMarginPresets: previousCustomMargins }),
       localFonts: normalizeLocalFonts(previousSettings.localFonts),
       headingPresets: {
         normal: { ...headingDefaults.normal, ...(previousHeadings.normal || {}) },
@@ -442,7 +503,7 @@
         h3: { ...headingDefaults.h3, ...(previousHeadings.h3 || {}) },
       },
     };
-    value.settings.pageMarginPreset = marginPresetForSetup(value.settings.pageSetup);
+    value.settings.pageMarginPreset = marginPresetForSetup(value.settings.pageSetup, value.settings);
     value.boxes.forEach((box) => {
       if (!Array.isArray(box.bookmarkedIds)) box.bookmarkedIds = [];
       if (!Array.isArray(box.openTabIds)) box.openTabIds = box.activeItemId ? [box.activeItemId] : [];
@@ -668,8 +729,10 @@
         graphDirection: "up",
         graphZoom: 1,
         editorViewMode: "flow",
+        pageFlowMode: "continuous",
         pageZoom: 1,
         pageMarginPreset: "normal",
+        customPageMarginPresets: normalizePageCustomMarginPresets(),
         pageSetup: normalizePageSetup({ sizeId: "a4", orientation: "portrait", margins: pageMarginPresets.normal.margins }, "normal"),
         localFonts: [],
       },
@@ -1371,6 +1434,10 @@
   }
 
   function render() {
+    const previousModalType = runtime.modal?.type;
+    const previousSettingsScroll = previousModalType === "settings"
+      ? app.querySelector(".settings-modal .modal-body")?.scrollTop || 0
+      : 0;
     applyAppearance();
     const box = activeBox();
     app.innerHTML = box ? renderApp(box) : renderLobby();
@@ -1378,6 +1445,12 @@
     bindGraphCanvas();
     bindTabMarquees();
     focusAutofocusTarget();
+    if (previousModalType === "settings" && runtime.modal?.type === "settings") {
+      requestAnimationFrame(() => {
+        const body = app.querySelector(".settings-modal .modal-body");
+        if (body) body.scrollTop = previousSettingsScroll;
+      });
+    }
   }
 
   function renderLobby() {
@@ -1794,6 +1867,8 @@
     const splitMode = viewMode === "split";
     const pageZoom = clampPageZoom(state.settings?.pageZoom || 1);
     const marginLabel = pageMarginLabel(state.settings);
+    const pageFlowMode = normalizePageFlowMode(state.settings?.pageFlowMode);
+    const pageFlowLabel = pageFlowMode === "continuous" ? "Pages continues" : "Pages independantes";
     const pageStyle = pageMode
       ? `--page-zoom:${pageZoom};${pageSetupStyle(state.settings)}`
       : "";
@@ -1847,6 +1922,7 @@
           <div class="toolbar-group">
             <button class="format-button ${pageMode ? "is-active" : ""}" data-action="toggle-editor-view" data-tooltip="${pageMode ? "Mode ecriture simple" : "Mode feuilles"}" aria-label="${pageMode ? "Mode ecriture simple" : "Mode feuilles"}">${icon("bookOpen")}</button>
             ${pageMode ? `<button class="format-button" data-action="cycle-page-margins" data-page-layout-button data-tooltip="${escapeHtml(marginLabel)} - clic droit : personnaliser" aria-label="${escapeHtml(marginLabel)}">${icon("ruler")}</button>` : ""}
+            ${pageMode ? `<button class="format-button ${pageFlowMode === "continuous" ? "is-active" : ""}" data-action="toggle-page-flow-mode" data-tooltip="${escapeHtml(pageFlowLabel)}" aria-label="${escapeHtml(pageFlowLabel)}">${icon(pageFlowMode === "continuous" ? "linkedPages" : "splitPages")}</button>` : ""}
             <button class="format-button ${splitMode ? "is-active" : ""}" data-action="toggle-editor-split-view" data-tooltip="${splitMode ? "Mode ecriture simple" : "Tableau coupe en 2"}" aria-label="${splitMode ? "Mode ecriture simple" : "Tableau coupe en 2"}">${icon("splitColumns")}</button>
             ${pageMode ? `
               <button class="format-button" data-action="page-zoom-out" data-tooltip="Dezoomer les feuilles" aria-label="Dezoomer les feuilles">${icon("zoomOut")}</button>
@@ -2201,9 +2277,9 @@
       const todoColors = ["#0f6b58", "#4ca66a", "#55a7e5", "#7c5cff", "#d94b4b", "#f08a24", "#ffffff"];
       const treeGuideColor = cleanColor(settings.treeGuideColor, defaultTreeGuideColor(settings.theme));
       const todoColor = cleanColor(settings.todoColor, settings.selectionColor || "#0f6b58");
-      const pageSetup = normalizePageSetup(settings.pageSetup, settings.pageMarginPreset);
+      const pageSetup = normalizePageSetup(settings.pageSetup, settings.pageMarginPreset, settings);
       const pageLimits = pageMarginLimits(pageSetup);
-      const activeMarginPreset = marginPresetForSetup(pageSetup);
+      const activeMarginPreset = marginPresetForSetup(pageSetup, settings);
       return `
         <div class="modal-backdrop">
           <div class="modal settings-modal">
@@ -2257,7 +2333,7 @@
                 </div>
                 <div class="page-size-summary">Feuille active : ${escapeHtml(pageSizePreset(pageSetup.sizeId).label)} ${pageSetup.orientation === "landscape" ? "paysage" : "portrait"} - ${pageSizeSummary(pageSetup)}</div>
                 <div class="margin-preset-row">
-                  ${pageMarginOrder.map((id) => `<button class="ghost-button tiny-button ${activeMarginPreset === id ? "is-active" : ""}" type="button" data-page-margin-preset="${id}">${escapeHtml(pageMarginPresets[id].label)}</button>`).join("")}
+                  ${pageMarginOrder.map((id) => `<button class="ghost-button tiny-button ${activeMarginPreset === id ? "is-active" : ""}" type="button" data-page-margin-preset="${id}">${escapeHtml(pageMarginPresetLabel(id, settings))}</button>`).join("")}
                 </div>
                 <div class="margin-input-grid">
                   ${[
@@ -2639,8 +2715,9 @@
     if (pageSize) {
       pageSize.addEventListener("change", () => {
         flushActiveEditorContent();
-        const setup = normalizePageSetup(state.settings.pageSetup, state.settings.pageMarginPreset);
-        updatePageSetup({ ...setup, sizeId: pageSize.value }, "custom");
+        const preset = normalizePageMarginPreset(state.settings.pageMarginPreset);
+        const setup = normalizePageSetup(state.settings.pageSetup, preset, state.settings);
+        updatePageSetup({ ...setup, sizeId: pageSize.value }, preset);
         render();
       });
     }
@@ -2649,8 +2726,9 @@
     if (pageOrientation) {
       pageOrientation.addEventListener("change", () => {
         flushActiveEditorContent();
-        const setup = normalizePageSetup(state.settings.pageSetup, state.settings.pageMarginPreset);
-        updatePageSetup({ ...setup, orientation: pageOrientation.value }, "custom");
+        const preset = normalizePageMarginPreset(state.settings.pageMarginPreset);
+        const setup = normalizePageSetup(state.settings.pageSetup, preset, state.settings);
+        updatePageSetup({ ...setup, orientation: pageOrientation.value }, preset);
         render();
       });
     }
@@ -2659,8 +2737,9 @@
       button.addEventListener("click", () => {
         flushActiveEditorContent();
         const preset = button.dataset.pageMarginPreset;
-        const setup = normalizePageSetup(state.settings.pageSetup, preset);
-        updatePageSetup({ ...setup, margins: pageMarginPresets[preset]?.margins || setup.margins }, preset);
+        const presetMargins = pageMarginPresetMargins(preset, state.settings);
+        const setup = normalizePageSetup(state.settings.pageSetup, preset, state.settings);
+        updatePageSetup({ ...setup, margins: presetMargins || setup.margins }, preset, { rememberCustom: false });
         render();
       });
     });
@@ -2668,12 +2747,14 @@
     app.querySelectorAll("[data-page-margin]").forEach((input) => {
       const update = (rerender = false) => {
         flushActiveEditorContent();
-        const setup = normalizePageSetup(state.settings.pageSetup, state.settings.pageMarginPreset);
+        const currentPreset = normalizePageMarginPreset(state.settings.pageMarginPreset);
+        const targetPreset = pageCustomMarginIds.includes(currentPreset) ? currentPreset : "custom";
+        const setup = normalizePageSetup(state.settings.pageSetup, currentPreset, state.settings);
         setup.margins = {
           ...setup.margins,
           [input.dataset.pageMargin]: Number(input.value),
         };
-        updatePageSetup(setup, "custom");
+        updatePageSetup(setup, targetPreset);
         if (rerender) {
           render();
         } else {
@@ -2769,7 +2850,8 @@
       });
     }
 
-    if (runtime.modal?.focus === "page-setup") {
+    if (runtime.modal?.focus === "page-setup" && !runtime.modal.focusApplied) {
+      runtime.modal.focusApplied = true;
       requestAnimationFrame(() => {
         app.querySelector("[data-page-setup-section]")?.scrollIntoView({ block: "start" });
       });
@@ -2909,13 +2991,51 @@
       }
     }
     if (action === "toggle-editor-view") {
-      flushActiveEditorContent();
+      if (normalizeEditorViewMode(state.settings.editorViewMode) === "pages") {
+        const editor = app.querySelector(".editor-page.is-page-mode [data-note-editor]");
+        const note = findItem(box, box.activeItemId);
+        if (editor && note?.type === "note") {
+          note.content = mergePageEditorHtml({ keepActiveBlankSheet: true });
+          note.modifiedAt = now();
+          touchBox(box);
+          saveState();
+        }
+      } else {
+        flushActiveEditorContent();
+      }
       state.settings.editorViewMode = state.settings.editorViewMode === "pages" ? "flow" : "pages";
       saveState();
       render();
     }
+    if (action === "toggle-page-flow-mode") {
+      const editor = app.querySelector(".editor-page.is-page-mode [data-note-editor]");
+      const note = findItem(box, box.activeItemId);
+      const nextMode = isContinuousPageFlow() ? "independent" : "continuous";
+      if (editor && note?.type === "note") {
+        note.content = mergePageEditorHtml({
+          keepActiveBlankSheet: true,
+          keepSheets: nextMode === "independent",
+        });
+        note.modifiedAt = now();
+        touchBox(box);
+      }
+      state.settings.pageFlowMode = nextMode;
+      saveState();
+      render();
+    }
     if (action === "toggle-editor-split-view") {
-      flushActiveEditorContent();
+      if (normalizeEditorViewMode(state.settings.editorViewMode) === "pages") {
+        const editor = app.querySelector(".editor-page.is-page-mode [data-note-editor]");
+        const note = findItem(box, box.activeItemId);
+        if (editor && note?.type === "note") {
+          note.content = mergePageEditorHtml({ keepActiveBlankSheet: true });
+          note.modifiedAt = now();
+          touchBox(box);
+          saveState();
+        }
+      } else {
+        flushActiveEditorContent();
+      }
       state.settings.editorViewMode = state.settings.editorViewMode === "split" ? "flow" : "split";
       saveState();
       render();
@@ -2935,8 +3055,8 @@
     if (action === "cycle-page-margins") {
       flushActiveEditorContent();
       const nextPreset = nextPageMarginPreset(state.settings.pageMarginPreset);
-      const setup = normalizePageSetup(state.settings.pageSetup, nextPreset);
-      updatePageSetup({ ...setup, margins: pageMarginPresets[nextPreset].margins }, nextPreset);
+      const setup = normalizePageSetup(state.settings.pageSetup, nextPreset, state.settings);
+      updatePageSetup({ ...setup, margins: pageMarginPresetMargins(nextPreset, state.settings) || setup.margins }, nextPreset, { rememberCustom: false });
       render();
     }
     if (action === "new-note") createNote(box);
@@ -3191,6 +3311,7 @@
   function mergePageEditorHtml(options = {}) {
     const keepMarkers = !!options.keepMarkers;
     const keepActiveBlankSheet = !!options.keepActiveBlankSheet;
+    const keepSheets = !!options.keepSheets;
     const editor = app.querySelector(".editor-page.is-page-mode [data-note-editor]");
     if (!editor) return "<p><br></p>";
     const activeSheet = keepActiveBlankSheet ? currentPageSheet(editor) : null;
@@ -3199,7 +3320,7 @@
         const containsMarker = !!node.querySelector("[data-editor-selection-marker]");
         const source = cleanNodeForMerge(node, keepMarkers);
         return {
-          html: source.innerHTML,
+          html: keepSheets ? source.outerHTML : source.innerHTML,
           meaningful: isMeaningfulEditorHtml(source.innerHTML) || containsMarker || node === activeSheet,
         };
       }
@@ -3246,7 +3367,7 @@
     while (node) {
       lastText = node;
       const nextConsumed = consumed + node.textContent.length;
-      if (targetOffset <= nextConsumed) {
+      if (targetOffset < nextConsumed) {
         return { node, offset: Math.max(targetOffset - consumed, 0) };
       }
       consumed = nextConsumed;
@@ -3382,7 +3503,7 @@
     let consumed = 0;
     for (const sheet of sheets) {
       const length = nodeTextLength(sheet);
-      if (target <= consumed + length) return sheet;
+      if (target < consumed + length) return sheet;
       consumed += length;
     }
     return sheets[sheets.length - 1];
@@ -3579,12 +3700,43 @@
     page.style.setProperty("--page-zoom", String(zoom));
   }
 
+  function renderIndependentPages(note, editor, page, selectionOffsets = null, restoreSelection = true) {
+    const source = document.createElement("div");
+    source.innerHTML = note.content || "<p><br></p>";
+    const existingSheets = [...source.children].filter((node) => node.classList?.contains("page-sheet"));
+    editor.innerHTML = "";
+    const sheets = existingSheets.length ? existingSheets : [];
+    if (!sheets.length) {
+      const sheet = createPageSheet(editor, 0);
+      editableBlocksFromHtml(note.content).forEach((block) => sheet.appendChild(block));
+    } else {
+      sheets.forEach((sourceSheet, index) => {
+        const sheet = sourceSheet.cloneNode(true);
+        sheet.classList.add("page-sheet");
+        sheet.dataset.pageSheet = String(index);
+        editor.appendChild(sheet);
+      });
+    }
+    if (!editor.querySelector(".page-sheet")) {
+      const sheet = createPageSheet(editor, 0);
+      const paragraph = document.createElement("p");
+      paragraph.appendChild(document.createElement("br"));
+      sheet.appendChild(paragraph);
+    }
+    updatePagedLayout(page);
+    if (restoreSelection !== false) restoreEditorSelectionOffsets(editor, selectionOffsets);
+    return [editor];
+  }
+
   function paginateNoteIntoPages(note, options = {}) {
     const page = app.querySelector(".editor-page.is-page-mode");
     const editor = page?.querySelector?.("[data-note-editor]");
     if (!page || !editor) return [];
 
     const selectionOffsets = options.selectionOffsets || getEditorSelectionOffsets(editor);
+    if (normalizePageFlowMode(state.settings?.pageFlowMode) === "independent") {
+      return renderIndependentPages(note, editor, page, selectionOffsets, options.restoreSelection);
+    }
     const blocks = editableBlocksFromHtml(note.content);
     editor.innerHTML = "";
     const sheets = [];
@@ -3634,6 +3786,11 @@
 
   function refreshPagedEditorIfNeeded(editor, note, scrollMode = "preserve", options = {}) {
     if (normalizeEditorViewMode(state.settings?.editorViewMode) !== "pages" || !editor || !note) {
+      syncPagedEditorMetrics(editor);
+      return;
+    }
+    if (normalizePageFlowMode(state.settings?.pageFlowMode) === "independent") {
+      note.content = mergePageEditorHtml({ keepActiveBlankSheet: true, keepSheets: true });
       syncPagedEditorMetrics(editor);
       return;
     }
@@ -3779,8 +3936,10 @@
         commitEditorHistoryChange(note, note.content);
         saveState();
         if (normalizeEditorViewMode(state.settings?.editorViewMode) === "pages") {
-          if (needsPagedLayoutRefresh(boundEditor)) {
-            repaginatePagesInPlace(boundEditor, { scroll: "target" });
+          if (isContinuousPageFlow()) {
+            schedulePageRepagination(boundEditor, { scroll: "target", delay: 60 });
+          } else if (needsPagedLayoutRefresh(boundEditor)) {
+            syncPagedEditorMetrics(boundEditor);
           } else {
             syncPagedEditorMetrics(boundEditor);
           }
@@ -3790,7 +3949,7 @@
       });
       boundEditor.addEventListener("blur", () => {
         if (normalizeEditorViewMode(state.settings?.editorViewMode) !== "pages") return;
-        note.content = mergePageEditorHtml();
+        note.content = mergePageEditorHtml({ keepSheets: !isContinuousPageFlow() });
         saveState();
       });
     }
@@ -4306,9 +4465,13 @@
   }
 
   function editorSnapshotContent(editor) {
-    return normalizeEditorViewMode(state.settings?.editorViewMode) === "pages"
-      ? mergePageEditorHtml({ keepActiveBlankSheet: true })
-      : (editor?.innerHTML || "<p><br></p>");
+    if (normalizeEditorViewMode(state.settings?.editorViewMode) !== "pages") {
+      return editor?.innerHTML || "<p><br></p>";
+    }
+    return mergePageEditorHtml({
+      keepActiveBlankSheet: true,
+      keepSheets: normalizePageFlowMode(state.settings?.pageFlowMode) === "independent",
+    });
   }
 
   function flushActiveEditorContent() {
