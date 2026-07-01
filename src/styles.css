@@ -1595,6 +1595,8 @@ body.is-marquee-selecting {
 .editor-page.is-page-mode .page-document {
   display: grid;
   grid-template-columns: repeat(var(--pages-per-row, 1), var(--page-width));
+  grid-auto-rows: var(--page-height);
+  align-items: start;
   gap: var(--page-row-gap) var(--page-gap);
   width: max-content;
   min-height: 0;
@@ -1608,12 +1610,15 @@ body.is-marquee-selecting {
 .page-sheet {
   width: var(--page-width);
   height: var(--page-height);
+  min-height: var(--page-height);
+  max-height: var(--page-height);
   padding: var(--page-margin-y) var(--page-margin-x);
   border: 1px solid var(--border);
   border-radius: 7px;
   background: var(--surface);
   box-shadow: 0 18px 42px rgba(35, 48, 43, 0.12);
   overflow: hidden;
+  contain: layout paint;
 }
 
 .page-sheet:focus-within {

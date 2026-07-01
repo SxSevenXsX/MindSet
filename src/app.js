@@ -2929,6 +2929,10 @@
       || sheets.slice(1).some((sheet) => isPageSheetBlank(sheet));
   }
 
+  function sheetOverflows(sheet) {
+    return !!sheet && sheet.scrollHeight > sheet.clientHeight + 2;
+  }
+
   function removeEditorSelectionMarkers(root) {
     root?.querySelectorAll?.("[data-editor-selection-marker]").forEach((marker) => marker.remove());
   }
@@ -3135,6 +3139,97 @@
     return sheets[sheets.length - 1];
   }
 
+  function splittableTextBlock(block) {
+    if (!block || block.nodeType !== Node.ELEMENT_NODE) return false;
+    if (!["P", "DIV", "BLOCKQUOTE", "LI"].includes(block.tagName)) return false;
+    if (block.querySelector("img, video, audio, iframe, table, ul, ol, hr")) return false;
+    return (block.textContent || "").length > 1;
+  }
+
+  function fragmentForTextRange(source, startOffset, endOffset) {
+    const start = textPointFromOffset(source, startOffset);
+    const end = textPointFromOffset(source, endOffset);
+    const range = document.createRange();
+    range.setStart(start.node, start.offset);
+    range.setEnd(end.node, end.offset);
+    return range.cloneContents();
+  }
+
+  function setBlockFragment(block, source, startOffset, endOffset) {
+    const fragment = fragmentForTextRange(source, startOffset, endOffset);
+    block.replaceChildren(fragment);
+    if (!block.childNodes.length) block.appendChild(document.createElement("br"));
+  }
+
+  function splitTextBlockToFit(block, sheet) {
+    if (!splittableTextBlock(block) || !sheetOverflows(sheet)) return null;
+    const source = block.cloneNode(true);
+    removeEditorSelectionMarkers(source);
+    removeEditorSelectionMarkers(block);
+    const textLength = (source.textContent || "").length;
+    if (textLength <= 1) return null;
+
+    let low = 1;
+    let high = textLength - 1;
+    let best = 0;
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      setBlockFragment(block, source, 0, mid);
+      if (sheetOverflows(sheet)) {
+        high = mid - 1;
+      } else {
+        best = mid;
+        low = mid + 1;
+      }
+    }
+
+    if (best <= 0) {
+      setBlockFragment(block, source, 0, textLength);
+      return null;
+    }
+
+    const remainder = block.cloneNode(false);
+    setBlockFragment(block, source, 0, best);
+    setBlockFragment(remainder, source, best, textLength);
+    return (remainder.textContent || "").length ? remainder : null;
+  }
+
+  function splitListBlockToFit(list, sheet) {
+    if (!list || list.nodeType !== Node.ELEMENT_NODE || !["UL", "OL"].includes(list.tagName) || !sheetOverflows(sheet)) return null;
+    const remainder = list.cloneNode(false);
+    while (sheetOverflows(sheet) && list.children.length > 1) {
+      remainder.insertBefore(list.lastElementChild, remainder.firstElementChild);
+    }
+    if (remainder.children.length) return remainder;
+
+    const onlyItem = list.firstElementChild;
+    const splitItem = splitTextBlockToFit(onlyItem, sheet);
+    if (!splitItem) return null;
+    remainder.appendChild(splitItem);
+    return remainder;
+  }
+
+  function splitBlockToFit(block, sheet) {
+    if (!block || block.nodeType !== Node.ELEMENT_NODE) return null;
+    if (["UL", "OL"].includes(block.tagName)) return splitListBlockToFit(block, sheet);
+    return splitTextBlockToFit(block, sheet);
+  }
+
+  function keepOverflowOnNextSheets(sheet, sheets, editor) {
+    let currentSheet = sheet;
+    let guard = 0;
+    while (sheetOverflows(currentSheet) && guard < 80) {
+      guard += 1;
+      const block = currentSheet.lastElementChild;
+      const remainder = splitBlockToFit(block, currentSheet);
+      if (!remainder) break;
+      currentSheet = createPageSheet(editor, sheets.length);
+      sheets.push(currentSheet);
+      currentSheet.appendChild(remainder);
+    }
+    return currentSheet;
+  }
+
   function capturePagedViewport(editor) {
     const viewport = editor?.closest?.("[data-page-viewport]") || app.querySelector("[data-page-viewport]");
     const contentArea = editor?.closest?.(".content-area") || app.querySelector(".content-area");
@@ -3222,11 +3317,27 @@
 
     blocks.forEach((block) => {
       sheet.appendChild(block);
-      if (sheet.scrollHeight <= sheet.clientHeight + 2 || sheet.childNodes.length <= 1) return;
+      if (!sheetOverflows(sheet)) return;
+
+      const remainder = splitBlockToFit(block, sheet);
+      if (remainder) {
+        sheet = createPageSheet(editor, sheets.length);
+        sheets.push(sheet);
+        sheet.appendChild(remainder);
+        sheet = keepOverflowOnNextSheets(sheet, sheets, editor);
+        return;
+      }
+
+      if (sheet.childNodes.length <= 1) {
+        sheet = keepOverflowOnNextSheets(sheet, sheets, editor);
+        return;
+      }
+
       sheet.removeChild(block);
       sheet = createPageSheet(editor, sheets.length);
       sheets.push(sheet);
       sheet.appendChild(block);
+      sheet = keepOverflowOnNextSheets(sheet, sheets, editor);
     });
 
     if (!sheets.some((item) => item.childNodes.length)) {
@@ -3381,14 +3492,14 @@
         updateFormatBlockSelect(boundEditor);
         commitEditorHistoryChange(note, note.content);
         saveState();
-        syncPagedEditorMetrics(boundEditor);
         if (normalizeEditorViewMode(state.settings?.editorViewMode) === "pages") {
           if (needsPagedLayoutRefresh(boundEditor)) {
-            schedulePageRepagination(boundEditor, {
-              scroll: "target",
-              delay: 80,
-            });
+            repaginatePagesInPlace(boundEditor, { scroll: "target" });
+          } else {
+            syncPagedEditorMetrics(boundEditor);
           }
+        } else {
+          syncPagedEditorMetrics(boundEditor);
         }
       });
       boundEditor.addEventListener("blur", () => {
