@@ -1587,17 +1587,28 @@ body.is-marquee-selecting {
 }
 
 .page-editor-scale {
-  display: grid;
-  grid-template-columns: repeat(var(--pages-per-row, 1), var(--page-width));
-  gap: var(--page-row-gap) var(--page-gap);
   width: max-content;
   margin: 0 auto;
   zoom: var(--page-zoom, 1);
 }
 
+.editor-page.is-page-mode .page-document {
+  display: grid;
+  grid-template-columns: repeat(var(--pages-per-row, 1), var(--page-width));
+  gap: var(--page-row-gap) var(--page-gap);
+  width: max-content;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+  box-shadow: none;
+}
+
 .page-sheet {
   width: var(--page-width);
   height: var(--page-height);
+  padding: var(--page-margin-y) var(--page-margin-x);
   border: 1px solid var(--border);
   border-radius: 7px;
   background: var(--surface);
@@ -1605,21 +1616,28 @@ body.is-marquee-selecting {
   overflow: hidden;
 }
 
-.editor-page.is-page-mode .note-editor {
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  margin: 0;
-  border: 0;
-  border-radius: 0;
-  padding: var(--page-margin-y) var(--page-margin-x);
-  overflow: hidden;
-  background: transparent;
-  box-shadow: none;
+.page-sheet:focus-within {
+  box-shadow:
+    0 0 0 1px var(--selection-border),
+    0 18px 42px rgba(35, 48, 43, 0.12);
+}
+
+.editor-page.is-page-mode .page-sheet > :first-child {
+  margin-top: 0;
+}
+
+.editor-page.is-page-mode .page-sheet > :last-child {
+  margin-bottom: 0;
 }
 
 :root[data-theme="dark"] .page-sheet {
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.32);
+}
+
+:root[data-theme="dark"] .page-sheet:focus-within {
+  box-shadow:
+    0 0 0 1px var(--selection-border),
+    0 18px 42px rgba(0, 0, 0, 0.32);
 }
 
 .editor-page.is-page-mode .editor-status {

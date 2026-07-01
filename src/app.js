@@ -21,6 +21,10 @@
     loadedFontIds: new Set(),
     pagePaginationTimer: 0,
     activePageIndex: 0,
+    undoStack: [],
+    redoStack: [],
+    noteHistories: new Map(),
+    restoringEditorHistory: false,
   };
 
   const icons = {
@@ -70,6 +74,7 @@
     zoomOut: '<circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/><path d="M8 11h6"/>',
     bookOpen: '<path d="M12 7v14"/><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v18H6.5A2.5 2.5 0 0 1 4 18.5v-13Z"/><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H12v18h5.5A2.5 2.5 0 0 0 20 18.5v-13Z"/>',
     splitColumns: '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M12 5v14"/><path d="M8 9h1"/><path d="M8 13h1"/><path d="M15 9h1"/><path d="M15 13h1"/>',
+    ruler: '<path d="M4 18 18 4l2 2L6 20H4v-2Z"/><path d="m14 8 2 2"/><path d="m11 11 2 2"/><path d="m8 14 2 2"/>',
   };
 
   const graphDirections = [
@@ -97,6 +102,14 @@
   const supportedFontExtensions = [".ttf", ".otf", ".woff", ".woff2"];
   const localFontLimit = 12;
 
+  const pageMarginPresets = {
+    compact: { label: "Marges compactes", x: 38, y: 42 },
+    normal: { label: "Marges normales", x: 56, y: 62 },
+    wide: { label: "Marges larges", x: 74, y: 84 },
+  };
+
+  const pageMarginOrder = ["compact", "normal", "wide"];
+
   const baseColorPresets = [
     { label: "Rouge", value: "#d94b4b" },
     { label: "Orange", value: "#f08a24" },
@@ -122,6 +135,16 @@
   function clampPageZoom(value) {
     const number = Number(value);
     return Math.min(Math.max(Number.isFinite(number) ? number : 1, 0.55), 1.25);
+  }
+
+  function normalizePageMarginPreset(value) {
+    return pageMarginOrder.includes(value) ? value : "normal";
+  }
+
+  function nextPageMarginPreset(value) {
+    const current = normalizePageMarginPreset(value);
+    const index = pageMarginOrder.indexOf(current);
+    return pageMarginOrder[(index + 1) % pageMarginOrder.length];
   }
 
   function normalizeLocalFontName(name) {
@@ -275,6 +298,7 @@
       graphZoom: clampGraphZoom(previousSettings.graphZoom || 1),
       editorViewMode: normalizeEditorViewMode(previousSettings.editorViewMode),
       pageZoom: clampPageZoom(previousSettings.pageZoom || 1),
+      pageMarginPreset: normalizePageMarginPreset(previousSettings.pageMarginPreset),
       localFonts: normalizeLocalFonts(previousSettings.localFonts),
       headingPresets: {
         normal: { ...headingDefaults.normal, ...(previousHeadings.normal || {}) },
@@ -390,6 +414,56 @@
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }
 
+  function stateSnapshot() {
+    return JSON.stringify(state);
+  }
+
+  function rememberState(label = "Action") {
+    runtime.undoStack.push({ label, snapshot: stateSnapshot() });
+    if (runtime.undoStack.length > 80) runtime.undoStack.shift();
+    runtime.redoStack = [];
+  }
+
+  function restoreStateSnapshot(snapshot) {
+    if (!snapshot) return false;
+    try {
+      const restored = normalizeStateShape(JSON.parse(snapshot));
+      Object.keys(state).forEach((key) => delete state[key]);
+      Object.assign(state, restored);
+      runtime.modal = null;
+      runtime.contextMenu = null;
+      runtime.paletteQuery = "";
+      runtime.boxMenuOpen = false;
+      runtime.editorRange = null;
+      saveState();
+      render();
+      return true;
+    } catch (error) {
+      console.warn("MindSet history restore failed", error);
+      return false;
+    }
+  }
+
+  function undoStateChange() {
+    const previous = runtime.undoStack.pop();
+    if (!previous) return false;
+    runtime.redoStack.push({ label: previous.label, snapshot: stateSnapshot() });
+    if (runtime.redoStack.length > 80) runtime.redoStack.shift();
+    const restored = restoreStateSnapshot(previous.snapshot);
+    if (restored) setToast("Action annulee.");
+    return restored;
+  }
+
+  function redoStateChange() {
+    const next = runtime.redoStack.pop();
+    if (!next) return false;
+    runtime.undoStack.push({ label: next.label, snapshot: stateSnapshot() });
+    if (runtime.undoStack.length > 80) runtime.undoStack.shift();
+    const restored = restoreStateSnapshot(next.snapshot);
+    if (restored) setToast("Action retablie.");
+    return restored;
+  }
+
   function editableTarget(element) {
     return element?.closest?.("input, textarea, select, [contenteditable='true']") || null;
   }
@@ -459,6 +533,7 @@
         graphZoom: 1,
         editorViewMode: "flow",
         pageZoom: 1,
+        pageMarginPreset: "normal",
         localFonts: [],
       },
       boxes: [
@@ -901,6 +976,7 @@
 
   function createNote(box, folder = creationFolder(box), quick = false) {
     const createdAt = now();
+    rememberState("Creation de note");
     const note = {
       id: uid("note"),
       type: "note",
@@ -928,6 +1004,7 @@
   function createFolder(box) {
     const folder = creationFolder(box);
     const createdAt = now();
+    rememberState("Creation de dossier");
     const previousActiveId = box.activeItemId || box.root.id;
     const previousSelectedIds = [...(box.selectedIds || [])];
     const child = {
@@ -952,6 +1029,7 @@
   function setItemIcon(box, id, kind, emoji = "") {
     const item = findItem(box, id);
     if (!item || item.id === box.root.id) return;
+    rememberState("Icone");
     item.iconKind = kind;
     item.emoji = kind === "emoji" ? emoji || emojiChoices[0] : "";
     item.modifiedAt = now();
@@ -996,6 +1074,7 @@
   function deleteSelected(box, idsToDelete = box.selectedIds || []) {
     const ids = new Set(idsToDelete.filter((id) => id !== box.root.id));
     if (!ids.size) return;
+    rememberState("Suppression");
     const affectedIds = new Set(ids);
     ids.forEach((id) => {
       const item = findItem(box, id);
@@ -1059,6 +1138,8 @@
     if (!target || target.type !== "folder") return;
     const ids = (box.selectedIds || []).filter((id) => id !== box.root.id && id !== targetId);
     const movableIds = ids.filter((id) => !isDescendant(box, id, targetId));
+    if (!movableIds.length) return;
+    rememberState("Deplacement");
     movableIds.forEach((id) => {
       const item = extractItem(box, id);
       if (item) target.children.push(item);
@@ -1078,6 +1159,7 @@
       .filter((id) => findItem(box, id) && !isDescendant(box, id, targetId));
     if (!uniqueIds.length) return false;
 
+    rememberState("Deplacement");
     const moved = [];
     uniqueIds.forEach((id) => {
       const item = extractItem(box, id);
@@ -1109,6 +1191,8 @@
     if (!draggedId || !targetId || draggedId === targetId) return;
     if (isDescendant(box, draggedId, targetId)) return;
 
+    if (!findItem(box, draggedId) || !findParent(box, targetId)) return;
+    rememberState("Reorganisation");
     const dragged = extractItem(box, draggedId);
     const targetParent = findParent(box, targetId);
     if (!dragged || !targetParent?.children) return;
@@ -1572,6 +1656,11 @@
     const pageMode = viewMode === "pages";
     const splitMode = viewMode === "split";
     const pageZoom = clampPageZoom(state.settings?.pageZoom || 1);
+    const pageMarginPreset = normalizePageMarginPreset(state.settings?.pageMarginPreset);
+    const pageMargins = pageMarginPresets[pageMarginPreset];
+    const pageStyle = pageMode
+      ? `--page-zoom:${pageZoom};--page-margin-x:${pageMargins.x}px;--page-margin-y:${pageMargins.y}px`
+      : "";
     const fonts = availableFontOptions();
     return `
       <article class="editor-shell">
@@ -1621,6 +1710,7 @@
           </div>
           <div class="toolbar-group">
             <button class="format-button ${pageMode ? "is-active" : ""}" data-action="toggle-editor-view" data-tooltip="${pageMode ? "Mode ecriture simple" : "Mode feuilles"}" aria-label="${pageMode ? "Mode ecriture simple" : "Mode feuilles"}">${icon("bookOpen")}</button>
+            ${pageMode ? `<button class="format-button" data-action="cycle-page-margins" data-tooltip="${escapeHtml(pageMargins.label)}" aria-label="${escapeHtml(pageMargins.label)}">${icon("ruler")}</button>` : ""}
             <button class="format-button ${splitMode ? "is-active" : ""}" data-action="toggle-editor-split-view" data-tooltip="${splitMode ? "Mode ecriture simple" : "Tableau coupe en 2"}" aria-label="${splitMode ? "Mode ecriture simple" : "Tableau coupe en 2"}">${icon("splitColumns")}</button>
             ${pageMode ? `
               <button class="format-button" data-action="page-zoom-out" data-tooltip="Dezoomer les feuilles" aria-label="Dezoomer les feuilles">${icon("zoomOut")}</button>
@@ -1630,10 +1720,10 @@
             <button class="format-button ${bookmarked ? "is-active" : ""}" data-action="toggle-bookmark" data-tooltip="${bookmarked ? "Retirer des signets" : "Ajouter aux signets"}" aria-label="${bookmarked ? "Retirer des signets" : "Ajouter aux signets"}">${icon(bookmarked ? "bookmarkFilled" : "bookmark")}</button>
           </div>
         </div>
-        <section class="editor-page ${pageMode ? "is-page-mode" : ""} ${splitMode ? "is-split-mode" : ""}" style="${pageMode ? `--page-zoom:${pageZoom}` : ""}">
+        <section class="editor-page ${pageMode ? "is-page-mode" : ""} ${splitMode ? "is-split-mode" : ""}" style="${pageStyle}">
           <input class="title-input" data-note-title value="${escapeHtml(note.title)}" aria-label="Titre de la note" />
           ${pageMode
-            ? `<div class="page-editor-viewport" data-page-viewport><div class="page-editor-scale" data-page-scale><div class="note-editor" data-note-editor contenteditable="true" spellcheck="true">${note.content || ""}</div></div></div>`
+            ? `<div class="page-editor-viewport" data-page-viewport><div class="page-editor-scale" data-page-scale><div class="note-editor page-document" data-note-editor contenteditable="true" spellcheck="true"></div></div></div>`
             : `<div class="note-editor" data-note-editor contenteditable="true" spellcheck="true">${note.content || ""}</div>`}
           <div class="editor-status" aria-live="polite">
             <span data-word-count>${stats.words} mots</span>
@@ -2578,22 +2668,32 @@
       }
     }
     if (action === "toggle-editor-view") {
+      flushActiveEditorContent();
       state.settings.editorViewMode = state.settings.editorViewMode === "pages" ? "flow" : "pages";
       saveState();
       render();
     }
     if (action === "toggle-editor-split-view") {
+      flushActiveEditorContent();
       state.settings.editorViewMode = state.settings.editorViewMode === "split" ? "flow" : "split";
       saveState();
       render();
     }
     if (action === "page-zoom-out") {
+      flushActiveEditorContent();
       state.settings.pageZoom = clampPageZoom((state.settings.pageZoom || 1) * 0.82);
       saveState();
       render();
     }
     if (action === "page-zoom-in") {
+      flushActiveEditorContent();
       state.settings.pageZoom = clampPageZoom((state.settings.pageZoom || 1) * 1.12);
+      saveState();
+      render();
+    }
+    if (action === "cycle-page-margins") {
+      flushActiveEditorContent();
+      state.settings.pageMarginPreset = nextPageMarginPreset(state.settings.pageMarginPreset);
       saveState();
       render();
     }
@@ -2682,6 +2782,7 @@
         const name = String(form.get("name") || "Nouvelle boîte").trim() || "Nouvelle boîte";
         const password = String(form.get("password") || "");
         const createdAt = now();
+        rememberState("Creation de boite");
         const box = {
           id: uid("box"),
           name,
@@ -2747,6 +2848,7 @@
         const item = box ? findItem(box, runtime.modal?.itemId) : null;
         const name = String(new FormData(renameForm).get("name") || "").trim();
         if (!box || !item || !name) return;
+        rememberState("Renommage");
         item.title = name;
         item.modifiedAt = now();
         touchBox(box);
@@ -2762,28 +2864,23 @@
     return Number.isFinite(value) ? value : fallback;
   }
 
-  function createPageEditor(scale, index) {
+  function createPageSheet(editor, index) {
     const sheet = document.createElement("div");
     sheet.className = "page-sheet";
     sheet.dataset.pageSheet = String(index);
-
-    const content = document.createElement("div");
-    content.className = "note-editor";
-    content.dataset.noteEditor = "true";
-    content.dataset.pageIndex = String(index);
-    content.contentEditable = "true";
-    content.spellcheck = true;
-
-    sheet.appendChild(content);
-    scale.appendChild(sheet);
-    return content;
+    editor.appendChild(sheet);
+    return sheet;
   }
 
   function editableBlocksFromHtml(html) {
     const source = document.createElement("div");
     source.innerHTML = html || "<p><br></p>";
+    const pageSheets = [...source.querySelectorAll(".page-sheet")];
+    const sourceNodes = pageSheets.length
+      ? pageSheets.flatMap((sheet) => [...sheet.childNodes])
+      : [...source.childNodes];
     const blocks = [];
-    source.childNodes.forEach((node) => {
+    sourceNodes.forEach((node) => {
       if (node.nodeType === Node.TEXT_NODE && !node.textContent.trim()) return;
       if (node.nodeType === Node.TEXT_NODE) {
         const paragraph = document.createElement("p");
@@ -2812,17 +2909,230 @@
     return !isMeaningfulEditorHtml(editor?.innerHTML || "");
   }
 
-  function mergePageEditorHtml() {
-    const pages = [...app.querySelectorAll(".editor-page.is-page-mode [data-note-editor]")]
-      .map((editor) => ({
-        html: editor.innerHTML,
-        meaningful: isMeaningfulEditorHtml(editor.innerHTML),
-      }));
-    const keptPages = pages.filter((page) => page.meaningful);
-    return (keptPages.length ? keptPages : pages.slice(0, 1))
-      .map((page) => page.html)
+  function isPageSheetBlank(sheet) {
+    return !isMeaningfulEditorHtml(sheet?.innerHTML || "");
+  }
+
+  function currentPageSheet(editor) {
+    const selection = window.getSelection();
+    let node = selection?.anchorNode || null;
+    if (node?.nodeType === Node.TEXT_NODE) node = node.parentElement;
+    const selectedSheet = node?.closest?.(".page-sheet");
+    if (selectedSheet && editor?.contains(selectedSheet)) return selectedSheet;
+    return editor?.querySelector?.(".page-sheet") || null;
+  }
+
+  function needsPagedLayoutRefresh(editor) {
+    const sheets = [...(editor?.querySelectorAll?.(".page-sheet") || [])];
+    if (!sheets.length) return true;
+    return sheets.some((sheet) => sheet.scrollHeight > sheet.clientHeight + 2)
+      || sheets.slice(1).some((sheet) => isPageSheetBlank(sheet));
+  }
+
+  function removeEditorSelectionMarkers(root) {
+    root?.querySelectorAll?.("[data-editor-selection-marker]").forEach((marker) => marker.remove());
+  }
+
+  function cleanNodeForMerge(node, keepMarkers) {
+    if (keepMarkers || node.nodeType !== Node.ELEMENT_NODE) return node;
+    if (node.matches?.("[data-editor-selection-marker]")) return document.createTextNode("");
+    const clone = node.cloneNode(true);
+    removeEditorSelectionMarkers(clone);
+    return clone;
+  }
+
+  function mergePageEditorHtml(options = {}) {
+    const keepMarkers = !!options.keepMarkers;
+    const editor = app.querySelector(".editor-page.is-page-mode [data-note-editor]");
+    if (!editor) return "<p><br></p>";
+    const parts = [...editor.childNodes].map((node) => {
+      if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains("page-sheet")) {
+        const source = cleanNodeForMerge(node, keepMarkers);
+        return { html: source.innerHTML, meaningful: isMeaningfulEditorHtml(source.innerHTML) };
+      }
+      if (node.nodeType === Node.TEXT_NODE) {
+        return { html: escapeHtml(node.textContent), meaningful: !!node.textContent.replace(/\u00a0/g, " ").trim() };
+      }
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const source = cleanNodeForMerge(node, keepMarkers);
+        return { html: source.outerHTML, meaningful: isMeaningfulEditorHtml(source.outerHTML) };
+      }
+      return { html: "", meaningful: false };
+    });
+    if (!parts.length) return "<p><br></p>";
+    const keptParts = parts.filter((part) => part.meaningful);
+    return (keptParts.length ? keptParts : parts.slice(0, 1))
+      .map((part) => part.html)
       .join("")
       .trim() || "<p><br></p>";
+  }
+
+  function getEditorSelectionOffsets(editor) {
+    const selection = window.getSelection();
+    if (!editor || !selection || !selection.rangeCount) return null;
+    const range = selection.getRangeAt(0);
+    if (!selectionInsideEditor(editor, range)) return null;
+    const beforeStart = range.cloneRange();
+    beforeStart.selectNodeContents(editor);
+    beforeStart.setEnd(range.startContainer, range.startOffset);
+    const beforeEnd = range.cloneRange();
+    beforeEnd.selectNodeContents(editor);
+    beforeEnd.setEnd(range.endContainer, range.endOffset);
+    return {
+      start: beforeStart.toString().length,
+      end: beforeEnd.toString().length,
+    };
+  }
+
+  function textPointFromOffset(root, offset) {
+    const targetOffset = Math.max(Number(offset) || 0, 0);
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    let consumed = 0;
+    let lastText = null;
+    while (node) {
+      lastText = node;
+      const nextConsumed = consumed + node.textContent.length;
+      if (targetOffset <= nextConsumed) {
+        return { node, offset: Math.max(targetOffset - consumed, 0) };
+      }
+      consumed = nextConsumed;
+      node = walker.nextNode();
+    }
+    if (lastText) return { node: lastText, offset: lastText.textContent.length };
+    return { node: root, offset: root.childNodes.length };
+  }
+
+  function restoreEditorSelectionOffsets(editor, offsets) {
+    if (!editor || !offsets) return false;
+    const start = textPointFromOffset(editor, offsets.start);
+    const end = textPointFromOffset(editor, offsets.end);
+    const range = document.createRange();
+    try {
+      range.setStart(start.node, start.offset);
+      range.setEnd(end.node, end.offset);
+    } catch (error) {
+      placeCaretAtEnd(editor);
+      return false;
+    }
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return true;
+  }
+
+  function createSelectionMarker(id) {
+    const marker = document.createElement("span");
+    marker.dataset.editorSelectionMarker = id;
+    marker.textContent = "\ufeff";
+    marker.setAttribute("aria-hidden", "true");
+    marker.style.cssText = "display:inline-block;width:0;overflow:hidden;line-height:0;";
+    return marker;
+  }
+
+  function captureEditorSelectionMarkers(editor) {
+    const selection = window.getSelection();
+    if (!editor || !selection || !selection.rangeCount) return null;
+    const range = selection.getRangeAt(0);
+    if (!selectionInsideEditor(editor, range)) return null;
+
+    const id = uid("selection");
+    if (range.collapsed) {
+      const caret = createSelectionMarker(`${id}-caret`);
+      const caretRange = range.cloneRange();
+      caretRange.insertNode(caret);
+      return { id, collapsed: true, caret: caret.dataset.editorSelectionMarker };
+    }
+
+    const start = createSelectionMarker(`${id}-start`);
+    const end = createSelectionMarker(`${id}-end`);
+    const endRange = range.cloneRange();
+    endRange.collapse(false);
+    endRange.insertNode(end);
+    const startRange = range.cloneRange();
+    startRange.collapse(true);
+    startRange.insertNode(start);
+    return {
+      id,
+      collapsed: false,
+      start: start.dataset.editorSelectionMarker,
+      end: end.dataset.editorSelectionMarker,
+    };
+  }
+
+  function markerBoundary(marker) {
+    if (!marker?.parentNode) return null;
+    return {
+      node: marker.parentNode,
+      offset: [...marker.parentNode.childNodes].indexOf(marker),
+    };
+  }
+
+  function pageSheetForMarker(editor, markers) {
+    if (!editor || !markers) return null;
+    if (markers.collapsed) {
+      return editor.querySelector(`[data-editor-selection-marker="${markers.caret}"]`)?.closest?.(".page-sheet") || null;
+    }
+    return editor.querySelector(`[data-editor-selection-marker="${markers.end}"]`)?.closest?.(".page-sheet")
+      || editor.querySelector(`[data-editor-selection-marker="${markers.start}"]`)?.closest?.(".page-sheet")
+      || null;
+  }
+
+  function restoreEditorSelectionMarkers(editor, markers) {
+    if (!editor || !markers) return false;
+    const selection = window.getSelection();
+    const range = document.createRange();
+    const caret = markers.collapsed ? editor.querySelector(`[data-editor-selection-marker="${markers.caret}"]`) : null;
+    const start = markers.collapsed ? caret : editor.querySelector(`[data-editor-selection-marker="${markers.start}"]`);
+    const end = markers.collapsed ? caret : editor.querySelector(`[data-editor-selection-marker="${markers.end}"]`);
+    if (!selection || !start || !end) {
+      removeEditorSelectionMarkers(editor);
+      return false;
+    }
+
+    const startPoint = markerBoundary(start);
+    const endPoint = markerBoundary(end);
+    if (!startPoint || !endPoint) {
+      removeEditorSelectionMarkers(editor);
+      return false;
+    }
+
+    try {
+      range.setStart(startPoint.node, startPoint.offset);
+      if (markers.collapsed) {
+        range.collapse(true);
+      } else {
+        range.setEnd(endPoint.node, endPoint.offset);
+      }
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } catch (error) {
+      removeEditorSelectionMarkers(editor);
+      return false;
+    }
+
+    removeEditorSelectionMarkers(editor);
+    return true;
+  }
+
+  function nodeTextLength(node) {
+    if (!node) return 0;
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    return range.toString().length;
+  }
+
+  function pageSheetForTextOffset(editor, offset) {
+    const sheets = [...(editor?.querySelectorAll?.(".page-sheet") || [])];
+    if (!sheets.length) return null;
+    const target = Math.max(Number(offset) || 0, 0);
+    let consumed = 0;
+    for (const sheet of sheets) {
+      const length = nodeTextLength(sheet);
+      if (target <= consumed + length) return sheet;
+      consumed += length;
+    }
+    return sheets[sheets.length - 1];
   }
 
   function capturePagedViewport(editor) {
@@ -2898,33 +3208,64 @@
     page.style.setProperty("--page-zoom", String(zoom));
   }
 
-  function paginateNoteIntoPages(note) {
+  function paginateNoteIntoPages(note, options = {}) {
     const page = app.querySelector(".editor-page.is-page-mode");
-    const scale = page?.querySelector?.("[data-page-scale]");
-    if (!page || !scale) return [];
+    const editor = page?.querySelector?.("[data-note-editor]");
+    if (!page || !editor) return [];
 
+    const selectionOffsets = options.selectionOffsets || getEditorSelectionOffsets(editor);
     const blocks = editableBlocksFromHtml(note.content);
-    scale.innerHTML = "";
-    const editors = [];
-    let editor = createPageEditor(scale, 0);
-    editors.push(editor);
+    editor.innerHTML = "";
+    const sheets = [];
+    let sheet = createPageSheet(editor, 0);
+    sheets.push(sheet);
 
     blocks.forEach((block) => {
-      editor.appendChild(block);
-      if (editor.scrollHeight <= editor.clientHeight + 2 || editor.childNodes.length <= 1) return;
-      editor.removeChild(block);
-      editor = createPageEditor(scale, editors.length);
-      editors.push(editor);
-      editor.appendChild(block);
+      sheet.appendChild(block);
+      if (sheet.scrollHeight <= sheet.clientHeight + 2 || sheet.childNodes.length <= 1) return;
+      sheet.removeChild(block);
+      sheet = createPageSheet(editor, sheets.length);
+      sheets.push(sheet);
+      sheet.appendChild(block);
     });
 
+    if (!sheets.some((item) => item.childNodes.length)) {
+      const paragraph = document.createElement("p");
+      paragraph.appendChild(document.createElement("br"));
+      sheets[0].appendChild(paragraph);
+    }
+
     updatePagedLayout(page);
-    return editors;
+    if (options.restoreSelection !== false) restoreEditorSelectionOffsets(editor, selectionOffsets);
+    return [editor];
   }
 
   function syncPagedEditorMetrics(editor) {
     const page = editor?.closest?.(".editor-page.is-page-mode");
     if (page) updatePagedLayout(page);
+  }
+
+  function refreshPagedEditorIfNeeded(editor, note, scrollMode = "preserve") {
+    if (normalizeEditorViewMode(state.settings?.editorViewMode) !== "pages" || !editor || !note) {
+      syncPagedEditorMetrics(editor);
+      return;
+    }
+    const snapshot = capturePagedViewport(editor);
+    const selectionOffsets = getEditorSelectionOffsets(editor);
+    const markers = captureEditorSelectionMarkers(editor);
+    if (needsPagedLayoutRefresh(editor)) {
+      note.content = mergePageEditorHtml({ keepMarkers: !!markers });
+      paginateNoteIntoPages(note, { selectionOffsets, restoreSelection: !markers });
+    } else {
+      updatePagedLayout(editor.closest(".editor-page.is-page-mode"));
+    }
+    const markerTarget = pageSheetForMarker(editor, markers);
+    const restored = markers ? restoreEditorSelectionMarkers(editor, markers) : false;
+    if (!restored) restoreEditorSelectionOffsets(editor, selectionOffsets);
+    removeEditorSelectionMarkers(editor);
+    note.content = mergePageEditorHtml();
+    const target = markerTarget || pageSheetForTextOffset(editor, selectionOffsets?.end ?? selectionOffsets?.start) || currentPageSheet(editor) || editor.querySelector(".page-sheet") || editor;
+    requestAnimationFrame(() => restorePagedViewport(snapshot, target, scrollMode));
   }
 
   function bindPagedEditor(editor) {
@@ -2977,22 +3318,26 @@
     function repaginatePagesInPlace(sourceEditor, options = {}) {
       if (normalizeEditorViewMode(state.settings?.editorViewMode) !== "pages") return;
       const snapshot = capturePagedViewport(sourceEditor);
-      note.content = mergePageEditorHtml();
-      const nextEditors = paginateNoteIntoPages(note);
+      const selectionOffsets = getEditorSelectionOffsets(sourceEditor);
+      const markers = captureEditorSelectionMarkers(sourceEditor);
+      note.content = mergePageEditorHtml({ keepMarkers: !!markers });
+      const nextEditors = paginateNoteIntoPages(note, { selectionOffsets, restoreSelection: false });
       nextEditors.forEach(bindSingleEditor);
-      const maxIndex = Math.max(nextEditors.length - 1, 0);
-      const targetIndex = Math.max(0, Math.min(Number(options.targetIndex ?? runtime.activePageIndex) || 0, maxIndex));
-      const target = nextEditors[targetIndex] || nextEditors[maxIndex] || nextEditors[0];
-      if (target && options.focus !== false) {
-        runtime.activePageIndex = Number(target.dataset.pageIndex || 0);
-        target.focus({ preventScroll: true });
-        options.caret === "start" ? placeCaretInside(target) : placeCaretAtEnd(target);
-        saveEditorSelection(target);
-        updateFormatBlockSelect(target);
+      const targetEditor = nextEditors[0] || sourceEditor;
+      const markerTarget = pageSheetForMarker(targetEditor, markers);
+      const restored = markers ? restoreEditorSelectionMarkers(targetEditor, markers) : false;
+      if (!restored) restoreEditorSelectionOffsets(targetEditor, selectionOffsets);
+      removeEditorSelectionMarkers(targetEditor);
+      note.content = mergePageEditorHtml();
+      const targetSheet = markerTarget || pageSheetForTextOffset(targetEditor, selectionOffsets?.end ?? selectionOffsets?.start) || currentPageSheet(targetEditor) || targetEditor?.querySelector?.(".page-sheet") || targetEditor;
+      if (targetEditor && options.focus !== false) {
+        targetEditor.focus({ preventScroll: true });
+        saveEditorSelection(targetEditor);
+        updateFormatBlockSelect(targetEditor);
       }
       updateEditorStats(note);
       saveState();
-      requestAnimationFrame(() => restorePagedViewport(snapshot, target, options.scroll || "preserve"));
+      requestAnimationFrame(() => restorePagedViewport(snapshot, targetSheet, options.scroll || "preserve"));
     }
 
     function schedulePageRepagination(sourceEditor, options = {}) {
@@ -3007,52 +3352,41 @@
       boundEditor.dataset.editorBound = "true";
       prepareCollapsibleHeadings(boundEditor, note, box);
       bindPagedEditor(boundEditor);
-      boundEditor.addEventListener("pointerdown", () => {
-        runtime.activePageIndex = Number(boundEditor.dataset.pageIndex || 0);
+      boundEditor.addEventListener("pointerdown", (event) => {
+        runtime.activePageIndex = Number(event?.target?.closest?.(".page-sheet")?.dataset.pageSheet || 0);
         if (document.activeElement !== boundEditor) boundEditor.focus({ preventScroll: true });
       });
       ["keyup", "mouseup", "focus", "click"].forEach((eventName) => {
-        boundEditor.addEventListener(eventName, () => {
-          runtime.activePageIndex = Number(boundEditor.dataset.pageIndex || 0);
+        boundEditor.addEventListener(eventName, (event) => {
+          runtime.activePageIndex = Number(event?.target?.closest?.(".page-sheet")?.dataset.pageSheet || runtime.activePageIndex || 0);
           saveEditorSelection(boundEditor);
           updateFormatBlockSelect(boundEditor);
         });
       });
-      boundEditor.addEventListener("keydown", (event) => handleEditorAutomation(event, boundEditor, note, box));
-      boundEditor.addEventListener("page-boundary-edit", () => {
-        const index = Number(boundEditor.dataset.pageIndex || 0);
-        repaginatePagesInPlace(boundEditor, {
-          targetIndex: Math.max(index - 1, 0),
-          caret: "end",
-          scroll: "target",
-        });
+      boundEditor.addEventListener("beforeinput", (event) => {
+        if (event.inputType === "historyUndo" || event.inputType === "historyRedo") {
+          event.preventDefault();
+          restoreEditorHistory(boundEditor, note, box, event.inputType === "historyRedo" ? "redo" : "undo");
+          return;
+        }
+        rememberEditorSnapshot(note, boundEditor);
       });
+      boundEditor.addEventListener("keydown", (event) => handleEditorAutomation(event, boundEditor, note, box));
       boundEditor.addEventListener("input", () => {
-        note.content = normalizeEditorViewMode(state.settings?.editorViewMode) === "pages"
-          ? mergePageEditorHtml()
-          : boundEditor.innerHTML;
+        note.content = editorSnapshotContent(boundEditor);
         note.modifiedAt = now();
         touchBox(box);
         updateEditorStats(note);
         saveEditorSelection(boundEditor);
         updateFormatBlockSelect(boundEditor);
+        commitEditorHistoryChange(note, note.content);
         saveState();
         syncPagedEditorMetrics(boundEditor);
         if (normalizeEditorViewMode(state.settings?.editorViewMode) === "pages") {
-          const pageIndex = Number(boundEditor.dataset.pageIndex || 0);
-          const pageCount = app.querySelectorAll(".editor-page.is-page-mode [data-note-editor]").length;
-          if (boundEditor.scrollHeight > boundEditor.clientHeight + 8) {
+          if (needsPagedLayoutRefresh(boundEditor)) {
             schedulePageRepagination(boundEditor, {
-              targetIndex: pageIndex + 1,
-              caret: "end",
               scroll: "target",
-              delay: 220,
-            });
-          } else if (pageCount > 1 && isEditorPageBlank(boundEditor)) {
-            schedulePageRepagination(boundEditor, {
-              targetIndex: Math.max(pageIndex - 1, 0),
-              caret: "end",
-              scroll: "target",
+              delay: 80,
             });
           }
         }
@@ -3075,13 +3409,15 @@
       button.addEventListener("click", () => {
         const current = activeEditor();
         if (!current) return;
+        rememberEditorSnapshot(note, current);
         restoreEditorSelection(current);
         document.execCommand(button.dataset.editorCmd, false, null);
-        note.content = normalizeEditorViewMode(state.settings?.editorViewMode) === "pages" ? mergePageEditorHtml() : current.innerHTML;
+        note.content = editorSnapshotContent(current);
         note.modifiedAt = now();
         touchBox(box);
+        commitEditorHistoryChange(note, note.content);
         saveState();
-        syncPagedEditorMetrics(current);
+        refreshPagedEditorIfNeeded(current, note);
       });
     });
 
@@ -3271,6 +3607,7 @@
   }
 
   function toggleCheckListItem(editor, note, box, li) {
+    rememberEditorSnapshot(note, editor);
     const checked = !li.matches(".is-checked, [data-checked='true']");
     li.classList.toggle("is-checked", checked);
     checked ? li.setAttribute("data-checked", "true") : li.removeAttribute("data-checked");
@@ -3297,16 +3634,18 @@
   }
 
   function toggleHeadingSection(editor, note, box, heading) {
+    rememberEditorSnapshot(note, editor);
     const collapsed = heading.dataset.collapsed !== "true";
     heading.dataset.collapsed = collapsed ? "true" : "false";
     heading.classList.toggle("is-heading-collapsed", collapsed);
     setHeadingSectionVisibility(heading, collapsed);
     if (!collapsed) syncCollapsedHeadings(editor);
-    note.content = normalizeEditorViewMode(state.settings?.editorViewMode) === "pages" ? mergePageEditorHtml() : editor.innerHTML;
+    note.content = editorSnapshotContent(editor);
     note.modifiedAt = now();
     touchBox(box);
     updateEditorStats(note);
-    syncPagedEditorMetrics(editor);
+    commitEditorHistoryChange(note, note.content);
+    refreshPagedEditorIfNeeded(editor, note);
     saveState();
   }
 
@@ -3326,6 +3665,16 @@
   }
 
   function handleEditorAutomation(event, editor, note, box) {
+    if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+      const key = event.key.toLowerCase();
+      if (key === "z" || key === "y") {
+        event.preventDefault();
+        const direction = key === "y" || event.shiftKey ? "redo" : "undo";
+        restoreEditorHistory(editor, note, box, direction);
+        return;
+      }
+    }
+
     if (event.key === " " || event.code === "Space") {
       const marker = currentLineMarker(editor);
       if (marker) {
@@ -3358,16 +3707,6 @@
         exitListItem(editor, note, box, li);
         return;
       }
-      if (normalizeEditorViewMode(state.settings?.editorViewMode) === "pages" && Number(editor.dataset.pageIndex || 0) > 0 && isCaretAtStartOfEditor(editor)) {
-        event.preventDefault();
-        editor.dispatchEvent(new CustomEvent("page-boundary-edit"));
-      }
-      return;
-    }
-
-    if (event.key === "Delete" && normalizeEditorViewMode(state.settings?.editorViewMode) === "pages" && Number(editor.dataset.pageIndex || 0) > 0 && isEditorPageBlank(editor)) {
-      event.preventDefault();
-      editor.dispatchEvent(new CustomEvent("page-boundary-edit"));
       return;
     }
 
@@ -3424,6 +3763,7 @@
   }
 
   function exitHeadingBlock(editor, note, box, heading) {
+    rememberEditorSnapshot(note, editor);
     const paragraph = document.createElement("p");
     paragraph.appendChild(document.createElement("br"));
     heading.after(paragraph);
@@ -3454,6 +3794,7 @@
   function convertCurrentBlockToList(editor, note, box, marker) {
     const block = currentEditableBlock(editor);
     if (!block) return;
+    rememberEditorSnapshot(note, editor);
     const list = document.createElement(marker.tag);
     if (marker.className) list.className = marker.className;
     const item = document.createElement("li");
@@ -3470,6 +3811,7 @@
   }
 
   function exitListItem(editor, note, box, li) {
+    rememberEditorSnapshot(note, editor);
     const list = li.parentElement;
     const afterList = list.cloneNode(false);
     let sibling = li.nextSibling;
@@ -3545,16 +3887,114 @@
     }
   }
 
+  function editorSnapshotContent(editor) {
+    return normalizeEditorViewMode(state.settings?.editorViewMode) === "pages"
+      ? mergePageEditorHtml()
+      : (editor?.innerHTML || "<p><br></p>");
+  }
+
+  function flushActiveEditorContent() {
+    const editor = app.querySelector("[data-note-editor]");
+    if (!editor) return false;
+    const box = activeBox();
+    const note = box ? findItem(box, box.activeItemId) : null;
+    if (!box || note?.type !== "note") return false;
+    note.content = editorSnapshotContent(editor);
+    note.modifiedAt = now();
+    touchBox(box);
+    markEditorHistoryCurrent(note, note.content);
+    saveState();
+    return true;
+  }
+
+  function editorHistory(note) {
+    const id = note?.id || "active";
+    if (!runtime.noteHistories.has(id)) {
+      runtime.noteHistories.set(id, {
+        undo: [],
+        redo: [],
+        current: note?.content || "<p><br></p>",
+      });
+    }
+    return runtime.noteHistories.get(id);
+  }
+
+  function rememberEditorSnapshot(note, editor) {
+    if (!note || !editor || runtime.restoringEditorHistory) return;
+    const history = editorHistory(note);
+    const snapshot = editorSnapshotContent(editor);
+    if (history.undo[history.undo.length - 1] !== snapshot) {
+      history.undo.push(snapshot);
+      if (history.undo.length > 120) history.undo.shift();
+    }
+    history.redo = [];
+    history.current = snapshot;
+  }
+
+  function markEditorHistoryCurrent(note, content) {
+    if (!note) return;
+    const history = editorHistory(note);
+    history.current = content || "<p><br></p>";
+  }
+
+  function commitEditorHistoryChange(note, content) {
+    if (!note || runtime.restoringEditorHistory) return;
+    const history = editorHistory(note);
+    const next = content || "<p><br></p>";
+    if (history.current !== next) {
+      if (history.undo[history.undo.length - 1] !== history.current) {
+        history.undo.push(history.current);
+        if (history.undo.length > 120) history.undo.shift();
+      }
+      history.redo = [];
+    }
+    history.current = next;
+  }
+
+  function restoreEditorHistory(editor, note, box, direction) {
+    if (!editor || !note || !box) return false;
+    const history = editorHistory(note);
+    const from = direction === "redo" ? history.redo : history.undo;
+    const to = direction === "redo" ? history.undo : history.redo;
+    if (!from.length) return false;
+
+    const current = editorSnapshotContent(editor);
+    const target = from.pop();
+    to.push(current);
+    if (to.length > 120) to.shift();
+
+    runtime.restoringEditorHistory = true;
+    note.content = target || "<p><br></p>";
+    note.modifiedAt = now();
+    touchBox(box);
+    if (normalizeEditorViewMode(state.settings?.editorViewMode) === "pages") {
+      paginateNoteIntoPages(note);
+    } else {
+      editor.innerHTML = note.content;
+    }
+    prepareCollapsibleHeadings(editor, note, box);
+    updateEditorStats(note);
+    markEditorHistoryCurrent(note, note.content);
+    saveState();
+    editor.focus({ preventScroll: true });
+    placeCaretAtEnd(editor);
+    saveEditorSelection(editor);
+    runtime.restoringEditorHistory = false;
+    return true;
+  }
+
   function syncEditorContent(editor, note, box) {
-    note.content = normalizeEditorViewMode(state.settings?.editorViewMode) === "pages" ? mergePageEditorHtml() : editor.innerHTML;
+    note.content = editorSnapshotContent(editor);
     note.modifiedAt = now();
     touchBox(box);
     updateEditorStats(note);
-    syncPagedEditorMetrics(editor);
+    commitEditorHistoryChange(note, note.content);
     saveState();
+    refreshPagedEditorIfNeeded(editor, note);
   }
 
   function applyHeadingFormat(editor, note, box, value) {
+    rememberEditorSnapshot(note, editor);
     restoreEditorSelection(editor);
     const tag = ["h1", "h2", "h3"].includes(value) ? `<${value}>` : "<p>";
     document.execCommand("formatBlock", false, tag);
@@ -3585,6 +4025,7 @@
   function applyEditorColor(editor, note, box, kind, color) {
     const clean = registerRecentColor(kind, color);
     if (!editor || !note || !box || !clean) return;
+    rememberEditorSnapshot(note, editor);
     restoreEditorSelection(editor);
     document.execCommand(kind === "highlight" ? "hiliteColor" : "foreColor", false, clean);
     syncEditorContent(editor, note, box);
@@ -3592,6 +4033,7 @@
 
   function clearEditorHighlight(editor, note, box) {
     if (!editor || !note || !box) return;
+    rememberEditorSnapshot(note, editor);
     restoreEditorSelection(editor);
     const selection = window.getSelection();
     if (!selection || !selection.rangeCount || selection.isCollapsed) {
@@ -3617,6 +4059,7 @@
   }
 
   function applySpanStyle(editor, note, box, style) {
+    rememberEditorSnapshot(note, editor);
     restoreEditorSelection(editor);
     const selection = window.getSelection();
     if (!selection || !selection.rangeCount || selection.isCollapsed) {
@@ -3636,6 +4079,7 @@
   }
 
   function insertList(editor, note, box, type) {
+    rememberEditorSnapshot(note, editor);
     restoreEditorSelection(editor);
     const listMap = {
       bullet: '<ul><li>Nouvel élément</li></ul>',
@@ -3651,7 +4095,31 @@
   }
 
   document.addEventListener("keydown", (event) => {
+    if (event.defaultPrevented) return;
     const editingTarget = editableTarget(event.target);
+    const editingEditor = editingTarget?.closest?.("[data-note-editor]");
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && editingEditor) {
+      const key = event.key.toLowerCase();
+      if (key === "z" || key === "y") {
+        const box = activeBox();
+        const note = box ? findItem(box, box.activeItemId) : null;
+        if (box && note?.type === "note") {
+          event.preventDefault();
+          const direction = key === "y" || event.shiftKey ? "redo" : "undo";
+          restoreEditorHistory(editingEditor, note, box, direction);
+          return;
+        }
+      }
+    }
+    if ((event.ctrlKey || event.metaKey) && !editingTarget && !runtime.modal) {
+      const key = event.key.toLowerCase();
+      if (key === "z" || key === "y") {
+        event.preventDefault();
+        const restored = key === "y" || event.shiftKey ? redoStateChange() : undoStateChange();
+        if (!restored) setToast(key === "y" || event.shiftKey ? "Rien a retablir." : "Rien a annuler.");
+        return;
+      }
+    }
     if (!editingTarget && !runtime.modal && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
       const box = activeBox();
       if (box) moveKeyboardSelection(box, event.key === "ArrowDown" ? 1 : -1, event);
