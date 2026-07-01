@@ -1554,12 +1554,14 @@ body.is-marquee-selecting {
 }
 
 .editor-page.is-page-mode {
-  --page-width: 560px;
-  --page-height: 792px;
+  --page-width: 793.7008px;
+  --page-height: 1122.5197px;
   --page-gap: 28px;
   --page-row-gap: 34px;
-  --page-margin-x: 56px;
-  --page-margin-y: 62px;
+  --page-margin-top: 75.5906px;
+  --page-margin-right: 75.5906px;
+  --page-margin-bottom: 75.5906px;
+  --page-margin-left: 75.5906px;
   min-height: calc(100vh - 112px);
   margin: 6px -8px 0;
   padding: 18px 0 70px;
@@ -1612,7 +1614,7 @@ body.is-marquee-selecting {
   height: var(--page-height);
   min-height: var(--page-height);
   max-height: var(--page-height);
-  padding: var(--page-margin-y) var(--page-margin-x);
+  padding: var(--page-margin-top) var(--page-margin-right) var(--page-margin-bottom) var(--page-margin-left);
   border: 1px solid var(--border);
   border-radius: 7px;
   background: var(--surface);
@@ -2498,7 +2500,14 @@ body.is-marquee-selecting {
 }
 
 .settings-modal {
-  width: min(560px, 100%);
+  display: flex;
+  flex-direction: column;
+  width: min(680px, 100%);
+  max-height: min(86vh, 820px);
+}
+
+.settings-modal .modal-body {
+  overflow: auto;
 }
 
 .settings-section {
@@ -2518,6 +2527,54 @@ body.is-marquee-selecting {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.page-layout-grid,
+.margin-input-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.page-size-summary {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 9px 10px;
+  background: var(--surface-soft);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.margin-preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tiny-button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.tiny-button.is-active {
+  border-color: var(--selection-border);
+  background: var(--selection-soft);
+  color: var(--text);
+}
+
+.cm-input-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.cm-input-wrap span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
 }
 
 .font-import-button {
@@ -2869,16 +2926,17 @@ body.is-marquee-selecting {
   }
 
   .editor-page.is-page-mode {
-    --page-width: 520px;
-    --page-height: 735px;
-    --page-margin-x: 42px;
-    --page-margin-y: 50px;
     margin: 6px -14px 0;
     padding-top: 14px;
   }
 
   .editor-page.is-page-mode .title-input {
     width: min(100%, var(--page-width));
+  }
+
+  .page-layout-grid,
+  .margin-input-grid {
+    grid-template-columns: 1fr;
   }
 
   .graph-canvas {

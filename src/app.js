@@ -101,11 +101,23 @@
 
   const supportedFontExtensions = [".ttf", ".otf", ".woff", ".woff2"];
   const localFontLimit = 12;
+  const cmToPx = 96 / 2.54;
+  const minPageMarginCm = 0.1;
+  const minPageContentCm = 4;
+
+  const pageSizePresets = [
+    { id: "a4", label: "A4", widthCm: 21, heightCm: 29.7 },
+    { id: "a5", label: "A5", widthCm: 14.8, heightCm: 21 },
+    { id: "a3", label: "A3", widthCm: 29.7, heightCm: 42 },
+    { id: "letter", label: "Letter US", widthCm: 21.59, heightCm: 27.94 },
+    { id: "legal", label: "Legal US", widthCm: 21.59, heightCm: 35.56 },
+    { id: "executive", label: "Executive", widthCm: 18.41, heightCm: 26.67 },
+  ];
 
   const pageMarginPresets = {
-    compact: { label: "Marges compactes", x: 38, y: 42 },
-    normal: { label: "Marges normales", x: 56, y: 62 },
-    wide: { label: "Marges larges", x: 74, y: 84 },
+    compact: { label: "Marges compactes", margins: { top: 1.2, right: 1.2, bottom: 1.2, left: 1.2 } },
+    normal: { label: "Marges normales", margins: { top: 2, right: 2, bottom: 2, left: 2 } },
+    wide: { label: "Marges larges", margins: { top: 2.7, right: 2.7, bottom: 2.7, left: 2.7 } },
   };
 
   const pageMarginOrder = ["compact", "normal", "wide"];
@@ -138,13 +150,135 @@
   }
 
   function normalizePageMarginPreset(value) {
-    return pageMarginOrder.includes(value) ? value : "normal";
+    return pageMarginOrder.includes(value) ? value : "custom";
   }
 
   function nextPageMarginPreset(value) {
     const current = normalizePageMarginPreset(value);
     const index = pageMarginOrder.indexOf(current);
-    return pageMarginOrder[(index + 1) % pageMarginOrder.length];
+    return pageMarginOrder[((index < 0 ? -1 : index) + 1) % pageMarginOrder.length];
+  }
+
+  function roundCm(value) {
+    return Math.round((Number(value) || 0) * 10) / 10;
+  }
+
+  function cm(value) {
+    return `${roundCm(value).toFixed(1)} cm`;
+  }
+
+  function pageSizePreset(id) {
+    return pageSizePresets.find((size) => size.id === id) || pageSizePresets[0];
+  }
+
+  function pageSizeDimensions(setup) {
+    const preset = pageSizePreset(setup?.sizeId);
+    const landscape = setup?.orientation === "landscape";
+    return {
+      widthCm: landscape ? preset.heightCm : preset.widthCm,
+      heightCm: landscape ? preset.widthCm : preset.heightCm,
+    };
+  }
+
+  function normalizeMarginPair(first, second, dimensionCm) {
+    const maxCombined = Math.max(minPageMarginCm * 2, dimensionCm - minPageContentCm);
+    let a = Math.min(Math.max(roundCm(first), minPageMarginCm), maxCombined - minPageMarginCm);
+    let b = Math.min(Math.max(roundCm(second), minPageMarginCm), maxCombined - minPageMarginCm);
+    if (a + b > maxCombined) {
+      const overflow = a + b - maxCombined;
+      if (a >= b) {
+        a = Math.max(minPageMarginCm, roundCm(a - overflow));
+      } else {
+        b = Math.max(minPageMarginCm, roundCm(b - overflow));
+      }
+    }
+    if (a + b > maxCombined) {
+      a = roundCm(maxCombined / 2);
+      b = roundCm(maxCombined - a);
+    }
+    return [a, b];
+  }
+
+  function normalizePageSetup(value = {}, fallbackPreset = "normal") {
+    value = value || {};
+    const presetId = pageSizePreset(value.sizeId)?.id || "a4";
+    const setup = {
+      sizeId: presetId,
+      orientation: value.orientation === "landscape" ? "landscape" : "portrait",
+      margins: {
+        ...pageMarginPresets.normal.margins,
+        ...(pageMarginPresets[fallbackPreset]?.margins || {}),
+        ...(value.margins || {}),
+      },
+    };
+    const dimensions = pageSizeDimensions(setup);
+    const [left, right] = normalizeMarginPair(setup.margins.left, setup.margins.right, dimensions.widthCm);
+    const [top, bottom] = normalizeMarginPair(setup.margins.top, setup.margins.bottom, dimensions.heightCm);
+    setup.margins = { top, right, bottom, left };
+    return setup;
+  }
+
+  function marginPresetForSetup(setup) {
+    const normalized = normalizePageSetup(setup);
+    const match = pageMarginOrder.find((id) => {
+      const preset = pageMarginPresets[id].margins;
+      return ["top", "right", "bottom", "left"].every((side) => Math.abs(preset[side] - normalized.margins[side]) < 0.05);
+    });
+    return match || "custom";
+  }
+
+  function pageSetupStyle(settings = state.settings) {
+    const setup = normalizePageSetup(settings?.pageSetup, settings?.pageMarginPreset);
+    const dimensions = pageSizeDimensions(setup);
+    return [
+      `--page-width:${dimensions.widthCm * cmToPx}px`,
+      `--page-height:${dimensions.heightCm * cmToPx}px`,
+      `--page-margin-top:${setup.margins.top * cmToPx}px`,
+      `--page-margin-right:${setup.margins.right * cmToPx}px`,
+      `--page-margin-bottom:${setup.margins.bottom * cmToPx}px`,
+      `--page-margin-left:${setup.margins.left * cmToPx}px`,
+    ].join(";");
+  }
+
+  function pageMarginLimits(setup) {
+    const normalized = normalizePageSetup(setup);
+    const dimensions = pageSizeDimensions(normalized);
+    return {
+      left: Math.max(minPageMarginCm, roundCm(dimensions.widthCm - normalized.margins.right - minPageContentCm)),
+      right: Math.max(minPageMarginCm, roundCm(dimensions.widthCm - normalized.margins.left - minPageContentCm)),
+      top: Math.max(minPageMarginCm, roundCm(dimensions.heightCm - normalized.margins.bottom - minPageContentCm)),
+      bottom: Math.max(minPageMarginCm, roundCm(dimensions.heightCm - normalized.margins.top - minPageContentCm)),
+    };
+  }
+
+  function pageSizeSummary(setup) {
+    const dimensions = pageSizeDimensions(setup);
+    return `${cm(dimensions.widthCm)} x ${cm(dimensions.heightCm)}`;
+  }
+
+  function pageMarginLabel(settings = state.settings) {
+    const preset = normalizePageMarginPreset(settings?.pageMarginPreset);
+    if (pageMarginPresets[preset]) return pageMarginPresets[preset].label;
+    const margins = normalizePageSetup(settings?.pageSetup, settings?.pageMarginPreset).margins;
+    return `Marges ${cm(margins.top)} / ${cm(margins.right)} / ${cm(margins.bottom)} / ${cm(margins.left)}`;
+  }
+
+  function updatePageSetup(nextSetup, preset = "custom") {
+    state.settings.pageSetup = normalizePageSetup(nextSetup, preset);
+    state.settings.pageMarginPreset = preset === "custom" ? marginPresetForSetup(state.settings.pageSetup) : preset;
+    saveState();
+  }
+
+  function applyPageSetupToCurrentView() {
+    const page = app.querySelector(".editor-page.is-page-mode");
+    if (!page) return;
+    const setupStyle = pageSetupStyle();
+    setupStyle.split(";").forEach((entry) => {
+      const [name, value] = entry.split(":");
+      if (name && value) page.style.setProperty(name, value);
+    });
+    const editor = page.querySelector("[data-note-editor]");
+    syncPagedEditorMetrics(editor);
   }
 
   function normalizeLocalFontName(name) {
@@ -298,7 +432,8 @@
       graphZoom: clampGraphZoom(previousSettings.graphZoom || 1),
       editorViewMode: normalizeEditorViewMode(previousSettings.editorViewMode),
       pageZoom: clampPageZoom(previousSettings.pageZoom || 1),
-      pageMarginPreset: normalizePageMarginPreset(previousSettings.pageMarginPreset),
+      pageMarginPreset: normalizePageMarginPreset(previousSettings.pageMarginPreset || "normal"),
+      pageSetup: normalizePageSetup(previousSettings.pageSetup, normalizePageMarginPreset(previousSettings.pageMarginPreset || "normal")),
       localFonts: normalizeLocalFonts(previousSettings.localFonts),
       headingPresets: {
         normal: { ...headingDefaults.normal, ...(previousHeadings.normal || {}) },
@@ -307,6 +442,7 @@
         h3: { ...headingDefaults.h3, ...(previousHeadings.h3 || {}) },
       },
     };
+    value.settings.pageMarginPreset = marginPresetForSetup(value.settings.pageSetup);
     value.boxes.forEach((box) => {
       if (!Array.isArray(box.bookmarkedIds)) box.bookmarkedIds = [];
       if (!Array.isArray(box.openTabIds)) box.openTabIds = box.activeItemId ? [box.activeItemId] : [];
@@ -534,6 +670,7 @@
         editorViewMode: "flow",
         pageZoom: 1,
         pageMarginPreset: "normal",
+        pageSetup: normalizePageSetup({ sizeId: "a4", orientation: "portrait", margins: pageMarginPresets.normal.margins }, "normal"),
         localFonts: [],
       },
       boxes: [
@@ -1656,10 +1793,9 @@
     const pageMode = viewMode === "pages";
     const splitMode = viewMode === "split";
     const pageZoom = clampPageZoom(state.settings?.pageZoom || 1);
-    const pageMarginPreset = normalizePageMarginPreset(state.settings?.pageMarginPreset);
-    const pageMargins = pageMarginPresets[pageMarginPreset];
+    const marginLabel = pageMarginLabel(state.settings);
     const pageStyle = pageMode
-      ? `--page-zoom:${pageZoom};--page-margin-x:${pageMargins.x}px;--page-margin-y:${pageMargins.y}px`
+      ? `--page-zoom:${pageZoom};${pageSetupStyle(state.settings)}`
       : "";
     const fonts = availableFontOptions();
     return `
@@ -1710,7 +1846,7 @@
           </div>
           <div class="toolbar-group">
             <button class="format-button ${pageMode ? "is-active" : ""}" data-action="toggle-editor-view" data-tooltip="${pageMode ? "Mode ecriture simple" : "Mode feuilles"}" aria-label="${pageMode ? "Mode ecriture simple" : "Mode feuilles"}">${icon("bookOpen")}</button>
-            ${pageMode ? `<button class="format-button" data-action="cycle-page-margins" data-tooltip="${escapeHtml(pageMargins.label)}" aria-label="${escapeHtml(pageMargins.label)}">${icon("ruler")}</button>` : ""}
+            ${pageMode ? `<button class="format-button" data-action="cycle-page-margins" data-page-layout-button data-tooltip="${escapeHtml(marginLabel)} - clic droit : personnaliser" aria-label="${escapeHtml(marginLabel)}">${icon("ruler")}</button>` : ""}
             <button class="format-button ${splitMode ? "is-active" : ""}" data-action="toggle-editor-split-view" data-tooltip="${splitMode ? "Mode ecriture simple" : "Tableau coupe en 2"}" aria-label="${splitMode ? "Mode ecriture simple" : "Tableau coupe en 2"}">${icon("splitColumns")}</button>
             ${pageMode ? `
               <button class="format-button" data-action="page-zoom-out" data-tooltip="Dezoomer les feuilles" aria-label="Dezoomer les feuilles">${icon("zoomOut")}</button>
@@ -2065,6 +2201,9 @@
       const todoColors = ["#0f6b58", "#4ca66a", "#55a7e5", "#7c5cff", "#d94b4b", "#f08a24", "#ffffff"];
       const treeGuideColor = cleanColor(settings.treeGuideColor, defaultTreeGuideColor(settings.theme));
       const todoColor = cleanColor(settings.todoColor, settings.selectionColor || "#0f6b58");
+      const pageSetup = normalizePageSetup(settings.pageSetup, settings.pageMarginPreset);
+      const pageLimits = pageMarginLimits(pageSetup);
+      const activeMarginPreset = marginPresetForSetup(pageSetup);
       return `
         <div class="modal-backdrop">
           <div class="modal settings-modal">
@@ -2099,6 +2238,43 @@
                 <div class="color-swatches">
                   ${todoColors.map((color) => `<button class="color-swatch ${color === todoColor ? "is-active" : ""} ${color === "#ffffff" ? "is-light" : ""}" style="--swatch:${color}" data-todo-swatch="${color}" aria-label="Couleur ${color}"></button>`).join("")}
                 </div>
+              </section>
+              <section class="settings-section" data-page-setup-section>
+                <h3>Mise en page</h3>
+                <p class="settings-hint">Dimensions en cm, converties en taille CSS absolue pour garder des feuilles fideles a l'impression. A4 portrait est le format initial.</p>
+                <div class="page-layout-grid">
+                  <label class="modal-label">Format
+                    <select class="modal-field" data-page-size>
+                      ${pageSizePresets.map((size) => `<option value="${size.id}" ${pageSetup.sizeId === size.id ? "selected" : ""}>${escapeHtml(size.label)} - ${cm(size.widthCm)} x ${cm(size.heightCm)}</option>`).join("")}
+                    </select>
+                  </label>
+                  <label class="modal-label">Orientation
+                    <select class="modal-field" data-page-orientation>
+                      <option value="portrait" ${pageSetup.orientation !== "landscape" ? "selected" : ""}>Portrait</option>
+                      <option value="landscape" ${pageSetup.orientation === "landscape" ? "selected" : ""}>Paysage</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="page-size-summary">Feuille active : ${escapeHtml(pageSizePreset(pageSetup.sizeId).label)} ${pageSetup.orientation === "landscape" ? "paysage" : "portrait"} - ${pageSizeSummary(pageSetup)}</div>
+                <div class="margin-preset-row">
+                  ${pageMarginOrder.map((id) => `<button class="ghost-button tiny-button ${activeMarginPreset === id ? "is-active" : ""}" type="button" data-page-margin-preset="${id}">${escapeHtml(pageMarginPresets[id].label)}</button>`).join("")}
+                </div>
+                <div class="margin-input-grid">
+                  ${[
+                    ["top", "Haut"],
+                    ["right", "Droite"],
+                    ["bottom", "Bas"],
+                    ["left", "Gauche"],
+                  ].map(([side, label]) => `
+                    <label class="modal-label">${label}
+                      <span class="cm-input-wrap">
+                        <input class="modal-field compact-field" type="number" min="${minPageMarginCm}" max="${pageLimits[side]}" step="0.1" value="${pageSetup.margins[side].toFixed(1)}" data-page-margin="${side}" aria-label="Marge ${label}" />
+                        <span>cm</span>
+                      </span>
+                    </label>
+                  `).join("")}
+                </div>
+                <p class="settings-hint">Limite basse : ${cm(minPageMarginCm)}. MindSet garde toujours au moins ${cm(minPageContentCm)} de zone utile sur chaque axe.</p>
               </section>
               <section class="settings-section">
                 <h3>Presets de texte</h3>
@@ -2153,6 +2329,16 @@
   function bindEvents() {
     app.querySelectorAll("[data-action]").forEach((button) => {
       button.addEventListener("click", handleAction);
+    });
+
+    app.querySelectorAll("[data-page-layout-button]").forEach((button) => {
+      button.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        flushActiveEditorContent();
+        runtime.modal = { type: "settings", focus: "page-setup" };
+        render();
+      });
     });
 
     app.querySelectorAll("[data-tab-id]").forEach((tab) => {
@@ -2449,6 +2635,55 @@
       });
     });
 
+    const pageSize = app.querySelector("[data-page-size]");
+    if (pageSize) {
+      pageSize.addEventListener("change", () => {
+        flushActiveEditorContent();
+        const setup = normalizePageSetup(state.settings.pageSetup, state.settings.pageMarginPreset);
+        updatePageSetup({ ...setup, sizeId: pageSize.value }, "custom");
+        render();
+      });
+    }
+
+    const pageOrientation = app.querySelector("[data-page-orientation]");
+    if (pageOrientation) {
+      pageOrientation.addEventListener("change", () => {
+        flushActiveEditorContent();
+        const setup = normalizePageSetup(state.settings.pageSetup, state.settings.pageMarginPreset);
+        updatePageSetup({ ...setup, orientation: pageOrientation.value }, "custom");
+        render();
+      });
+    }
+
+    app.querySelectorAll("[data-page-margin-preset]").forEach((button) => {
+      button.addEventListener("click", () => {
+        flushActiveEditorContent();
+        const preset = button.dataset.pageMarginPreset;
+        const setup = normalizePageSetup(state.settings.pageSetup, preset);
+        updatePageSetup({ ...setup, margins: pageMarginPresets[preset]?.margins || setup.margins }, preset);
+        render();
+      });
+    });
+
+    app.querySelectorAll("[data-page-margin]").forEach((input) => {
+      const update = (rerender = false) => {
+        flushActiveEditorContent();
+        const setup = normalizePageSetup(state.settings.pageSetup, state.settings.pageMarginPreset);
+        setup.margins = {
+          ...setup.margins,
+          [input.dataset.pageMargin]: Number(input.value),
+        };
+        updatePageSetup(setup, "custom");
+        if (rerender) {
+          render();
+        } else {
+          applyPageSetupToCurrentView();
+        }
+      };
+      input.addEventListener("input", () => update(false));
+      input.addEventListener("change", () => update(true));
+    });
+
     app.querySelectorAll("[data-heading-size]").forEach((input) => {
       input.addEventListener("input", () => updateHeadingPreset(input.dataset.headingSize, "size", `${input.value || 18}px`));
     });
@@ -2531,6 +2766,12 @@
           runtime.boxMenuOpen = false;
           render();
         }
+      });
+    }
+
+    if (runtime.modal?.focus === "page-setup") {
+      requestAnimationFrame(() => {
+        app.querySelector("[data-page-setup-section]")?.scrollIntoView({ block: "start" });
       });
     }
 
@@ -2693,8 +2934,9 @@
     }
     if (action === "cycle-page-margins") {
       flushActiveEditorContent();
-      state.settings.pageMarginPreset = nextPageMarginPreset(state.settings.pageMarginPreset);
-      saveState();
+      const nextPreset = nextPageMarginPreset(state.settings.pageMarginPreset);
+      const setup = normalizePageSetup(state.settings.pageSetup, nextPreset);
+      updatePageSetup({ ...setup, margins: pageMarginPresets[nextPreset].margins }, nextPreset);
       render();
     }
     if (action === "new-note") createNote(box);
