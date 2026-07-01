@@ -42,6 +42,8 @@
     bookmark: '<path d="M6 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18l-6-4-6 4V4Z"/>',
     bookmarkFilled: '<path d="M6 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18l-6-4-6 4V4Z" fill="currentColor"/>',
     chevron: '<path d="m9 6 6 6-6 6"/>',
+    chevronRight: '<path d="m9 6 6 6-6 6"/>',
+    chevronDown: '<path d="m6 9 6 6 6-6"/>',
     panel: '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M9 5v14"/>',
     sidebar: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M15 4v16"/>',
     sort: '<path d="M7 4v16"/><path d="m4 7 3-3 3 3"/><path d="M17 20V4"/><path d="m14 17 3 3 3-3"/>',
@@ -63,6 +65,7 @@
     check: '<path d="m5 12 4 4L19 6"/>',
     close: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
     edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"/>',
+    external: '<path d="M14 3h7v7"/><path d="M21 3 10 14"/><path d="M11 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/>',
     eraser: '<path d="m7 21-4-4a2 2 0 0 1 0-2.8L12.2 5a2 2 0 0 1 2.8 0l4 4a2 2 0 0 1 0 2.8L9.8 21H7Z"/><path d="m5 12 7 7"/><path d="M16 21h5"/>',
     alignLeft: '<path d="M4 6h16"/><path d="M4 10h10"/><path d="M4 14h16"/><path d="M4 18h10"/>',
     alignCenter: '<path d="M4 6h16"/><path d="M7 10h10"/><path d="M4 14h16"/><path d="M7 18h10"/>',
@@ -1003,6 +1006,26 @@
     runtime.selectionAnchorId = null;
     runtime.focusedItemId = null;
     runtime.contextMenu = null;
+    saveState();
+    render();
+  }
+
+  function openItemFromGraph(box, id) {
+    const item = findItem(box, id);
+    if (!box || !item || item.id === box.root.id) return;
+    runtime.contextMenu = null;
+    runtime.modal = null;
+    box.activeItemId = item.id;
+    box.selectedIds = [item.id];
+    runtime.selectionAnchorId = item.id;
+    runtime.focusedItemId = item.id;
+    if (item.type === "folder") {
+      const set = new Set(box.expandedIds || []);
+      set.add(item.id);
+      box.expandedIds = [...set];
+    }
+    if (!Array.isArray(box.openTabIds)) box.openTabIds = [];
+    if (!box.openTabIds.includes(item.id)) box.openTabIds.push(item.id);
     saveState();
     render();
   }
@@ -2082,6 +2105,10 @@
             <button class="graph-zoom-value" data-action="graph-zoom-reset" data-graph-zoom-label data-tooltip="Reinitialiser le zoom" aria-label="Reinitialiser le zoom">${graphZoomLabel(zoom)}</button>
             <button class="tool-button" data-action="graph-zoom-in" data-tooltip="Zoomer" aria-label="Zoomer">${icon("zoomIn")}</button>
           </div>
+          <div class="graph-control-group" aria-label="Deplier le graphe">
+            <button class="tool-button" data-action="collapse-all" data-tooltip="Tout refermer" aria-label="Tout refermer">${icon("collapseIn")}</button>
+            <button class="tool-button" data-action="expand-all" data-tooltip="Tout derouler" aria-label="Tout derouler">${icon("collapse")}</button>
+          </div>
         </div>
         <div class="graph-canvas" data-graph-canvas data-marquee-surface>
           <div class="graph-viewport" data-graph-viewport style="--graph-zoom:${zoom}">
@@ -2096,6 +2123,8 @@
 
   function renderGraphNode(box, node, root = false) {
     const children = node.type === "folder" ? sortedChildren(box, node) : [];
+    const expanded = root || node.type !== "folder" || isExpanded(box, node.id);
+    const visibleChildren = expanded ? children : [];
     const selected = (box.selectedIds || []).includes(node.id);
     const active = node.id === box.activeItemId;
     const words = node.type === "note" ? noteStats(node).words : 0;
@@ -2105,17 +2134,18 @@
         ? `${children.length} element${children.length > 1 ? "s" : ""}`
         : `${words} mot${words > 1 ? "s" : ""}`;
     return `
-      <div class="graph-branch ${root ? "is-root" : ""} ${children.length ? "has-children" : "is-leaf"} ${children.length === 1 ? "has-single-child" : ""}">
-        <button class="graph-node ${root ? "root" : ""} ${node.type} ${active ? "is-active" : ""} ${selected ? "is-selected" : ""}" data-item-id="${node.id}" draggable="false" type="button">
+      <div class="graph-branch ${root ? "is-root" : ""} ${visibleChildren.length ? "has-children" : "is-leaf"} ${visibleChildren.length === 1 ? "has-single-child" : ""} ${children.length && !expanded ? "is-collapsed" : ""}">
+        <button class="graph-node ${root ? "root" : ""} ${node.type} ${active ? "is-active" : ""} ${selected ? "is-selected" : ""} ${children.length && !expanded ? "is-collapsed" : ""}" data-item-id="${node.id}" draggable="false" type="button">
           <span class="graph-node-icon">${graphNodeIcon(node, root)}</span>
           <span class="graph-node-copy">
             <strong>${escapeHtml(node.title)}</strong>
             <small>${escapeHtml(meta)}</small>
           </span>
+          ${node.type === "folder" && children.length && !root ? `<span class="graph-node-caret">${icon(expanded ? "chevronDown" : "chevronRight")}</span>` : ""}
         </button>
-        ${children.length ? `
-          <div class="graph-children ${children.length === 1 ? "is-single-child" : ""}">
-            ${children.map((child) => renderGraphNode(box, child)).join("")}
+        ${visibleChildren.length ? `
+          <div class="graph-children ${visibleChildren.length === 1 ? "is-single-child" : ""}">
+            ${visibleChildren.map((child) => renderGraphNode(box, child)).join("")}
           </div>
         ` : ""}
       </div>
@@ -2136,13 +2166,19 @@
     const defaultLabel = item.type === "folder" ? "Icone de dossier" : "Icone de note";
     return `
       <div class="context-menu" style="left:${x}px; top:${y}px" data-context-menu>
-        <button class="context-row danger" data-action="delete-context-item" data-delete-target="${item.id}">
-          ${icon("trash")}
-          <span>Supprimer</span>
-        </button>
+        ${runtime.contextMenu.source === "graph" ? `
+          <button class="context-row" data-action="open-context-item" data-open-target="${item.id}">
+            ${icon("external")}
+            <span>Ouvrir</span>
+          </button>
+        ` : ""}
         <button class="context-row" data-action="rename-item" data-rename-target="${item.id}">
           ${icon("edit")}
           <span>Renommer</span>
+        </button>
+        <button class="context-row danger" data-action="delete-context-item" data-delete-target="${item.id}">
+          ${icon("trash")}
+          <span>Supprimer</span>
         </button>
         <div class="context-label">Icone</div>
         <button class="context-row" data-icon-choice="none" data-icon-target="${item.id}">
@@ -2567,6 +2603,24 @@
         saveState();
         render();
       });
+      if (row.matches(".graph-node")) {
+        row.addEventListener("dblclick", (event) => {
+          const box = activeBox();
+          const item = box ? findItem(box, row.dataset.itemId) : null;
+          if (!box || item?.type !== "folder" || item.id === box.root.id) return;
+          event.preventDefault();
+          event.stopPropagation();
+          const set = new Set(box.expandedIds || []);
+          set.has(item.id) ? set.delete(item.id) : set.add(item.id);
+          box.expandedIds = [...set];
+          box.activeItemId = item.id;
+          box.selectedIds = [item.id];
+          runtime.selectionAnchorId = item.id;
+          runtime.focusedItemId = item.id;
+          saveState();
+          render();
+        });
+      }
       row.addEventListener("dragstart", (event) => {
         const box = activeBox();
         if (!sortableTarget || !box || row.dataset.itemId === box.root.id) {
@@ -2954,11 +3008,54 @@
     }, { passive: false });
   }
 
+  function startGraphTreePan(event, nodeElement) {
+    const canvas = nodeElement?.closest?.("[data-graph-canvas]");
+    if (!canvas || event.button !== 0) return;
+    if (event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startLeft = canvas.scrollLeft;
+    const startTop = canvas.scrollTop;
+    let panning = false;
+
+    const move = (pointerEvent) => {
+      const dx = pointerEvent.clientX - startX;
+      const dy = pointerEvent.clientY - startY;
+      if (!panning && Math.hypot(dx, dy) < 5) return;
+      panning = true;
+      pointerEvent.preventDefault();
+      canvas.scrollLeft = startLeft - dx;
+      canvas.scrollTop = startTop - dy;
+      document.body.classList.add("is-graph-panning");
+      nodeElement.classList.add("is-panning-root");
+    };
+
+    const finish = (pointerEvent) => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", finish);
+      document.body.classList.remove("is-graph-panning");
+      nodeElement.classList.remove("is-panning-root");
+      if (!panning) return;
+      runtime.ignoreSurfaceClick = true;
+      window.setTimeout(() => {
+        runtime.ignoreSurfaceClick = false;
+      }, 0);
+      pointerEvent.preventDefault();
+    };
+
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", finish, { once: true });
+  }
+
   function startGraphNodeDrag(event, nodeElement) {
     const box = activeBox();
     const sourceId = nodeElement?.dataset?.itemId;
     const source = box ? findItem(box, sourceId) : null;
-    if (!box || !source || source.id === box.root.id || event.button !== 0) return;
+    if (!box || !source || event.button !== 0) return;
+    if (source.id === box.root.id) {
+      startGraphTreePan(event, nodeElement);
+      return;
+    }
     if (event.ctrlKey || event.metaKey || event.shiftKey) return;
 
     const startX = event.clientX;
@@ -3123,6 +3220,10 @@
       const returnToGraph = runtime.contextMenu?.source === "graph" || graphViewVisible();
       runtime.contextMenu = null;
       requestDeleteItems(box, [id], { returnToGraph });
+    }
+    if (action === "open-context-item") {
+      openItemFromGraph(box, event.currentTarget.dataset.openTarget);
+      return;
     }
     if (action === "show-explorer") {
       runtime.sideTab = "explorer";

@@ -2082,6 +2082,7 @@ body.is-graph-dragging {
   --graph-link: 38px;
   --graph-level-gap: 76px;
   --graph-sibling-gap: 22px;
+  --graph-node-width: 214px;
   overflow: auto;
   overscroll-behavior: contain;
   flex: 1 1 auto;
@@ -2141,7 +2142,7 @@ body.is-graph-dragging {
   display: flex;
   align-items: center;
   gap: 10px;
-  width: 214px;
+  width: var(--graph-node-width);
   min-height: 68px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -2231,7 +2232,17 @@ body.is-graph-dragging {
 }
 
 .graph-node.root {
-  cursor: pointer;
+  cursor: grab;
+}
+
+.graph-node.root.is-panning-root,
+body.is-graph-panning .graph-node.root {
+  cursor: grabbing;
+}
+
+body.is-graph-panning {
+  cursor: grabbing;
+  user-select: none;
 }
 
 .graph-node-icon {
@@ -2258,6 +2269,26 @@ body.is-graph-dragging {
   display: grid;
   gap: 4px;
   min-width: 0;
+  flex: 1 1 auto;
+}
+
+.graph-node-caret {
+  display: grid;
+  place-items: center;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.graph-node-caret .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.graph-node.is-collapsed {
+  border-style: dashed;
 }
 
 .graph-node strong {
@@ -2401,8 +2432,8 @@ body.is-graph-dragging {
 
 .graph-map.graph-up .graph-children::before,
 .graph-map.graph-down .graph-children::before {
-  right: 34px;
-  left: 34px;
+  right: calc(var(--graph-node-width) / 2);
+  left: calc(var(--graph-node-width) / 2);
   border-top: 2px solid var(--graph-line);
   border-left: 0;
 }
@@ -3056,6 +3087,7 @@ body.is-graph-dragging {
     --graph-link: 31px;
     --graph-level-gap: 62px;
     --graph-sibling-gap: 18px;
+    --graph-node-width: 190px;
   }
 
   .graph-children {
@@ -3121,8 +3153,8 @@ body.is-graph-dragging {
 
   .graph-map.graph-up .graph-children::before,
   .graph-map.graph-down .graph-children::before {
-    right: 30px;
-    left: 30px;
+    right: calc(var(--graph-node-width) / 2);
+    left: calc(var(--graph-node-width) / 2);
   }
 
   .lobby {
