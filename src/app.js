@@ -23,6 +23,7 @@
     activePageIndex: 0,
     independentPageSnapshot: null,
     pageFullNoticeTimer: 0,
+    idleRenderTimer: 0,
     undoStack: [],
     redoStack: [],
     noteHistories: new Map(),
@@ -478,6 +479,11 @@
     return Math.min(Math.max(Number.isFinite(number) ? number : 1, 0.35), 1.8);
   }
 
+  function clampGraphPan(value) {
+    const number = Number(value);
+    return Math.min(Math.max(Number.isFinite(number) ? number : 0, -5000), 5000);
+  }
+
   function graphZoomLabel(value) {
     return `${Math.round(clampGraphZoom(value) * 100)}%`;
   }
@@ -502,6 +508,8 @@
       recentHighlightColors: normalizeRecentColors(previousSettings.recentHighlightColors),
       graphDirection: normalizeGraphDirection(previousSettings.graphDirection),
       graphZoom: clampGraphZoom(previousSettings.graphZoom || 1),
+      graphPanX: clampGraphPan(previousSettings.graphPanX),
+      graphPanY: clampGraphPan(previousSettings.graphPanY),
       editorViewMode: normalizeEditorViewMode(previousSettings.editorViewMode),
       pageFlowMode: normalizePageFlowMode(previousSettings.pageFlowMode),
       pageZoom: clampPageZoom(previousSettings.pageZoom || 1),
@@ -684,10 +692,13 @@
   }
 
   function scheduleRenderWhenIdle() {
-    window.setTimeout(() => {
-      if (activeEditableTarget()) return;
-      render();
-    }, 0);
+    window.clearTimeout(runtime.idleRenderTimer);
+    runtime.idleRenderTimer = window.setTimeout(() => {
+      window.requestAnimationFrame(() => {
+        if (activeEditableTarget()) return;
+        render();
+      });
+    }, 120);
   }
 
   function focusAutofocusTarget() {
@@ -741,6 +752,8 @@
         recentHighlightColors: [],
         graphDirection: "up",
         graphZoom: 1,
+        graphPanX: 0,
+        graphPanY: 0,
         editorViewMode: "flow",
         pageFlowMode: "continuous",
         pageZoom: 1,
@@ -2085,6 +2098,8 @@
   function renderGraphView(box) {
     const direction = normalizeGraphDirection(state.settings?.graphDirection);
     const zoom = clampGraphZoom(state.settings?.graphZoom || 1);
+    const panX = clampGraphPan(state.settings?.graphPanX);
+    const panY = clampGraphPan(state.settings?.graphPanY);
     return `
       <section class="graph-shell">
         <div class="graph-header">
@@ -2095,23 +2110,25 @@
           <button class="tool-button raised" data-action="close-graph" data-tooltip="Retour à la note" aria-label="Retour à la note">${icon("edit")}</button>
         </div>
         <div class="graph-controls graph-controls-row" aria-label="Controles de la vue graphique">
-          <div class="graph-control-group" aria-label="Sens du graphe">
-            ${graphDirections.map((item) => `
-              <button class="tool-button ${direction === item.id ? "is-active" : ""}" data-action="set-graph-direction" data-graph-direction="${item.id}" data-tooltip="${escapeHtml(item.label)}" aria-label="${escapeHtml(item.label)}">${icon(item.icon)}</button>
-            `).join("")}
+          <div class="graph-control-cluster">
+            <div class="graph-control-group" aria-label="Sens du graphe">
+              ${graphDirections.map((item) => `
+                <button class="tool-button ${direction === item.id ? "is-active" : ""}" data-action="set-graph-direction" data-graph-direction="${item.id}" data-tooltip="${escapeHtml(item.label)}" aria-label="${escapeHtml(item.label)}">${icon(item.icon)}</button>
+              `).join("")}
+            </div>
+            <div class="graph-control-group" aria-label="Deplier le graphe">
+              <button class="tool-button" data-action="collapse-all" data-tooltip="Tout refermer" aria-label="Tout refermer">${icon("collapseIn")}</button>
+              <button class="tool-button" data-action="expand-all" data-tooltip="Tout derouler" aria-label="Tout derouler">${icon("collapse")}</button>
+            </div>
           </div>
           <div class="graph-control-group" aria-label="Zoom du graphe">
             <button class="tool-button" data-action="graph-zoom-out" data-tooltip="Dezoomer" aria-label="Dezoomer">${icon("zoomOut")}</button>
             <button class="graph-zoom-value" data-action="graph-zoom-reset" data-graph-zoom-label data-tooltip="Reinitialiser le zoom" aria-label="Reinitialiser le zoom">${graphZoomLabel(zoom)}</button>
             <button class="tool-button" data-action="graph-zoom-in" data-tooltip="Zoomer" aria-label="Zoomer">${icon("zoomIn")}</button>
           </div>
-          <div class="graph-control-group" aria-label="Deplier le graphe">
-            <button class="tool-button" data-action="collapse-all" data-tooltip="Tout refermer" aria-label="Tout refermer">${icon("collapseIn")}</button>
-            <button class="tool-button" data-action="expand-all" data-tooltip="Tout derouler" aria-label="Tout derouler">${icon("collapse")}</button>
-          </div>
         </div>
         <div class="graph-canvas" data-graph-canvas data-marquee-surface>
-          <div class="graph-viewport" data-graph-viewport style="--graph-zoom:${zoom}">
+          <div class="graph-viewport" data-graph-viewport style="--graph-zoom:${zoom};--graph-pan-x:${panX}px;--graph-pan-y:${panY}px">
             <div class="graph-map graph-${direction}">
               ${renderGraphNode(box, box.root, true)}
             </div>
@@ -3010,12 +3027,13 @@
 
   function startGraphTreePan(event, nodeElement) {
     const canvas = nodeElement?.closest?.("[data-graph-canvas]");
+    const viewport = canvas?.querySelector?.("[data-graph-viewport]");
     if (!canvas || event.button !== 0) return;
     if (event.ctrlKey || event.metaKey || event.shiftKey) return;
     const startX = event.clientX;
     const startY = event.clientY;
-    const startLeft = canvas.scrollLeft;
-    const startTop = canvas.scrollTop;
+    const startPanX = clampGraphPan(state.settings?.graphPanX);
+    const startPanY = clampGraphPan(state.settings?.graphPanY);
     let panning = false;
 
     const move = (pointerEvent) => {
@@ -3024,8 +3042,14 @@
       if (!panning && Math.hypot(dx, dy) < 5) return;
       panning = true;
       pointerEvent.preventDefault();
-      canvas.scrollLeft = startLeft - dx;
-      canvas.scrollTop = startTop - dy;
+      const nextPanX = clampGraphPan(startPanX + dx);
+      const nextPanY = clampGraphPan(startPanY + dy);
+      state.settings.graphPanX = nextPanX;
+      state.settings.graphPanY = nextPanY;
+      if (viewport) {
+        viewport.style.setProperty("--graph-pan-x", `${nextPanX}px`);
+        viewport.style.setProperty("--graph-pan-y", `${nextPanY}px`);
+      }
       document.body.classList.add("is-graph-panning");
       nodeElement.classList.add("is-panning-root");
     };
@@ -3040,6 +3064,7 @@
       window.setTimeout(() => {
         runtime.ignoreSurfaceClick = false;
       }, 0);
+      saveState();
       pointerEvent.preventDefault();
     };
 
@@ -4326,11 +4351,8 @@
       boundEditor.addEventListener("pointerdown", (event) => {
         const sheet = event?.target?.closest?.(".page-sheet");
         runtime.activePageIndex = Number(sheet?.dataset.pageSheet || 0);
-        if (!isIndependentPageMode() && document.activeElement !== boundEditor) {
-          boundEditor.focus({ preventScroll: true });
-        }
       });
-      ["keyup", "mouseup", "focus", "click"].forEach((eventName) => {
+      ["keyup", "mouseup", "focus", "focusin", "click"].forEach((eventName) => {
         boundEditor.addEventListener(eventName, (event) => {
           runtime.activePageIndex = Number(event?.target?.closest?.(".page-sheet")?.dataset.pageSheet || runtime.activePageIndex || 0);
           saveEditorSelection(boundEditor);
@@ -4366,7 +4388,11 @@
         saveState();
         if (normalizeEditorViewMode(state.settings?.editorViewMode) === "pages") {
           if (isContinuousPageFlow()) {
-            schedulePageRepagination(boundEditor, { scroll: "target", delay: 60 });
+            if (needsPagedLayoutRefresh(boundEditor)) {
+              schedulePageRepagination(boundEditor, { scroll: "preserve", delay: 220 });
+            } else {
+              syncPagedEditorMetrics(boundEditor);
+            }
           } else if (needsPagedLayoutRefresh(boundEditor)) {
             syncPagedEditorMetrics(boundEditor);
           } else {

@@ -1901,6 +1901,13 @@ body.is-graph-dragging {
   margin-top: -8px;
 }
 
+.graph-control-cluster {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .graph-control-group {
   display: inline-flex;
   align-items: center;
@@ -2110,6 +2117,7 @@ body.is-graph-dragging {
   display: inline-flex;
   min-width: max-content;
   min-height: 100%;
+  transform: translate(var(--graph-pan-x, 0), var(--graph-pan-y, 0));
   zoom: var(--graph-zoom, 1);
 }
 
