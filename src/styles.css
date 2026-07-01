@@ -828,6 +828,7 @@ body.is-resizing-nav {
   color: var(--text);
   cursor: pointer;
   user-select: none;
+  transition: opacity 120ms ease, filter 120ms ease, background 120ms ease, color 120ms ease;
 }
 
 .tree-row {
@@ -891,6 +892,29 @@ body.is-resizing-nav {
 .folder-tile.is-dragging,
 .graph-node.is-dragging {
   opacity: 0.45;
+}
+
+.tree-row.is-cut,
+.list-row.is-cut,
+.folder-card.is-cut,
+.folder-tile.is-cut,
+.mini-node-pill.is-cut,
+.quick-item.is-cut,
+.palette-result.is-cut,
+.graph-node.is-cut {
+  opacity: 0.52;
+  filter: grayscale(0.9);
+}
+
+.tree-row.is-cut .item-label,
+.list-row.is-cut .item-label,
+.folder-card.is-cut .item-label,
+.folder-tile.is-cut strong,
+.mini-node-pill.is-cut span,
+.quick-item.is-cut,
+.palette-result.is-cut strong,
+.graph-node.is-cut strong {
+  color: var(--faint);
 }
 
 .tree-row.is-manual-sort,
@@ -2220,7 +2244,7 @@ body.is-graph-dragging {
   box-shadow: 0 13px 30px rgba(35, 48, 43, 0.12);
   cursor: grab;
   text-align: left;
-  transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+  transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease, background 140ms ease, opacity 120ms ease, filter 120ms ease;
 }
 
 :root[data-theme="dark"] .graph-node {

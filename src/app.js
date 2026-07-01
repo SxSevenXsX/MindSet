@@ -1641,13 +1641,20 @@
       setToast("Selectionne un dossier ou une note.");
       return false;
     }
+    const hadCutClipboard = runtime.itemClipboard?.mode === "cut";
     runtime.itemClipboard = {
       mode: mode === "cut" ? "cut" : "copy",
       boxId: box.id,
       ids,
     };
     setToast(mode === "cut" ? "Selection coupee." : "Selection copiee.");
+    if (mode === "cut" || hadCutClipboard) render();
     return true;
+  }
+
+  function isItemCut(box, id) {
+    const clipboard = runtime.itemClipboard;
+    return clipboard?.mode === "cut" && clipboard.boxId === box?.id && (clipboard.ids || []).includes(id);
   }
 
   function pasteItemClipboard(box) {
@@ -1671,6 +1678,7 @@
       const moved = moveItemsToFolder(box, clipboard.ids, target.id);
       if (moved) {
         runtime.itemClipboard = null;
+        render();
       } else {
         setToast("Impossible de deplacer ici.");
       }
@@ -2147,13 +2155,14 @@
   function renderTreeRow(box, node, depth) {
     const active = box.activeItemId === node.id;
     const selected = (box.selectedIds || []).includes(node.id);
+    const cut = isItemCut(box, node.id);
     const folder = node.type === "folder";
     const childrenCount = folder ? node.children.length : "";
     const guides = depth
       ? `<span class="tree-guides" aria-hidden="true">${Array.from({ length: depth }, () => '<span class="tree-guide"></span>').join("")}</span>`
       : "";
     return `
-      <div class="tree-row ${active ? "is-active" : ""} ${selected ? "is-selected" : ""} ${box.customSortActive ? "is-manual-sort" : ""}" style="--depth:${depth}" data-item-id="${node.id}" draggable="true">
+      <div class="tree-row ${active ? "is-active" : ""} ${selected ? "is-selected" : ""} ${cut ? "is-cut" : ""} ${box.customSortActive ? "is-manual-sort" : ""}" style="--depth:${depth}" data-item-id="${node.id}" draggable="true">
         ${guides}
         ${folder ? `<button class="disclosure ${isExpanded(box, node.id) ? "is-open" : ""}" data-expand-id="${node.id}" title="Ouvrir / réduire">${icon("chevron")}</button>` : '<span class="disclosure"></span>'}
         ${itemIconMarkup(node)}
@@ -2166,9 +2175,10 @@
   function renderListRow(box, node, parent, depth = 1) {
     const active = box.activeItemId === node.id;
     const selected = (box.selectedIds || []).includes(node.id);
+    const cut = isItemCut(box, node.id);
     const indent = Math.max(depth - 1, 0);
     return `
-      <div class="list-row ${indent ? "is-nested" : ""} ${active ? "is-active" : ""} ${selected ? "is-selected" : ""} ${box.customSortActive ? "is-manual-sort" : ""}" style="--depth:${indent}" data-item-id="${node.id}" draggable="true">
+      <div class="list-row ${indent ? "is-nested" : ""} ${active ? "is-active" : ""} ${selected ? "is-selected" : ""} ${cut ? "is-cut" : ""} ${box.customSortActive ? "is-manual-sort" : ""}" style="--depth:${indent}" data-item-id="${node.id}" draggable="true">
         ${itemIconMarkup(node)}
         <span class="list-text">
           <span class="item-label">${escapeHtml(node.title)}</span>
@@ -2181,8 +2191,9 @@
   function renderIconCard(box, node) {
     const active = box.activeItemId === node.id;
     const selected = (box.selectedIds || []).includes(node.id);
+    const cut = isItemCut(box, node.id);
     return `
-      <div class="folder-card ${active ? "is-active" : ""} ${selected ? "is-selected" : ""} ${box.customSortActive ? "is-manual-sort" : ""}" data-item-id="${node.id}" draggable="true">
+      <div class="folder-card ${active ? "is-active" : ""} ${selected ? "is-selected" : ""} ${cut ? "is-cut" : ""} ${box.customSortActive ? "is-manual-sort" : ""}" data-item-id="${node.id}" draggable="true">
         ${itemIconMarkup(node)}
         <span class="item-label">${escapeHtml(node.title)}</span>
         <span class="item-meta">${node.type === "folder" ? `${node.children.length} éléments` : formatShortDate(node.modifiedAt)}</span>
@@ -2193,8 +2204,9 @@
   function renderFolderTile(box, node) {
     const active = box.activeItemId === node.id;
     const selected = (box.selectedIds || []).includes(node.id);
+    const cut = isItemCut(box, node.id);
     return `
-      <article class="folder-tile ${active ? "is-active" : ""} ${selected ? "is-selected" : ""} ${box.customSortActive ? "is-manual-sort" : ""}" data-item-id="${node.id}" draggable="true">
+      <article class="folder-tile ${active ? "is-active" : ""} ${selected ? "is-selected" : ""} ${cut ? "is-cut" : ""} ${box.customSortActive ? "is-manual-sort" : ""}" data-item-id="${node.id}" draggable="true">
         ${itemIconMarkup(node)}
         <strong>${escapeHtml(node.title)}</strong>
         <small>${node.type === "folder" ? `${node.children.length} elements` : formatShortDate(node.modifiedAt)}</small>
@@ -2428,9 +2440,10 @@
   function renderMiniTree(box, node, depth) {
     const children = node.type === "folder" ? sortedChildren(box, node).map((child) => renderMiniTree(box, child, depth + 1)).join("") : "";
     const nodeIcon = node.id === box.root.id ? icon("box") : itemIconMarkup(node);
+    const cut = isItemCut(box, node.id);
     return `
       <div class="mini-node" style="--depth:${depth}">
-        <button class="mini-node-pill" data-item-id="${node.id}">${nodeIcon}<span>${escapeHtml(node.title)}</span></button>
+        <button class="mini-node-pill ${cut ? "is-cut" : ""}" data-item-id="${node.id}">${nodeIcon}<span>${escapeHtml(node.title)}</span></button>
       </div>
       ${children}
     `;
@@ -2440,7 +2453,7 @@
     const quick = box.root.children.find((item) => item.type === "folder" && item.title === "Notes rapides");
     if (!quick || !quick.children.length) return '<div class="empty-state">Aucune note rapide</div>';
     return quick.children.filter((item) => item.type === "note").slice(0, 5).map((note) => `
-      <button class="quick-item" data-item-id="${note.id}">${escapeHtml(note.title)}</button>
+      <button class="quick-item ${isItemCut(box, note.id) ? "is-cut" : ""}" data-item-id="${note.id}">${escapeHtml(note.title)}</button>
     `).join("");
   }
 
@@ -2493,6 +2506,7 @@
     const visibleChildren = expanded ? children : [];
     const selected = (box.selectedIds || []).includes(node.id);
     const active = node.id === box.activeItemId;
+    const cut = isItemCut(box, node.id);
     const words = node.type === "note" ? noteStats(node).words : 0;
     const meta = root
       ? "Boite"
@@ -2501,7 +2515,7 @@
         : `${words} mot${words > 1 ? "s" : ""}`;
     return `
       <div class="graph-branch ${root ? "is-root" : ""} ${visibleChildren.length ? "has-children" : "is-leaf"} ${visibleChildren.length === 1 ? "has-single-child" : ""} ${children.length && !expanded ? "is-collapsed" : ""}">
-        <button class="graph-node ${root ? "root" : ""} ${node.type} ${active ? "is-active" : ""} ${selected ? "is-selected" : ""} ${children.length && !expanded ? "is-collapsed" : ""}" data-item-id="${node.id}" draggable="false" type="button">
+        <button class="graph-node ${root ? "root" : ""} ${node.type} ${active ? "is-active" : ""} ${selected ? "is-selected" : ""} ${cut ? "is-cut" : ""} ${children.length && !expanded ? "is-collapsed" : ""}" data-item-id="${node.id}" draggable="false" type="button">
           <span class="graph-node-icon">${graphNodeIcon(node, root)}</span>
           <span class="graph-node-copy">
             <strong>${escapeHtml(node.title)}</strong>
@@ -2639,7 +2653,7 @@
               </div>
               <div class="palette-results">
                 ${results.map(({ node, parent }) => `
-                  <button class="palette-result" data-item-id="${node.id}">
+                  <button class="palette-result ${isItemCut(box, node.id) ? "is-cut" : ""}" data-item-id="${node.id}">
                     ${itemIconMarkup(node)}
                     <span><strong>${escapeHtml(node.title)}</strong><small>${escapeHtml(parent?.title || box.name)}</small></span>
                   </button>
