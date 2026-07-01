@@ -21,6 +21,8 @@
     loadedFontIds: new Set(),
     pagePaginationTimer: 0,
     activePageIndex: 0,
+    independentPageSnapshot: null,
+    pageFullNoticeTimer: 0,
     undoStack: [],
     redoStack: [],
     noteHistories: new Map(),
@@ -158,6 +160,14 @@
 
   function isContinuousPageFlow() {
     return normalizePageFlowMode(state.settings?.pageFlowMode) === "continuous";
+  }
+
+  function isIndependentPageFlow() {
+    return normalizePageFlowMode(state.settings?.pageFlowMode) === "independent";
+  }
+
+  function isIndependentPageMode() {
+    return normalizeEditorViewMode(state.settings?.editorViewMode) === "pages" && isIndependentPageFlow();
   }
 
   function clampPageZoom(value) {
@@ -1938,6 +1948,7 @@
             <button class="format-button ${pageMode ? "is-active" : ""}" data-action="toggle-editor-view" data-tooltip="${pageMode ? "Mode ecriture simple" : "Mode feuilles"}" aria-label="${pageMode ? "Mode ecriture simple" : "Mode feuilles"}">${icon("bookOpen")}</button>
             ${pageMode ? `<button class="format-button" data-action="cycle-page-margins" data-page-layout-button data-tooltip="${escapeHtml(marginLabel)} - clic droit : personnaliser" aria-label="${escapeHtml(marginLabel)}">${icon("ruler")}</button>` : ""}
             ${pageMode ? `<button class="format-button ${pageFlowMode === "continuous" ? "is-active" : ""}" data-action="toggle-page-flow-mode" data-tooltip="${escapeHtml(pageFlowLabel)}" aria-label="${escapeHtml(pageFlowLabel)}">${icon(pageFlowMode === "continuous" ? "linkedPages" : "splitPages")}</button>` : ""}
+            ${pageMode && pageFlowMode === "independent" ? `<button class="format-button" data-action="add-independent-page" data-tooltip="Ajouter une page" aria-label="Ajouter une page">${icon("plus")}</button>` : ""}
             <button class="format-button ${splitMode ? "is-active" : ""}" data-action="toggle-editor-split-view" data-tooltip="${splitMode ? "Mode ecriture simple" : "Tableau coupe en 2"}" aria-label="${splitMode ? "Mode ecriture simple" : "Tableau coupe en 2"}">${icon("splitColumns")}</button>
             ${pageMode ? `
               <button class="format-button" data-action="page-zoom-out" data-tooltip="Dezoomer les feuilles" aria-label="Dezoomer les feuilles">${icon("zoomOut")}</button>
@@ -1950,9 +1961,10 @@
         <section class="editor-page ${pageMode ? "is-page-mode" : ""} ${splitMode ? "is-split-mode" : ""}" style="${pageStyle}">
           <input class="title-input" data-note-title value="${escapeHtml(note.title)}" aria-label="Titre de la note" />
           ${pageMode
-            ? `<div class="page-editor-viewport" data-page-viewport><div class="page-editor-scale" data-page-scale><div class="note-editor page-document" data-note-editor contenteditable="true" spellcheck="true"></div></div></div>`
+            ? `<div class="page-editor-viewport" data-page-viewport><div class="page-editor-scale" data-page-scale><div class="note-editor page-document" data-note-editor data-page-flow="${pageFlowMode}" contenteditable="${pageFlowMode === "independent" ? "false" : "true"}" spellcheck="true"></div></div></div>`
             : `<div class="note-editor" data-note-editor contenteditable="true" spellcheck="true">${note.content || ""}</div>`}
           <div class="editor-status" aria-live="polite">
+            ${pageMode && pageFlowMode === "independent" ? `<span class="page-full-notice" data-page-full-notice></span>` : ""}
             <span data-word-count>${stats.words} mots</span>
             <span data-char-count>${stats.chars} caractères</span>
           </div>
@@ -3145,7 +3157,7 @@
         const editor = app.querySelector(".editor-page.is-page-mode [data-note-editor]");
         const note = findItem(box, box.activeItemId);
         if (editor && note?.type === "note") {
-          note.content = mergePageEditorHtml({ keepActiveBlankSheet: true });
+          note.content = mergePageEditorHtml({ keepActiveBlankSheet: isIndependentPageFlow() });
           note.modifiedAt = now();
           touchBox(box);
           saveState();
@@ -3178,7 +3190,7 @@
         const editor = app.querySelector(".editor-page.is-page-mode [data-note-editor]");
         const note = findItem(box, box.activeItemId);
         if (editor && note?.type === "note") {
-          note.content = mergePageEditorHtml({ keepActiveBlankSheet: true });
+          note.content = mergePageEditorHtml({ keepActiveBlankSheet: isIndependentPageFlow() });
           note.modifiedAt = now();
           touchBox(box);
           saveState();
@@ -3208,6 +3220,10 @@
       const setup = normalizePageSetup(state.settings.pageSetup, nextPreset, state.settings);
       updatePageSetup({ ...setup, margins: pageMarginPresetMargins(nextPreset, state.settings) || setup.margins }, nextPreset, { rememberCustom: false });
       render();
+    }
+    if (action === "add-independent-page") {
+      addIndependentPage(box);
+      return;
     }
     if (action === "new-note") createNote(box);
     if (action === "new-folder") createFolder(box);
@@ -3397,10 +3413,26 @@
     return Number.isFinite(value) ? value : fallback;
   }
 
+  function configurePageSheet(sheet, index, options = {}) {
+    if (!sheet) return sheet;
+    sheet.classList.add("page-sheet");
+    sheet.dataset.pageSheet = String(index);
+    if (options.editable) {
+      sheet.setAttribute("contenteditable", "true");
+      sheet.setAttribute("spellcheck", "true");
+      sheet.setAttribute("tabindex", "0");
+    } else {
+      sheet.removeAttribute("contenteditable");
+      sheet.removeAttribute("spellcheck");
+      sheet.removeAttribute("tabindex");
+    }
+    return sheet;
+  }
+
   function createPageSheet(editor, index) {
     const sheet = document.createElement("div");
     sheet.className = "page-sheet";
-    sheet.dataset.pageSheet = String(index);
+    configurePageSheet(sheet, index, { editable: isIndependentPageMode() });
     editor.appendChild(sheet);
     return sheet;
   }
@@ -3467,6 +3499,79 @@
     return !!sheet && sheet.scrollHeight > sheet.clientHeight + 2;
   }
 
+  function inputCanGrowPage(event) {
+    const type = event?.inputType || "";
+    if (!type) return true;
+    return type.startsWith("insert");
+  }
+
+  function showPageFullNotice(message = "Page pleine") {
+    const notice = app.querySelector("[data-page-full-notice]");
+    if (!notice) return;
+    notice.textContent = message;
+    notice.classList.add("is-visible");
+    window.clearTimeout(runtime.pageFullNoticeTimer);
+    runtime.pageFullNoticeTimer = window.setTimeout(() => {
+      notice.classList.remove("is-visible");
+    }, 1800);
+  }
+
+  function rememberIndependentPageSnapshot(editor) {
+    if (!isIndependentPageMode() || !editor) return;
+    const sheet = currentPageSheet(editor) || editor.querySelector(".page-sheet");
+    if (!sheet) return;
+    runtime.independentPageSnapshot = {
+      index: Number(sheet.dataset.pageSheet || 0),
+      html: sheet.innerHTML,
+      selectionOffsets: getEditorSelectionOffsets(sheet),
+    };
+  }
+
+  function restoreIndependentPageSnapshot(editor) {
+    const snapshot = runtime.independentPageSnapshot;
+    if (!editor || !snapshot) return false;
+    const sheet = editor.querySelector(`[data-page-sheet="${snapshot.index}"]`) || currentPageSheet(editor);
+    if (!sheet) return false;
+    sheet.innerHTML = snapshot.html || "<p><br></p>";
+    configurePageSheet(sheet, Number(sheet.dataset.pageSheet || snapshot.index || 0), { editable: true });
+    if (!restoreEditorSelectionOffsets(sheet, snapshot.selectionOffsets)) placeCaretAtEnd(sheet);
+    sheet.focus({ preventScroll: true });
+    saveEditorSelection(editor);
+    return true;
+  }
+
+  function enforceIndependentPageLimit(editor, note, box) {
+    if (!isIndependentPageMode() || !editor) return false;
+    const sheet = currentPageSheet(editor) || editor.querySelector(".page-sheet");
+    if (!sheet || !sheetOverflows(sheet)) return false;
+    restoreIndependentPageSnapshot(editor);
+    showPageFullNotice();
+    if (note && box) {
+      note.content = editorSnapshotContent(editor);
+      note.modifiedAt = now();
+      touchBox(box);
+      updateEditorStats(note);
+      saveState();
+    }
+    syncPagedEditorMetrics(editor);
+    return true;
+  }
+
+  function selectIndependentPageContents(editor) {
+    if (!isIndependentPageMode()) return false;
+    const sheet = currentPageSheet(editor) || editor?.querySelector?.(".page-sheet");
+    if (!sheet) return false;
+    const range = document.createRange();
+    range.selectNodeContents(sheet);
+    const selection = window.getSelection();
+    if (!selection) return false;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    sheet.focus({ preventScroll: true });
+    saveEditorSelection(editor);
+    return true;
+  }
+
   function removeEditorSelectionMarkers(root) {
     root?.querySelectorAll?.("[data-editor-selection-marker]").forEach((marker) => marker.remove());
   }
@@ -3475,6 +3580,11 @@
     if (keepMarkers || node.nodeType !== Node.ELEMENT_NODE) return node;
     if (node.matches?.("[data-editor-selection-marker]")) return document.createTextNode("");
     const clone = node.cloneNode(true);
+    if (clone.classList?.contains("page-sheet")) {
+      clone.removeAttribute("contenteditable");
+      clone.removeAttribute("spellcheck");
+      clone.removeAttribute("tabindex");
+    }
     removeEditorSelectionMarkers(clone);
     return clone;
   }
@@ -3871,25 +3981,56 @@
     page.style.setProperty("--page-zoom", String(zoom));
   }
 
+  function addIndependentPage(box = activeBox()) {
+    if (!isIndependentPageMode()) return false;
+    const editor = app.querySelector(".editor-page.is-page-mode [data-note-editor]");
+    const note = box ? findItem(box, box.activeItemId) : null;
+    if (!box || note?.type !== "note" || !editor) return false;
+    rememberEditorSnapshot(note, editor);
+    const index = editor.querySelectorAll(".page-sheet").length;
+    const sheet = createPageSheet(editor, index);
+    configurePageSheet(sheet, index, { editable: true });
+    const paragraph = document.createElement("p");
+    paragraph.appendChild(document.createElement("br"));
+    sheet.appendChild(paragraph);
+    runtime.activePageIndex = index;
+    updatePagedLayout(editor.closest(".editor-page.is-page-mode"));
+    placeCaretInside(paragraph);
+    sheet.focus({ preventScroll: true });
+    saveEditorSelection(editor);
+    note.content = mergePageEditorHtml({ keepActiveBlankSheet: true, keepSheets: true });
+    note.modifiedAt = now();
+    touchBox(box);
+    updateEditorStats(note);
+    commitEditorHistoryChange(note, note.content);
+    saveState();
+    requestAnimationFrame(() => restorePagedViewport(capturePagedViewport(editor), sheet, "target"));
+    return true;
+  }
+
   function renderIndependentPages(note, editor, page, selectionOffsets = null, restoreSelection = true) {
     const source = document.createElement("div");
     source.innerHTML = note.content || "<p><br></p>";
     const existingSheets = [...source.children].filter((node) => node.classList?.contains("page-sheet"));
+    editor.setAttribute("contenteditable", "false");
+    editor.setAttribute("spellcheck", "false");
+    editor.dataset.pageFlow = "independent";
     editor.innerHTML = "";
     const sheets = existingSheets.length ? existingSheets : [];
     if (!sheets.length) {
       const sheet = createPageSheet(editor, 0);
+      configurePageSheet(sheet, 0, { editable: true });
       editableBlocksFromHtml(note.content).forEach((block) => sheet.appendChild(block));
     } else {
       sheets.forEach((sourceSheet, index) => {
         const sheet = sourceSheet.cloneNode(true);
-        sheet.classList.add("page-sheet");
-        sheet.dataset.pageSheet = String(index);
+        configurePageSheet(sheet, index, { editable: true });
         editor.appendChild(sheet);
       });
     }
     if (!editor.querySelector(".page-sheet")) {
       const sheet = createPageSheet(editor, 0);
+      configurePageSheet(sheet, 0, { editable: true });
       const paragraph = document.createElement("p");
       paragraph.appendChild(document.createElement("br"));
       sheet.appendChild(paragraph);
@@ -3909,6 +4050,10 @@
       return renderIndependentPages(note, editor, page, selectionOffsets, options.restoreSelection);
     }
     const blocks = editableBlocksFromHtml(note.content);
+    editor.setAttribute("contenteditable", "true");
+    editor.setAttribute("spellcheck", "true");
+    editor.dataset.pageFlow = "continuous";
+    runtime.independentPageSnapshot = null;
     editor.innerHTML = "";
     const sheets = [];
     let sheet = createPageSheet(editor, 0);
@@ -3978,7 +4123,7 @@
     const restored = markers ? restoreEditorSelectionMarkers(editor, markers) : false;
     if (!restored) restoreEditorSelectionOffsets(editor, selectionOffsets);
     removeEditorSelectionMarkers(editor);
-    note.content = mergePageEditorHtml({ keepActiveBlankSheet: true });
+    note.content = mergePageEditorHtml({ keepActiveBlankSheet: isIndependentPageFlow() });
     const target = currentSelectionScrollTarget(editor)
       || markerTarget
       || pageSheetForTextOffset(editor, selectionOffsets?.end ?? selectionOffsets?.start)
@@ -4048,7 +4193,7 @@
       const restored = markers ? restoreEditorSelectionMarkers(targetEditor, markers) : false;
       if (!restored) restoreEditorSelectionOffsets(targetEditor, selectionOffsets);
       removeEditorSelectionMarkers(targetEditor);
-      note.content = mergePageEditorHtml({ keepActiveBlankSheet: true });
+      note.content = mergePageEditorHtml({ keepActiveBlankSheet: isIndependentPageFlow() });
       const targetSheet = currentSelectionScrollTarget(targetEditor)
         || markerTarget
         || pageSheetForTextOffset(targetEditor, selectionOffsets?.end ?? selectionOffsets?.start)
@@ -4078,8 +4223,11 @@
       prepareCollapsibleHeadings(boundEditor, note, box);
       bindPagedEditor(boundEditor);
       boundEditor.addEventListener("pointerdown", (event) => {
-        runtime.activePageIndex = Number(event?.target?.closest?.(".page-sheet")?.dataset.pageSheet || 0);
-        if (document.activeElement !== boundEditor) boundEditor.focus({ preventScroll: true });
+        const sheet = event?.target?.closest?.(".page-sheet");
+        runtime.activePageIndex = Number(sheet?.dataset.pageSheet || 0);
+        if (!isIndependentPageMode() && document.activeElement !== boundEditor) {
+          boundEditor.focus({ preventScroll: true });
+        }
       });
       ["keyup", "mouseup", "focus", "click"].forEach((eventName) => {
         boundEditor.addEventListener(eventName, (event) => {
@@ -4094,10 +4242,19 @@
           restoreEditorHistory(boundEditor, note, box, event.inputType === "historyRedo" ? "redo" : "undo");
           return;
         }
+        if (isIndependentPageMode() && inputCanGrowPage(event)) {
+          const sheet = event.target?.closest?.(".page-sheet") || currentPageSheet(boundEditor);
+          if (sheet && sheetOverflows(sheet)) {
+            event.preventDefault();
+            showPageFullNotice();
+            return;
+          }
+        }
         rememberEditorSnapshot(note, boundEditor);
       });
       boundEditor.addEventListener("keydown", (event) => handleEditorAutomation(event, boundEditor, note, box));
       boundEditor.addEventListener("input", () => {
+        if (enforceIndependentPageLimit(boundEditor, note, box)) return;
         note.content = editorSnapshotContent(boundEditor);
         note.modifiedAt = now();
         touchBox(box);
@@ -4120,7 +4277,7 @@
       });
       boundEditor.addEventListener("blur", () => {
         if (normalizeEditorViewMode(state.settings?.editorViewMode) !== "pages") return;
-        note.content = mergePageEditorHtml({ keepSheets: !isContinuousPageFlow() });
+        note.content = mergePageEditorHtml({ keepActiveBlankSheet: isIndependentPageFlow(), keepSheets: !isContinuousPageFlow() });
         saveState();
       });
     }
@@ -4415,6 +4572,11 @@
   function handleEditorAutomation(event, editor, note, box) {
     if ((event.ctrlKey || event.metaKey) && !event.altKey) {
       const key = event.key.toLowerCase();
+      if (key === "a" && isIndependentPageMode()) {
+        event.preventDefault();
+        selectIndependentPageContents(editor);
+        return;
+      }
       if (key === "z" || key === "y") {
         event.preventDefault();
         const direction = key === "y" || event.shiftKey ? "redo" : "undo";
@@ -4620,7 +4782,8 @@
 
   function restoreEditorSelection(editor) {
     if (!editor) return;
-    editor.focus({ preventScroll: true });
+    const focusTarget = isIndependentPageMode() ? (currentPageSheet(editor) || editor) : editor;
+    focusTarget.focus({ preventScroll: true });
     const selection = window.getSelection();
     if (!selection || !runtime.editorRange) return;
     try {
@@ -4640,7 +4803,7 @@
       return editor?.innerHTML || "<p><br></p>";
     }
     return mergePageEditorHtml({
-      keepActiveBlankSheet: true,
+      keepActiveBlankSheet: isIndependentPageFlow(),
       keepSheets: normalizePageFlowMode(state.settings?.pageFlowMode) === "independent",
     });
   }
@@ -4673,6 +4836,7 @@
 
   function rememberEditorSnapshot(note, editor) {
     if (!note || !editor || runtime.restoringEditorHistory) return;
+    rememberIndependentPageSnapshot(editor);
     const history = editorHistory(note);
     const snapshot = editorSnapshotContent(editor);
     if (history.undo[history.undo.length - 1] !== snapshot) {
@@ -4728,14 +4892,16 @@
     updateEditorStats(note);
     markEditorHistoryCurrent(note, note.content);
     saveState();
-    editor.focus({ preventScroll: true });
-    placeCaretAtEnd(editor);
+    const focusTarget = isIndependentPageMode() ? (currentPageSheet(editor) || editor) : editor;
+    focusTarget.focus({ preventScroll: true });
+    placeCaretAtEnd(focusTarget);
     saveEditorSelection(editor);
     runtime.restoringEditorHistory = false;
     return true;
   }
 
   function syncEditorContent(editor, note, box) {
+    if (enforceIndependentPageLimit(editor, note, box)) return;
     note.content = editorSnapshotContent(editor);
     note.modifiedAt = now();
     touchBox(box);
