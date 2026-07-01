@@ -59,6 +59,8 @@
     collapseIn: '<path d="m8 5 4 4 4-4"/><path d="m16 19-4-4-4 4"/>',
     trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 15h10l1-15"/><path d="M10 11v6"/><path d="M14 11v6"/>',
     copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+    filePdf: '<path d="M7 3h7l4 4v14H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M14 3v5h5"/><path d="M8 13h2.5a1.5 1.5 0 0 1 0 3H8v-3Z"/><path d="M13 13h1.5a2 2 0 0 1 0 4H13v-4Z"/><path d="M17 13h3"/><path d="M17 15h2"/>',
+    printer: '<path d="M6 9V4h12v5"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v7H6z"/><path d="M18 12h.01"/>',
     lock: '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
     unlock: '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 7.4-2.1"/>',
     bolt: '<path d="m13 2-8 12h7l-1 8 8-12h-7l1-8Z"/>',
@@ -466,6 +468,169 @@
       pages.textContent = `${pageCount} page${pageCount > 1 ? "s" : ""}`;
     }
     if (chars) chars.textContent = `${stats.chars} caracteres`;
+  }
+
+  function safePrintCssValue(value, fallback) {
+    const cleaned = String(value || fallback || "").replace(/[<>{};]/g, "").trim();
+    return cleaned || fallback || "";
+  }
+
+  function printableFontFaces() {
+    const formatMap = {
+      ".ttf": "truetype",
+      ".otf": "opentype",
+      ".woff": "woff",
+      ".woff2": "woff2",
+    };
+    return (state.settings?.localFonts || [])
+      .filter((font) => font?.family && font?.dataUrl?.startsWith?.("data:"))
+      .map((font) => {
+        const family = safePrintCssValue(font.family, "");
+        const format = formatMap[String(font.format || "").toLowerCase()] || "";
+        return `@font-face{font-family:"${family}";src:url("${font.dataUrl}")${format ? ` format("${format}")` : ""};font-display:swap;}`;
+      })
+      .join("\n");
+  }
+
+  function printableHeadingCssVariables() {
+    const headings = state.settings?.headingPresets || headingDefaults;
+    return ["normal", "h1", "h2", "h3"].map((key) => {
+      const preset = { ...headingDefaults[key], ...(headings[key] || {}) };
+      const color = cleanColor(preset.color, headingDefaults[key].color);
+      return [
+        `--${key}-size:${safePrintCssValue(preset.size, headingDefaults[key].size)}`,
+        `--${key}-color:${color}`,
+        `--${key}-weight:${safePrintCssValue(preset.weight, headingDefaults[key].weight)}`,
+        `--${key}-font:${safePrintCssValue(preset.fontFamily, headingDefaults[key].fontFamily)}`,
+      ].join(";");
+    }).join(";");
+  }
+
+  function sanitizePrintableHtml(html) {
+    const template = document.createElement("template");
+    template.innerHTML = html || "<p><br></p>";
+    template.content.querySelectorAll("script, style, iframe, object, embed, link, meta, base, [data-editor-selection-marker], [data-pagination-probe]").forEach((node) => node.remove());
+    template.content.querySelectorAll("*").forEach((element) => {
+      [...element.attributes].forEach((attribute) => {
+        const name = attribute.name.toLowerCase();
+        const value = String(attribute.value || "").trim().toLowerCase();
+        if (name.startsWith("on") || name === "contenteditable" || name === "spellcheck" || name === "tabindex") {
+          element.removeAttribute(attribute.name);
+          return;
+        }
+        if ((name === "src" || name === "href") && value.startsWith("javascript:")) {
+          element.removeAttribute(attribute.name);
+        }
+      });
+    });
+    return template.innerHTML || "<p><br></p>";
+  }
+
+  function printableNoteBody(sourceHtml) {
+    const source = document.createElement("div");
+    source.innerHTML = sanitizePrintableHtml(sourceHtml);
+    const sheets = [...source.querySelectorAll(".page-sheet")];
+    if (sheets.length) {
+      return sheets.map((sheet) => `<section class="print-sheet note-editor">${sheet.innerHTML || "<p><br></p>"}</section>`).join("");
+    }
+    return `<section class="print-sheet note-editor">${source.innerHTML || "<p><br></p>"}</section>`;
+  }
+
+  function printableNoteDocument(note, sourceHtml) {
+    const setup = normalizePageSetup(state.settings?.pageSetup, state.settings?.pageMarginPreset, state.settings);
+    const dimensions = pageSizeDimensions(setup);
+    const margins = setup.margins;
+    const title = escapeHtml(note?.title || "Note MindSet");
+    const todoColor = cleanColor(state.settings?.todoColor, state.settings?.selectionColor || "#0f6b58");
+    return `<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>${title} - MindSet</title>
+  <style>
+    ${printableFontFaces()}
+    :root{${printableHeadingCssVariables()};--todo-color:${todoColor};--accent:${cleanColor(state.settings?.selectionColor, "#0f6b58")};}
+    @page{size:${dimensions.widthCm}cm ${dimensions.heightCm}cm;margin:${margins.top}cm ${margins.right}cm ${margins.bottom}cm ${margins.left}cm;}
+    *{box-sizing:border-box;}
+    body{margin:0;background:#f0f1f0;color:#17201c;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}
+    .print-toolbar{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 16px;border-bottom:1px solid #d8ddda;background:rgba(247,247,247,.94);backdrop-filter:blur(12px);}
+    .print-toolbar strong{font-size:13px;}
+    .print-toolbar span{color:#657169;font-size:12px;}
+    .print-button{height:30px;border:1px solid #cbd2ce;border-radius:6px;background:#fff;color:#17201c;padding:0 12px;font-weight:750;cursor:pointer;}
+    .print-button:hover{background:#f1f3f2;}
+    .print-preview{padding:28px 18px;}
+    .print-sheet{width:${dimensions.widthCm}cm;min-height:${dimensions.heightCm}cm;margin:0 auto 22px;padding:${margins.top}cm ${margins.right}cm ${margins.bottom}cm ${margins.left}cm;background:#fff;border:1px solid #dfe3e1;border-radius:6px;box-shadow:0 18px 42px rgba(35,48,43,.12);overflow:hidden;}
+    .note-editor{font-family:var(--normal-font);font-size:var(--normal-size);font-weight:var(--normal-weight);color:var(--normal-color);line-height:1.65;}
+    .note-editor h1,.note-editor h2,.note-editor h3{margin:1.2em 0 .45em;line-height:1.18;}
+    .note-editor h1{font-family:var(--h1-font);font-size:var(--h1-size);font-weight:var(--h1-weight);color:var(--h1-color);}
+    .note-editor h2{font-family:var(--h2-font);font-size:var(--h2-size);font-weight:var(--h2-weight);color:var(--h2-color);}
+    .note-editor h3{font-family:var(--h3-font);font-size:var(--h3-size);font-weight:var(--h3-weight);color:var(--h3-color);}
+    .note-editor p{margin:.55em 0;}
+    .note-editor ul,.note-editor ol{margin:.65em 0;padding-left:1.6em;}
+    .note-editor .dash-list,.note-editor .arrow-list,.note-editor .circle-list,.note-editor .check-list,.note-editor .triangle-list,.note-editor .square-list{list-style:none;padding-left:0;}
+    .note-editor .dash-list li::before{content:"- ";font-weight:700;}
+    .note-editor .arrow-list li::before{content:"-> ";font-weight:700;}
+    .note-editor .circle-list li::before{content:"○ ";font-weight:700;}
+    .note-editor .triangle-list li::before{content:"△ ";font-weight:700;color:#d58f27;}
+    .note-editor .square-list li::before{content:"□ ";font-weight:700;}
+    .note-editor .check-list li{position:relative;min-height:1.7em;padding-left:26px;}
+    .note-editor .check-list li::before{content:"";position:absolute;top:.45em;left:0;width:12px;height:12px;border:1.5px solid var(--accent);border-radius:3px;}
+    .note-editor .check-list li[data-checked="true"]{color:#657169;text-decoration:line-through;}
+    .note-editor .check-list li[data-checked="true"]::before{background:var(--todo-color);border-color:var(--todo-color);}
+    .note-editor .check-list li[data-checked="true"]::after{content:"";position:absolute;top:calc(.45em + 2px);left:4px;width:4px;height:8px;border-right:2px solid #fff;border-bottom:2px solid #fff;transform:rotate(42deg);}
+    .note-editor img{max-width:100%;height:auto;}
+    @media print{
+      body{background:#fff;}
+      .print-toolbar{display:none;}
+      .print-preview{padding:0;}
+      .print-sheet{width:auto;min-height:auto;margin:0;padding:0;border:0;border-radius:0;box-shadow:none;overflow:visible;break-after:page;}
+      .print-sheet:last-child{break-after:auto;}
+    }
+  </style>
+</head>
+<body>
+  <div class="print-toolbar">
+    <div><strong>${title}</strong><span> - impression MindSet</span></div>
+    <button class="print-button" onclick="window.print()">Imprimer</button>
+  </div>
+  <main class="print-preview">
+    ${printableNoteBody(sourceHtml)}
+  </main>
+</body>
+</html>`;
+  }
+
+  function activePrintableSource(box, note) {
+    const pageEditor = app.querySelector(".editor-page.is-page-mode [data-note-editor]");
+    if (pageEditor && findItem(box, note?.id)?.id === note?.id) return pageEditor.innerHTML;
+    const editor = app.querySelector("[data-note-editor]");
+    if (editor && findItem(box, note?.id)?.id === note?.id) return editor.innerHTML;
+    return note?.content || "<p><br></p>";
+  }
+
+  function openPrintableNoteWindow(box, note, mode = "print") {
+    if (!box || note?.type !== "note") return;
+    const sourceHtml = activePrintableSource(box, note);
+    flushActiveEditorContent();
+    const freshNote = findItem(box, note.id) || note;
+    const printWindow = window.open("", "_blank", "width=980,height=740");
+    if (!printWindow) {
+      setToast("Autorise les fenetres pour imprimer ou exporter la note.");
+      return;
+    }
+    printWindow.document.open();
+    printWindow.document.write(printableNoteDocument(freshNote, sourceHtml));
+    printWindow.document.close();
+    let started = false;
+    const startPrint = () => {
+      if (started) return;
+      started = true;
+      printWindow.focus();
+      printWindow.print();
+    };
+    printWindow.addEventListener?.("load", () => window.setTimeout(startPrint, 120));
+    window.setTimeout(startPrint, 320);
+    setToast(mode === "pdf" ? "Choisis Enregistrer en PDF dans la fenetre d'impression." : "Fenetre d'impression ouverte.");
   }
 
   function isHexColor(value) {
@@ -2156,6 +2321,10 @@
             <span data-char-count>${stats.chars} caracteres</span>
             <span data-word-count>${stats.words} mots</span>
             <span data-page-count>1 page</span>
+            <div class="toolbar-export-actions">
+              <button class="stats-action-button" data-action="export-note-pdf" data-tooltip="Exporter en PDF" aria-label="Exporter en PDF">${icon("filePdf")}</button>
+              <button class="stats-action-button" data-action="print-note" data-tooltip="Imprimer" aria-label="Imprimer">${icon("printer")}</button>
+            </div>
           </div>
           </div>
           <div class="toolbar-row toolbar-secondary-row">
@@ -3395,6 +3564,14 @@
 
     if (action === "confirm-delete") {
       deleteSelected(box, runtime.modal?.ids || []);
+      return;
+    }
+
+    if (action === "export-note-pdf" || action === "print-note") {
+      const note = findItem(box, box.activeItemId);
+      if (note?.type === "note") {
+        openPrintableNoteWindow(box, note, action === "export-note-pdf" ? "pdf" : "print");
+      }
       return;
     }
 

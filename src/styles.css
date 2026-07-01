@@ -1375,6 +1375,36 @@ body.is-graph-dragging {
   white-space: nowrap;
 }
 
+.toolbar-export-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 4px;
+}
+
+.stats-action-button {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 23px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.stats-action-button:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-soft);
+  color: var(--text);
+}
+
+.stats-action-button .icon {
+  width: 13px;
+  height: 13px;
+}
+
 .format-button {
   display: inline-grid;
   place-items: center;
