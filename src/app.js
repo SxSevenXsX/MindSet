@@ -3632,7 +3632,7 @@
     if (page) updatePagedLayout(page);
   }
 
-  function refreshPagedEditorIfNeeded(editor, note, scrollMode = "preserve") {
+  function refreshPagedEditorIfNeeded(editor, note, scrollMode = "preserve", options = {}) {
     if (normalizeEditorViewMode(state.settings?.editorViewMode) !== "pages" || !editor || !note) {
       syncPagedEditorMetrics(editor);
       return;
@@ -3640,7 +3640,7 @@
     const snapshot = capturePagedViewport(editor);
     const selectionOffsets = getEditorSelectionOffsets(editor);
     const markers = captureEditorSelectionMarkers(editor);
-    if (needsPagedLayoutRefresh(editor)) {
+    if (options.force || needsPagedLayoutRefresh(editor)) {
       note.content = mergePageEditorHtml({ keepMarkers: !!markers });
       paginateNoteIntoPages(note, { selectionOffsets, restoreSelection: !markers });
     } else {
@@ -4042,14 +4042,36 @@
     touchBox(box);
     updateEditorStats(note);
     commitEditorHistoryChange(note, note.content);
-    refreshPagedEditorIfNeeded(editor, note);
+    refreshPagedEditorIfNeeded(editor, note, "preserve", { force: true });
+    prepareCollapsibleHeadings(editor, note, box);
     saveState();
   }
 
-  function setHeadingSectionVisibility(heading, collapsed) {
+  function logicalEditorBlocks(editor) {
+    if (!editor) return [];
+    const sheets = [...editor.children].filter((child) => child.classList?.contains("page-sheet"));
+    return sheets.length
+      ? sheets.flatMap((sheet) => [...sheet.children])
+      : [...editor.children];
+  }
+
+  function headingSectionBlocks(heading) {
+    const editor = heading?.closest?.("[data-note-editor]");
+    const blocks = logicalEditorBlocks(editor);
+    const start = blocks.indexOf(heading);
+    if (start < 0) return [];
     const level = Number(heading.tagName.slice(1));
-    let node = heading.nextElementSibling;
-    while (node && !(/^H[1-3]$/.test(node.tagName) && Number(node.tagName.slice(1)) <= level)) {
+    const section = [];
+    for (let index = start + 1; index < blocks.length; index += 1) {
+      const block = blocks[index];
+      if (/^H[1-3]$/.test(block.tagName) && Number(block.tagName.slice(1)) <= level) break;
+      section.push(block);
+    }
+    return section;
+  }
+
+  function setHeadingSectionVisibility(heading, collapsed) {
+    headingSectionBlocks(heading).forEach((node) => {
       if (collapsed) {
         node.dataset.collapsedHidden = "true";
         node.style.display = "none";
@@ -4057,8 +4079,7 @@
         delete node.dataset.collapsedHidden;
         node.style.display = "";
       }
-      node = node.nextElementSibling;
-    }
+    });
   }
 
   function handleEditorAutomation(event, editor, note, box) {
