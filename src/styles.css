@@ -888,14 +888,16 @@ body.is-resizing-nav {
 .tree-row.is-dragging,
 .list-row.is-dragging,
 .folder-card.is-dragging,
-.folder-tile.is-dragging {
+.folder-tile.is-dragging,
+.graph-node.is-dragging {
   opacity: 0.45;
 }
 
 .tree-row.is-manual-sort,
 .list-row.is-manual-sort,
 .folder-card.is-manual-sort,
-.folder-tile.is-manual-sort {
+.folder-tile.is-manual-sort,
+.graph-node {
   cursor: grab;
 }
 
@@ -933,7 +935,8 @@ body.is-resizing-nav {
 .tree-row.drop-into,
 .list-row.drop-into,
 .folder-card.drop-into,
-.folder-tile.drop-into {
+.folder-tile.drop-into,
+.graph-node.drop-into {
   background: var(--selection-soft);
   box-shadow: inset 0 0 0 2px var(--selection-color);
 }
@@ -950,6 +953,11 @@ body.is-resizing-nav {
 
 body.is-marquee-selecting {
   cursor: crosshair;
+  user-select: none;
+}
+
+body.is-graph-dragging {
+  cursor: grabbing;
   user-select: none;
 }
 
@@ -2121,7 +2129,7 @@ body.is-marquee-selecting {
     var(--surface);
   color: var(--text);
   box-shadow: 0 13px 30px rgba(35, 48, 43, 0.12);
-  cursor: pointer;
+  cursor: grab;
   text-align: left;
   transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
@@ -2156,6 +2164,52 @@ body.is-marquee-selecting {
 .graph-node.is-selected {
   border-color: var(--selection-color);
   box-shadow: 0 0 0 2px var(--selection-soft), 0 16px 34px rgba(35, 48, 43, 0.14);
+}
+
+.graph-node.drop-before::before,
+.graph-node.drop-after::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--selection-color);
+}
+
+.graph-node.drop-before::before {
+  left: -9px;
+}
+
+.graph-node.drop-after::after {
+  right: -9px;
+}
+
+.graph-map.graph-left .graph-node.drop-before::before,
+.graph-map.graph-right .graph-node.drop-before::before,
+.graph-map.graph-left .graph-node.drop-after::after,
+.graph-map.graph-right .graph-node.drop-after::after {
+  right: 8px;
+  left: 8px;
+  width: auto;
+  height: 2px;
+}
+
+.graph-map.graph-left .graph-node.drop-before::before,
+.graph-map.graph-right .graph-node.drop-before::before {
+  top: -9px;
+  bottom: auto;
+}
+
+.graph-map.graph-left .graph-node.drop-after::after,
+.graph-map.graph-right .graph-node.drop-after::after {
+  top: auto;
+  bottom: -9px;
+}
+
+.graph-node.root {
+  cursor: pointer;
 }
 
 .graph-node-icon {
@@ -2286,17 +2340,18 @@ body.is-marquee-selecting {
 .graph-map.graph-up .graph-children,
 .graph-map.graph-down .graph-children {
   flex-direction: row;
-  align-items: flex-start;
   gap: 30px;
   margin-left: 0;
   padding: 0;
 }
 
 .graph-map.graph-up .graph-children {
+  align-items: flex-end;
   margin-bottom: var(--graph-level-gap);
 }
 
 .graph-map.graph-down .graph-children {
+  align-items: flex-start;
   margin-top: var(--graph-level-gap);
 }
 
@@ -2735,6 +2790,14 @@ body.is-marquee-selecting {
   background: var(--surface-soft);
 }
 
+.context-row.danger {
+  color: var(--danger);
+}
+
+.context-row.danger:hover {
+  background: var(--danger-soft);
+}
+
 .context-glyph {
   width: 19px;
   height: 19px;
@@ -3015,10 +3078,12 @@ body.is-marquee-selecting {
   }
 
   .graph-map.graph-up .graph-children {
+    align-items: flex-end;
     margin-bottom: var(--graph-level-gap);
   }
 
   .graph-map.graph-down .graph-children {
+    align-items: flex-start;
     margin-top: var(--graph-level-gap);
   }
 

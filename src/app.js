@@ -998,7 +998,8 @@
   }
 
   function visibleItemIds() {
-    return [...app.querySelectorAll(".tree-row[data-item-id], .list-row[data-item-id], .folder-card[data-item-id], .folder-tile[data-item-id]")]
+    const scope = graphViewVisible() ? app.querySelector("[data-graph-canvas]") || app : app;
+    return [...scope.querySelectorAll(".tree-row[data-item-id], .list-row[data-item-id], .folder-card[data-item-id], .folder-tile[data-item-id], .graph-node[data-item-id]")]
       .map((element) => element.dataset.itemId)
       .filter(Boolean);
   }
@@ -1049,7 +1050,7 @@
   }
 
   function selectableElements(surface) {
-    return [...surface.querySelectorAll(".tree-row[data-item-id], .list-row[data-item-id], .folder-card[data-item-id], .folder-tile[data-item-id]")]
+    return [...surface.querySelectorAll(".tree-row[data-item-id], .list-row[data-item-id], .folder-card[data-item-id], .folder-tile[data-item-id], .graph-node[data-item-id]")]
       .filter((element) => findItem(activeBox(), element.dataset.itemId));
   }
 
@@ -1266,8 +1267,18 @@
 
   function requestDeleteSelected(box) {
     const ids = (box.selectedIds || []).filter((id) => id !== box.root.id && findItem(box, id));
+    requestDeleteItems(box, ids);
+  }
+
+  function requestDeleteItems(box, idsToDelete = [], options = {}) {
+    const ids = [...new Set(idsToDelete)]
+      .filter((id) => id !== box.root.id && findItem(box, id));
     if (!ids.length) return;
-    runtime.modal = { type: "confirm-delete", ids };
+    runtime.modal = {
+      type: "confirm-delete",
+      ids,
+      returnToGraph: options.returnToGraph || graphViewVisible(),
+    };
     render();
   }
 
@@ -1299,7 +1310,7 @@
       box.iconFolderId = box.root.id;
     }
     box.selectedIds = [];
-    runtime.modal = null;
+    runtime.modal = runtime.modal?.returnToGraph ? { type: "graph-full" } : null;
     touchBox(box);
     saveState();
     render();
@@ -1384,6 +1395,10 @@
 
   function dropPosition(event, element) {
     const rect = element.getBoundingClientRect();
+    const graphMap = element.closest?.(".graph-map");
+    if (graphMap?.classList.contains("graph-up") || graphMap?.classList.contains("graph-down")) {
+      return event.clientX < rect.left + rect.width / 2 ? "before" : "after";
+    }
     return event.clientY < rect.top + rect.height / 2 ? "before" : "after";
   }
 
@@ -1504,7 +1519,7 @@
         <section class="workspace">
           ${renderPathBar(box)}
           <div class="content-area">
-            ${runtime.modal?.type === "graph-full" ? renderGraphView(box) : renderMainContent(box)}
+            ${graphViewVisible() ? renderGraphView(box) : renderMainContent(box)}
           </div>
         </section>
         ${rightOpen ? `<aside class="inspector">${renderInspector(box)}</aside>` : ""}
@@ -1598,7 +1613,7 @@
   }
 
   function renderRail() {
-    const graphActive = runtime.modal?.type === "graph-full";
+    const graphActive = graphViewVisible();
     return `
       <nav class="rail" aria-label="Navigation MindSet">
         <button class="rail-button" data-action="toggle-left-panel" data-tooltip="${state.settings?.leftPanelOpen === false ? "Afficher le panneau gauche" : "Masquer le panneau gauche"}" aria-label="${state.settings?.leftPanelOpen === false ? "Afficher le panneau gauche" : "Masquer le panneau gauche"}">${icon("panel")}</button>
@@ -2056,7 +2071,7 @@
             <button class="tool-button" data-action="graph-zoom-in" data-tooltip="Zoomer" aria-label="Zoomer">${icon("zoomIn")}</button>
           </div>
         </div>
-        <div class="graph-canvas" data-graph-canvas>
+        <div class="graph-canvas" data-graph-canvas data-marquee-surface>
           <div class="graph-viewport" data-graph-viewport style="--graph-zoom:${zoom}">
             <div class="graph-map graph-${direction}">
               ${renderGraphNode(box, box.root, true)}
@@ -2079,7 +2094,7 @@
         : `${words} mot${words > 1 ? "s" : ""}`;
     return `
       <div class="graph-branch ${root ? "is-root" : ""} ${children.length ? "has-children" : "is-leaf"} ${children.length === 1 ? "has-single-child" : ""}">
-        <button class="graph-node ${root ? "root" : ""} ${node.type} ${active ? "is-active" : ""} ${selected ? "is-selected" : ""}" data-item-id="${node.id}" type="button">
+        <button class="graph-node ${root ? "root" : ""} ${node.type} ${active ? "is-active" : ""} ${selected ? "is-selected" : ""}" data-item-id="${node.id}" draggable="false" type="button">
           <span class="graph-node-icon">${graphNodeIcon(node, root)}</span>
           <span class="graph-node-copy">
             <strong>${escapeHtml(node.title)}</strong>
@@ -2109,6 +2124,10 @@
     const defaultLabel = item.type === "folder" ? "Icone de dossier" : "Icone de note";
     return `
       <div class="context-menu" style="left:${x}px; top:${y}px" data-context-menu>
+        <button class="context-row danger" data-action="delete-context-item" data-delete-target="${item.id}">
+          ${icon("trash")}
+          <span>Supprimer</span>
+        </button>
         <button class="context-row" data-action="rename-item" data-rename-target="${item.id}">
           ${icon("edit")}
           <span>Renommer</span>
@@ -2402,6 +2421,22 @@
     return runtime.toast ? `<div class="toast">${escapeHtml(runtime.toast)}</div>` : "";
   }
 
+  function graphViewVisible() {
+    return runtime.modal?.type === "graph-full" || !!runtime.modal?.returnToGraph;
+  }
+
+  function modalBlocksGlobalShortcuts() {
+    return !!runtime.modal && runtime.modal.type !== "graph-full";
+  }
+
+  function closeModalOrRestoreGraph() {
+    const returnToGraph = !!runtime.modal?.returnToGraph;
+    runtime.modal = returnToGraph ? { type: "graph-full" } : null;
+    runtime.paletteQuery = "";
+    runtime.contextMenu = null;
+    render();
+  }
+
   function bindEvents() {
     app.querySelectorAll("[data-action]").forEach((button) => {
       button.addEventListener("click", handleAction);
@@ -2477,8 +2512,9 @@
     });
 
     app.querySelectorAll("[data-item-id]").forEach((row) => {
-      const sortableTarget = row.matches(".tree-row, .list-row, .folder-card, .folder-tile");
+      const sortableTarget = row.matches(".tree-row, .list-row, .folder-card, .folder-tile, .graph-node");
       row.addEventListener("click", (event) => {
+        if (runtime.ignoreSurfaceClick) return;
         const box = activeBox();
         if (!box) return;
         if (event.target.closest("[data-expand-id]")) return;
@@ -2510,13 +2546,18 @@
         event.preventDefault();
         event.stopPropagation();
         box.selectedIds = [item.id];
-        runtime.contextMenu = { itemId: item.id, x: event.clientX, y: event.clientY };
+        runtime.contextMenu = {
+          itemId: item.id,
+          x: event.clientX,
+          y: event.clientY,
+          source: row.matches(".graph-node") ? "graph" : "explorer",
+        };
         saveState();
         render();
       });
       row.addEventListener("dragstart", (event) => {
         const box = activeBox();
-        if (!sortableTarget || !box) {
+        if (!sortableTarget || !box || row.dataset.itemId === box.root.id) {
           event.preventDefault();
           return;
         }
@@ -2576,6 +2617,9 @@
         runtime.dragId = null;
         runtime.dragIds = [];
       });
+      if (row.matches(".graph-node")) {
+        row.addEventListener("mousedown", (event) => startGraphNodeDrag(event, row));
+      }
     });
 
     app.querySelectorAll("[data-expand-id]").forEach((button) => {
@@ -2898,6 +2942,108 @@
     }, { passive: false });
   }
 
+  function startGraphNodeDrag(event, nodeElement) {
+    const box = activeBox();
+    const sourceId = nodeElement?.dataset?.itemId;
+    const source = box ? findItem(box, sourceId) : null;
+    if (!box || !source || source.id === box.root.id || event.button !== 0) return;
+    if (event.ctrlKey || event.metaKey || event.shiftKey) return;
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const draggedIds = (box.selectedIds || []).includes(sourceId)
+      ? (box.selectedIds || []).filter((id) => id !== box.root.id)
+      : [sourceId];
+    let dragging = false;
+    let currentTarget = null;
+    let currentPosition = "after";
+
+    const clearDropTarget = () => {
+      app.querySelectorAll(".graph-node.drop-before, .graph-node.drop-after, .graph-node.drop-into")
+        .forEach((item) => item.classList.remove("drop-before", "drop-after", "drop-into"));
+      currentTarget = null;
+    };
+
+    const targetFromPointer = (pointerEvent) => {
+      const targetElement = document.elementFromPoint(pointerEvent.clientX, pointerEvent.clientY)?.closest?.(".graph-node[data-item-id]");
+      if (!targetElement || targetElement === nodeElement) return null;
+      const target = findItem(box, targetElement.dataset.itemId);
+      if (!target || draggedIds.includes(target.id)) return null;
+      if (draggedIds.some((id) => isDescendant(box, id, target.id))) return null;
+      return { element: targetElement, item: target };
+    };
+
+    const paintTarget = (pointerEvent) => {
+      clearDropTarget();
+      const target = targetFromPointer(pointerEvent);
+      if (!target) return;
+      currentTarget = target;
+      const canDropInto = target.item.type === "folder";
+      if (canDropInto) {
+        target.element.classList.add("drop-into");
+        return;
+      }
+      if (!box.customSortActive) return;
+      currentPosition = dropPosition(pointerEvent, target.element);
+      target.element.classList.add(currentPosition === "before" ? "drop-before" : "drop-after");
+    };
+
+    const startDragIfNeeded = (pointerEvent) => {
+      if (dragging) return true;
+      const distance = Math.hypot(pointerEvent.clientX - startX, pointerEvent.clientY - startY);
+      if (distance < 5) return false;
+      dragging = true;
+      runtime.dragId = sourceId;
+      runtime.dragIds = draggedIds;
+      box.selectedIds = draggedIds;
+      runtime.selectionAnchorId = sourceId;
+      nodeElement.classList.add("is-dragging");
+      document.body.classList.add("is-graph-dragging");
+      return true;
+    };
+
+    const move = (pointerEvent) => {
+      if (!startDragIfNeeded(pointerEvent)) return;
+      pointerEvent.preventDefault();
+      paintTarget(pointerEvent);
+    };
+
+    const finish = (pointerEvent) => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", finish);
+      document.body.classList.remove("is-graph-dragging");
+      nodeElement.classList.remove("is-dragging");
+      const target = currentTarget;
+      clearDropTarget();
+      runtime.dragId = null;
+      runtime.dragIds = [];
+      if (!dragging) return;
+      runtime.ignoreSurfaceClick = true;
+      window.setTimeout(() => {
+        runtime.ignoreSurfaceClick = false;
+      }, 0);
+      pointerEvent.preventDefault();
+      if (!target) {
+        saveState();
+        render();
+        return;
+      }
+      if (target.item.type === "folder") {
+        moveItemsToFolder(box, draggedIds, target.item.id);
+        return;
+      }
+      if (box.customSortActive) {
+        reorderItem(box, sourceId, target.item.id, currentPosition);
+      } else {
+        saveState();
+        render();
+      }
+    };
+
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", finish, { once: true });
+  }
+
   function handleAction(event) {
     event.preventDefault();
     event.stopPropagation();
@@ -2910,10 +3056,7 @@
       return;
     }
     if (action === "close-modal") {
-      runtime.modal = null;
-      runtime.paletteQuery = "";
-      runtime.contextMenu = null;
-      render();
+      closeModalOrRestoreGraph();
       return;
     }
     if (action === "show-lobby") {
@@ -2958,9 +3101,16 @@
       render();
     }
     if (action === "rename-item") {
+      const returnToGraph = runtime.contextMenu?.source === "graph" || graphViewVisible();
       runtime.contextMenu = null;
-      runtime.modal = { type: "rename-item", itemId: event.currentTarget.dataset.renameTarget };
+      runtime.modal = { type: "rename-item", itemId: event.currentTarget.dataset.renameTarget, returnToGraph };
       render();
+    }
+    if (action === "delete-context-item") {
+      const id = event.currentTarget.dataset.deleteTarget;
+      const returnToGraph = runtime.contextMenu?.source === "graph" || graphViewVisible();
+      runtime.contextMenu = null;
+      requestDeleteItems(box, [id], { returnToGraph });
     }
     if (action === "show-explorer") {
       runtime.sideTab = "explorer";
@@ -3204,19 +3354,40 @@
 
     const renameForm = app.querySelector("[data-rename-item-form]");
     if (renameForm) {
-      renameForm.addEventListener("submit", (event) => {
-        event.preventDefault();
+      const commitRename = () => {
         const box = activeBox();
         const item = box ? findItem(box, runtime.modal?.itemId) : null;
-        const name = String(new FormData(renameForm).get("name") || "").trim();
-        if (!box || !item || !name) return;
+        const field = renameForm.elements?.name;
+        const name = String(field?.value || "").trim();
+        if (!box || !item || !name) {
+          field?.focus?.();
+          return;
+        }
         rememberState("Renommage");
+        const returnToGraph = !!runtime.modal?.returnToGraph;
         item.title = name;
         item.modifiedAt = now();
+        if (box.activeItemId === item.id) updateTabTitle(item.id, item.title);
         touchBox(box);
-        runtime.modal = null;
+        runtime.modal = returnToGraph ? { type: "graph-full" } : null;
         saveState();
         render();
+      };
+      renameForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        commitRename();
+      });
+      renameForm.querySelector("input[name='name']")?.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" || event.isComposing) return;
+        event.preventDefault();
+        event.stopPropagation();
+        commitRename();
+      });
+      renameForm.querySelector("button[type='submit']")?.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        commitRename();
       });
     }
   }
@@ -4692,7 +4863,7 @@
         }
       }
     }
-    if ((event.ctrlKey || event.metaKey) && !editingTarget && !runtime.modal) {
+    if ((event.ctrlKey || event.metaKey) && !editingTarget && !modalBlocksGlobalShortcuts()) {
       const key = event.key.toLowerCase();
       if (key === "z" || key === "y") {
         event.preventDefault();
@@ -4701,7 +4872,7 @@
         return;
       }
     }
-    if (!editingTarget && !runtime.modal && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+    if (!editingTarget && !modalBlocksGlobalShortcuts() && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
       const box = activeBox();
       if (box) moveKeyboardSelection(box, event.key === "ArrowDown" ? 1 : -1, event);
     }
@@ -4718,7 +4889,7 @@
         createNote(box);
       }
     }
-    if (event.key === "Delete" && !editingTarget && !runtime.modal) {
+    if (event.key === "Delete" && !editingTarget && !modalBlocksGlobalShortcuts()) {
       const box = activeBox();
       const selected = box ? (box.selectedIds || []).filter((id) => id !== box.root.id) : [];
       if (box && selected.length) {
@@ -4726,14 +4897,11 @@
         requestDeleteSelected(box);
       }
     }
-    if (event.key === "Escape" && runtime.modal) {
-      runtime.modal = null;
-      runtime.paletteQuery = "";
+    if (event.key === "Escape" && runtime.contextMenu) {
       runtime.contextMenu = null;
       render();
-    } else if (event.key === "Escape" && runtime.contextMenu) {
-      runtime.contextMenu = null;
-      render();
+    } else if (event.key === "Escape" && runtime.modal) {
+      closeModalOrRestoreGraph();
     }
   });
 
