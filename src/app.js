@@ -39,6 +39,9 @@
     autofocusKey: "",
     pointerIsDown: false,
     dragBoxId: null,
+    boxCrypto: new Map(),
+    encryptTimer: 0,
+    encryptRunning: false,
   };
 
   const icons = {
@@ -1224,15 +1227,22 @@
     };
     value.settings.pageMarginPreset = marginPresetForSetup(value.settings.pageSetup, value.settings);
     value.boxes.forEach((box) => {
-      if (!Array.isArray(box.bookmarkedIds)) box.bookmarkedIds = [];
-      if (!Array.isArray(box.openTabIds)) box.openTabIds = box.activeItemId ? [box.activeItemId] : [];
-      if (typeof box.customSortActive !== "boolean") box.customSortActive = false;
-      if (!Array.isArray(box.selectedIds)) box.selectedIds = [];
-      normalizeItemShape(box.root, true);
-      const iconFolder = findItem(box, box.iconFolderId);
-      if (!iconFolder || iconFolder.type !== "folder") box.iconFolderId = box.root.id;
+      if (!box.root) return;
+      normalizeUnlockedBoxShape(box);
     });
     return value;
+  }
+
+  function normalizeUnlockedBoxShape(box) {
+    if (!box?.root) return;
+    if (!Array.isArray(box.bookmarkedIds)) box.bookmarkedIds = [];
+    if (!Array.isArray(box.openTabIds)) box.openTabIds = box.activeItemId ? [box.activeItemId] : [];
+    if (typeof box.customSortActive !== "boolean") box.customSortActive = false;
+    if (!Array.isArray(box.selectedIds)) box.selectedIds = [];
+    if (!Array.isArray(box.expandedIds)) box.expandedIds = [box.root.id];
+    normalizeItemShape(box.root, true);
+    const iconFolder = findItem(box, box.iconFolderId);
+    if (!iconFolder || iconFolder.type !== "folder") box.iconFolderId = box.root.id;
   }
 
   function applyAppearance() {
@@ -1331,7 +1341,8 @@
   }
 
   function saveState() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    persistState();
+    scheduleProtectedBoxEncryption();
   }
 
   function stateSnapshot() {
@@ -1657,6 +1668,7 @@
 
   function activeBox() {
     const box = state.boxes.find((item) => item.id === state.currentBoxId) || null;
+    if (box && !box.root) return null;
     if (box && !Array.isArray(box.bookmarkedIds)) box.bookmarkedIds = [];
     if (box && !Array.isArray(box.openTabIds)) box.openTabIds = box.activeItemId ? [box.activeItemId] : [];
     return box;
@@ -1734,7 +1746,7 @@
       runtime.applyingNavigationHistory = false;
       return;
     }
-    if (box.passwordHash && !runtime.unlockedBoxIds.has(box.id)) {
+    if (box.passwordHash && (!runtime.unlockedBoxIds.has(box.id) || !box.root)) {
       state.currentBoxId = null;
       runtime.sideTab = snapshot.sideTab || "explorer";
       setModal({ type: "unlock-box", boxId: box.id });
@@ -1774,6 +1786,7 @@
   }
 
   function allItems(box, includeRoot = false) {
+    if (!box?.root) return [];
     const items = [];
     const visit = (node, depth, parent) => {
       if (includeRoot || node.id !== box.root.id) {
@@ -1788,6 +1801,7 @@
   }
 
   function findItem(box, id) {
+    if (!box?.root) return null;
     let found = null;
     walk(box.root, (node) => {
       if (node.id === id) found = node;
@@ -1796,6 +1810,7 @@
   }
 
   function findParent(box, id) {
+    if (!box?.root) return null;
     let found = null;
     walk(box.root, (node, depth, parent) => {
       if (node.id === id) found = parent;
@@ -1935,12 +1950,206 @@
     return String(value || "").trim();
   }
 
-  async function boxCodeMatches(value, hash) {
-    if (!hash) return false;
+  async function matchingBoxCode(value, hash) {
+    if (!hash) return null;
     const raw = String(value || "");
     const normalized = normalizeBoxCode(raw);
-    if (await sha256(normalized) === hash) return true;
-    return raw !== normalized && await sha256(raw) === hash;
+    if (await sha256(normalized) === hash) return normalized;
+    if (raw !== normalized && await sha256(raw) === hash) return raw;
+    return null;
+  }
+
+  async function boxCodeMatches(value, hash) {
+    return (await matchingBoxCode(value, hash)) !== null;
+  }
+
+  function cryptoSubtle() {
+    return window.crypto?.subtle || null;
+  }
+
+  function bytesToBase64(bytes) {
+    let binary = "";
+    const chunk = 0x8000;
+    for (let index = 0; index < bytes.length; index += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
+    }
+    return btoa(binary);
+  }
+
+  function base64ToBytes(value) {
+    const binary = atob(String(value || ""));
+    return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  }
+
+  async function deriveBoxKey(code, saltBase64) {
+    const subtle = cryptoSubtle();
+    if (!subtle) return null;
+    const material = await subtle.importKey("raw", new TextEncoder().encode(String(code || "")), "PBKDF2", false, ["deriveKey"]);
+    return subtle.deriveKey(
+      { name: "PBKDF2", salt: base64ToBytes(saltBase64), iterations: 310000, hash: "SHA-256" },
+      material,
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["encrypt", "decrypt"],
+    );
+  }
+
+  async function encryptBoxPayload(cryptoEntry, payloadJson) {
+    const subtle = cryptoSubtle();
+    if (!subtle || !cryptoEntry?.key) return null;
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const data = await subtle.encrypt({ name: "AES-GCM", iv }, cryptoEntry.key, new TextEncoder().encode(payloadJson));
+    return {
+      v: 1,
+      salt: cryptoEntry.salt,
+      iv: bytesToBase64(iv),
+      data: bytesToBase64(new Uint8Array(data)),
+    };
+  }
+
+  async function decryptBoxBlob(code, blob) {
+    const subtle = cryptoSubtle();
+    if (!subtle || !blob?.data || !blob?.iv || !blob?.salt) return null;
+    const key = await deriveBoxKey(code, blob.salt);
+    if (!key) return null;
+    const data = await subtle.decrypt({ name: "AES-GCM", iv: base64ToBytes(blob.iv) }, key, base64ToBytes(blob.data));
+    return { key, payloadJson: new TextDecoder().decode(data) };
+  }
+
+  function protectedBoxPayload(box) {
+    return {
+      root: box.root,
+      activeItemId: box.activeItemId || "",
+      selectedIds: box.selectedIds || [],
+      expandedIds: box.expandedIds || [],
+      viewMode: box.viewMode || "tree",
+      sortMode: box.sortMode || "custom",
+      customSortActive: !!box.customSortActive,
+      iconFolderId: box.iconFolderId || "",
+      searchQuery: box.searchQuery || "",
+      bookmarkedIds: box.bookmarkedIds || [],
+      openTabIds: box.openTabIds || [],
+    };
+  }
+
+  function setupBoxEncryption(boxId, code) {
+    const subtle = cryptoSubtle();
+    if (!subtle) return false;
+    const salt = bytesToBase64(window.crypto.getRandomValues(new Uint8Array(16)));
+    runtime.boxCrypto.set(boxId, { key: null, salt, blob: null, lastPayload: null, pendingCode: String(code || "") });
+    return true;
+  }
+
+  async function ensureBoxCryptoKey(cryptoEntry) {
+    if (!cryptoEntry) return null;
+    if (!cryptoEntry.key && cryptoEntry.pendingCode !== undefined) {
+      cryptoEntry.key = await deriveBoxKey(cryptoEntry.pendingCode, cryptoEntry.salt);
+      delete cryptoEntry.pendingCode;
+    }
+    return cryptoEntry.key;
+  }
+
+  async function unlockProtectedBox(box, code) {
+    try {
+      if (box.encrypted?.data) {
+        const opened = await decryptBoxBlob(code, box.encrypted);
+        if (!opened) return false;
+        const payload = JSON.parse(opened.payloadJson);
+        Object.assign(box, payload);
+        normalizeUnlockedBoxShape(box);
+        runtime.boxCrypto.set(box.id, { key: opened.key, salt: box.encrypted.salt, blob: box.encrypted, lastPayload: null });
+        return true;
+      }
+      if (!box.root) return false;
+      return setupBoxEncryption(box.id, code);
+    } catch (error) {
+      console.warn("MindSet box decryption failed", error);
+      return false;
+    }
+  }
+
+  function stripProtectedBoxPlaintext(box, blob) {
+    const keep = {
+      id: box.id,
+      name: box.name,
+      passwordHash: box.passwordHash,
+      createdAt: box.createdAt,
+      modifiedAt: box.modifiedAt,
+      encrypted: blob,
+    };
+    Object.keys(box).forEach((key) => delete box[key]);
+    Object.assign(box, keep);
+  }
+
+  function boxForDisk(box) {
+    if (!box.passwordHash) {
+      if (!("encrypted" in box)) return box;
+      const { encrypted, ...rest } = box;
+      return rest;
+    }
+    const cryptoEntry = runtime.boxCrypto.get(box.id);
+    const blob = cryptoEntry?.blob || box.encrypted || null;
+    if (!blob) return box;
+    return {
+      id: box.id,
+      name: box.name,
+      passwordHash: box.passwordHash,
+      createdAt: box.createdAt,
+      modifiedAt: box.modifiedAt,
+      encrypted: blob,
+    };
+  }
+
+  function persistState() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, boxes: state.boxes.map(boxForDisk) }));
+  }
+
+  function needsEncryptionPass() {
+    return state.boxes.some((box) => box.passwordHash && box.root && runtime.boxCrypto.has(box.id));
+  }
+
+  function scheduleProtectedBoxEncryption() {
+    if (!needsEncryptionPass()) return;
+    window.clearTimeout(runtime.encryptTimer);
+    runtime.encryptTimer = window.setTimeout(() => {
+      runProtectedBoxEncryption();
+    }, 150);
+  }
+
+  async function encryptUnlockedBoxNow(box) {
+    const cryptoEntry = runtime.boxCrypto.get(box.id);
+    if (!box.passwordHash || !box.root || !cryptoEntry) return null;
+    if (!(await ensureBoxCryptoKey(cryptoEntry))) return null;
+    const payloadJson = JSON.stringify(protectedBoxPayload(box));
+    if (cryptoEntry.blob && cryptoEntry.lastPayload === payloadJson) return cryptoEntry.blob;
+    const blob = await encryptBoxPayload(cryptoEntry, payloadJson);
+    if (!blob) return null;
+    cryptoEntry.blob = blob;
+    cryptoEntry.lastPayload = payloadJson;
+    box.encrypted = blob;
+    return blob;
+  }
+
+  async function runProtectedBoxEncryption() {
+    if (runtime.encryptRunning) {
+      scheduleProtectedBoxEncryption();
+      return;
+    }
+    runtime.encryptRunning = true;
+    try {
+      let changed = false;
+      for (const box of state.boxes) {
+        if (!box.passwordHash || !box.root || !runtime.boxCrypto.has(box.id)) continue;
+        const before = runtime.boxCrypto.get(box.id)?.blob;
+        const blob = await encryptUnlockedBoxNow(box);
+        if (blob && blob !== before) changed = true;
+      }
+      if (changed) persistState();
+    } catch (error) {
+      console.warn("MindSet box encryption failed", error);
+    } finally {
+      runtime.encryptRunning = false;
+    }
   }
 
   function modalError(message) {
@@ -2439,7 +2648,7 @@
     runtime.editorRange = null;
     runtime.contextMenu = null;
     runtime.boxMenuOpen = false;
-    if (target.passwordHash && !runtime.unlockedBoxIds.has(target.id)) {
+    if (target.passwordHash && (!runtime.unlockedBoxIds.has(target.id) || !target.root)) {
       setModal({ type: "unlock-box", boxId: target.id });
     } else {
       openUnlockedBox(target);
@@ -2450,7 +2659,7 @@
   }
 
   function openUnlockedBox(box, options = {}) {
-    if (!box) return;
+    if (!box?.root) return;
     cancelDeferredEditorWork({ suppressIdleMs: 650 });
     runtime.editorRange = null;
     runtime.contextMenu = null;
@@ -2500,9 +2709,24 @@
     render();
   }
 
-  function lockBox(boxId) {
+  async function lockBox(boxId) {
     const target = state.boxes.find((item) => item.id === boxId);
     if (!target?.passwordHash) return;
+    if (target.root && runtime.boxCrypto.has(boxId)) {
+      try {
+        await encryptUnlockedBoxNow(target);
+      } catch (error) {
+        console.warn("MindSet lock encryption failed", error);
+      }
+    }
+    const blob = runtime.boxCrypto.get(boxId)?.blob || target.encrypted || null;
+    if (blob) {
+      stripProtectedBoxPlaintext(target, blob);
+      runtime.noteHistories.clear();
+      runtime.undoStack = [];
+      runtime.redoStack = [];
+    }
+    runtime.boxCrypto.delete(boxId);
     runtime.unlockedBoxIds.delete(boxId);
     if (state.currentBoxId === boxId) state.currentBoxId = null;
     pushNavigationPoint();
@@ -2966,8 +3190,9 @@
 
   function renderBoxCardV2(box) {
     const count = allItems(box).length;
+    const sealed = !box.root;
     const protectedBox = !!box.passwordHash;
-    const unlocked = !protectedBox || runtime.unlockedBoxIds.has(box.id);
+    const unlocked = !protectedBox || (runtime.unlockedBoxIds.has(box.id) && !sealed);
     return `
       <article class="box-card" data-box-card-id="${box.id}" draggable="true">
         <button
@@ -2980,10 +3205,10 @@
         >${icon(protectedBox && !unlocked ? "lock" : "unlock")}</button>
         <div>
           <h2>${escapeHtml(box.name)}</h2>
-          <p>${count} element${count > 1 ? "s" : ""} - modifiee le ${formatShortDate(box.modifiedAt)}</p>
+          <p>${sealed ? "Contenu chiffré" : `${count} element${count > 1 ? "s" : ""}`} - modifiee le ${formatShortDate(box.modifiedAt)}</p>
         </div>
         <div class="box-card-footer">
-          <span class="box-protection-status ${protectedBox ? "is-protected" : "is-unprotected"}">${protectedBox ? "Protégé" : "Non protégé"}</span>
+          <span class="box-protection-status ${protectedBox ? "is-protected" : "is-unprotected"}">${protectedBox ? (box.encrypted || sealed ? "Chiffré" : "Protégé") : "Non protégé"}</span>
           <button class="button" data-action="open-box" data-box-id="${box.id}">Ouvrir</button>
         </div>
       </article>
@@ -3182,7 +3407,7 @@
             ${state.boxes.map((item) => `
               <button class="box-option ${item.id === box.id ? "is-active" : ""}" type="button" data-box-option="${item.id}">
                 <span>${escapeHtml(item.name)}</span>
-                <small>${allItems(item).length} éléments</small>
+                <small>${item.root ? `${allItems(item).length} éléments` : "verrouillée"}</small>
               </button>
             `).join("")}
           </div>
@@ -5530,7 +5755,10 @@
         box.iconFolderId = box.root.id;
         state.boxes.push(box);
         state.currentBoxId = runtime.modal?.returnToLobby ? null : box.id;
-        if (password) runtime.unlockedBoxIds.add(box.id);
+        if (password) {
+          runtime.unlockedBoxIds.add(box.id);
+          setupBoxEncryption(box.id, password);
+        }
         setModal(null);
         saveState();
         render();
@@ -5544,7 +5772,12 @@
         try {
           const box = state.boxes.find((item) => item.id === runtime.modal?.boxId);
           const password = new FormData(unlockForm).get("password");
-          if (box && await boxCodeMatches(password, box.passwordHash)) {
+          const code = box ? await matchingBoxCode(password, box.passwordHash) : null;
+          if (box && code !== null) {
+            if (!(await unlockProtectedBox(box, code))) {
+              modalError("impossible de dechiffrer cette boite");
+              return;
+            }
             openUnlockedBox(box);
           } else {
             modalError("mot de passe incorrect");
@@ -5640,18 +5873,48 @@
           return;
         }
         try {
-          if (mode === "change" && (!box.passwordHash || !(await boxCodeMatches(oldPassword, box.passwordHash)))) {
-            modalError("mot de passe incorrect");
-            return;
+          let matchedOldCode = null;
+          if (mode === "change") {
+            matchedOldCode = box.passwordHash ? await matchingBoxCode(oldPassword, box.passwordHash) : null;
+            if (matchedOldCode === null) {
+              modalError("mot de passe incorrect");
+              return;
+            }
           }
           if (!newPassword || newPassword !== confirmPassword) {
             modalError("les deux nouveaux codes ne correspondent pas");
             return;
           }
+          if (mode === "change" && !box.root && box.encrypted) {
+            const opened = await decryptBoxBlob(matchedOldCode, box.encrypted);
+            if (!opened) {
+              modalError("impossible de rechiffrer la boite");
+              return;
+            }
+            rememberState("Modification de code");
+            const salt = bytesToBase64(window.crypto.getRandomValues(new Uint8Array(16)));
+            const key = await deriveBoxKey(newPassword, salt);
+            const blob = await encryptBoxPayload({ key, salt }, opened.payloadJson);
+            if (!blob) {
+              modalError("impossible de rechiffrer la boite");
+              return;
+            }
+            box.encrypted = blob;
+            box.passwordHash = await sha256(newPassword);
+            box.modifiedAt = now();
+            setModal(null);
+            saveState();
+            render();
+            setToast("Code de la boite modifie.");
+            return;
+          }
           rememberState(mode === "change" ? "Modification de code" : "Ajout de code");
           box.passwordHash = await sha256(newPassword);
           box.modifiedAt = now();
-          runtime.unlockedBoxIds.add(box.id);
+          if (box.root) {
+            runtime.unlockedBoxIds.add(box.id);
+            setupBoxEncryption(box.id, newPassword);
+          }
           setModal(null);
           saveState();
           render();
