@@ -6870,7 +6870,7 @@
       if (targetEditor && options.focus !== false) {
         targetEditor.focus({ preventScroll: true });
         saveEditorSelection(targetEditor);
-        updateFormatBlockSelect(targetEditor);
+        updateEditorToolbarState(targetEditor);
       }
       updateEditorStats(note);
       saveState();
@@ -6917,7 +6917,7 @@
           if (eventName === "click") markEditorPointerIntent();
           runtime.activePageIndex = Number(event?.target?.closest?.(".page-sheet")?.dataset.pageSheet || runtime.activePageIndex || 0);
           saveEditorSelection(boundEditor);
-          updateFormatBlockSelect(boundEditor);
+          updateEditorToolbarState(boundEditor);
         });
       });
       boundEditor.addEventListener("beforeinput", (event) => {
@@ -6946,7 +6946,7 @@
         touchBox(box);
         updateEditorStats(note);
         saveEditorSelection(boundEditor);
-        updateFormatBlockSelect(boundEditor);
+        updateEditorToolbarState(boundEditor);
         commitEditorHistoryChange(note, note.content);
         saveState();
         if (normalizeEditorViewMode(state.settings?.editorViewMode) === "pages") {
@@ -7489,7 +7489,7 @@
     touchBox(box);
     updateEditorStats(note);
     saveEditorSelection(editor);
-    updateFormatBlockSelect(editor);
+    updateEditorToolbarState(editor);
     commitEditorHistoryChange(note, note.content);
     saveState();
     syncPagedEditorMetrics(editor);
@@ -7523,7 +7523,7 @@
     touchBox(box);
     updateEditorStats(note);
     saveEditorSelection(editor);
-    updateFormatBlockSelect(editor);
+    updateEditorToolbarState(editor);
     commitEditorHistoryChange(note, note.content);
     saveState();
     syncPagedEditorMetrics(editor);
@@ -7549,7 +7549,7 @@
     touchBox(box);
     updateEditorStats(note);
     saveEditorSelection(editor);
-    updateFormatBlockSelect(editor);
+    updateEditorToolbarState(editor);
     commitEditorHistoryChange(note, note.content);
     saveState();
     syncPagedEditorMetrics(editor);
@@ -7586,7 +7586,7 @@
     touchBox(box);
     updateEditorStats(note);
     saveEditorSelection(editor);
-    updateFormatBlockSelect(editor);
+    updateEditorToolbarState(editor);
     commitEditorHistoryChange(note, note.content);
     saveState();
     if (typeof repaginateNow === "function") {
@@ -7606,7 +7606,7 @@
     paragraph.appendChild(document.createElement("br"));
     heading.after(paragraph);
     placeCaretInside(paragraph);
-    updateFormatBlockSelect(editor);
+    updateEditorToolbarState(editor);
     syncEditorContent(editor, note, box);
   }
 
@@ -7846,8 +7846,116 @@
     const tag = ["h1", "h2", "h3"].includes(value) ? `<${value}>` : "<p>";
     document.execCommand("formatBlock", false, tag);
     prepareCollapsibleHeadings(editor, note, box);
-    updateFormatBlockSelect(editor);
+    updateEditorToolbarState(editor);
     syncEditorContent(editor, note, box);
+  }
+
+  function selectionComputedValues(editor) {
+    const selection = window.getSelection();
+    if (!editor || !selection || !selection.rangeCount) return null;
+    const range = selection.getRangeAt(0);
+    if (!selectionInsideEditor(editor, range)) return null;
+    const families = new Set();
+    const sizes = new Set();
+
+    const collectFrom = (element) => {
+      if (!element || !editor.contains(element)) return;
+      const style = getComputedStyle(element);
+      families.add(style.fontFamily);
+      sizes.add(style.fontSize);
+    };
+
+    if (range.collapsed) {
+      let node = range.startContainer;
+      if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+      collectFrom(node);
+    } else {
+      const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT, {
+        acceptNode: (node) => {
+          if (!node.textContent.trim() || !range.intersectsNode(node)) return NodeFilter.FILTER_REJECT;
+          if (node === range.endContainer && range.endOffset === 0) return NodeFilter.FILTER_REJECT;
+          if (node === range.startContainer && range.startOffset >= node.textContent.length) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        },
+      });
+      let node = walker.nextNode();
+      let visited = 0;
+      while (node && visited < 400 && (families.size < 2 || sizes.size < 2)) {
+        collectFrom(node.parentElement);
+        visited += 1;
+        node = walker.nextNode();
+      }
+      if (!families.size) {
+        let fallback = range.startContainer;
+        if (fallback.nodeType === Node.TEXT_NODE) fallback = fallback.parentElement;
+        collectFrom(fallback);
+      }
+    }
+
+    if (!families.size) return null;
+    return {
+      fontFamily: families.size === 1 ? [...families][0] : null,
+      fontSize: sizes.size === 1 ? [...sizes][0] : null,
+    };
+  }
+
+  function primaryFontName(stack) {
+    return String(stack || "").split(",")[0].replace(/["']/g, "").trim().toLowerCase();
+  }
+
+  function removeDynamicSelectOption(select) {
+    select.querySelector("option[data-dynamic-option]")?.remove();
+  }
+
+  function setDynamicSelectValue(select, value, label) {
+    const dynamic = document.createElement("option");
+    dynamic.dataset.dynamicOption = "true";
+    dynamic.value = value;
+    dynamic.textContent = label;
+    select.appendChild(dynamic);
+    select.value = value;
+  }
+
+  function syncFontFamilySelect(select, computedFamily) {
+    removeDynamicSelectOption(select);
+    if (!computedFamily) {
+      select.selectedIndex = -1;
+      return;
+    }
+    const target = primaryFontName(computedFamily);
+    const option = [...select.options].find((item) => primaryFontName(item.value) === target);
+    if (option) {
+      select.value = option.value;
+      return;
+    }
+    setDynamicSelectValue(select, computedFamily, String(computedFamily).split(",")[0].replace(/["']/g, "").trim() || "Police");
+  }
+
+  function syncFontSizeSelect(select, computedSize) {
+    removeDynamicSelectOption(select);
+    const parsed = Number.parseFloat(computedSize);
+    if (!computedSize || !Number.isFinite(parsed)) {
+      select.selectedIndex = -1;
+      return;
+    }
+    const px = `${Math.round(parsed)}px`;
+    const option = [...select.options].find((item) => item.value === px);
+    if (option) {
+      select.value = px;
+      return;
+    }
+    setDynamicSelectValue(select, px, String(Math.round(parsed)));
+  }
+
+  function updateEditorToolbarState(editorElement) {
+    updateFormatBlockSelect(editorElement);
+    const fontSelect = app.querySelector("[data-font-family]");
+    const sizeSelect = app.querySelector("[data-font-size]");
+    if (!fontSelect && !sizeSelect) return;
+    const computed = selectionComputedValues(editorElement);
+    if (!computed) return;
+    if (fontSelect) syncFontFamilySelect(fontSelect, computed.fontFamily);
+    if (sizeSelect) syncFontSizeSelect(sizeSelect, computed.fontSize);
   }
 
   function updateFormatBlockSelect(editor) {
