@@ -38,6 +38,7 @@
     navigationReady: false,
     autofocusKey: "",
     pointerIsDown: false,
+    dragBoxId: null,
   };
 
   const icons = {
@@ -2484,6 +2485,25 @@
     render();
   }
 
+  function reorderBoxes(draggedId, targetId, position) {
+    if (!draggedId || !targetId || draggedId === targetId) return;
+    const fromIndex = state.boxes.findIndex((box) => box.id === draggedId);
+    const initialTargetIndex = state.boxes.findIndex((box) => box.id === targetId);
+    if (fromIndex < 0 || initialTargetIndex < 0) return;
+    rememberState("Deplacement de boite");
+    const [dragged] = state.boxes.splice(fromIndex, 1);
+    let targetIndex = state.boxes.findIndex((box) => box.id === targetId);
+    if (position === "after") targetIndex += 1;
+    state.boxes.splice(targetIndex, 0, dragged);
+    saveState();
+    render();
+  }
+
+  function boxCardDropPosition(event, card) {
+    const rect = card.getBoundingClientRect();
+    return event.clientX < rect.left + rect.width / 2 ? "before" : "after";
+  }
+
   function deleteBoxById(boxId) {
     const target = state.boxes.find((item) => item.id === boxId);
     if (!target) return;
@@ -2924,7 +2944,7 @@
     const protectedBox = !!box.passwordHash;
     const unlocked = !protectedBox || runtime.unlockedBoxIds.has(box.id);
     return `
-      <article class="box-card" data-box-card-id="${box.id}">
+      <article class="box-card" data-box-card-id="${box.id}" draggable="true">
         <button
           class="box-lock-button ${protectedBox ? "is-protected" : "is-open"} ${unlocked ? "is-unlocked" : "is-locked"}"
           type="button"
@@ -2977,15 +2997,15 @@
     const activeId = box.activeItemId;
     return `
       <div class="app-tabs-bar">
-        <div class="history-tabs" aria-label="Historique">
-          <button class="top-tab" data-action="history-back" data-tooltip="Revenir en arriere" aria-label="Revenir en arriere">${icon("arrowLeft")}</button>
-          <button class="top-tab" data-action="history-forward" data-tooltip="Repartir en avant" aria-label="Repartir en avant">${icon("arrowRight")}</button>
-        </div>
         ${leftOpen ? `<div class="top-tabs" aria-label="Navigation principale">
           <button class="top-tab" data-action="show-lobby" data-tooltip="Accueil" aria-label="Accueil">${icon("home")}</button>
           <button class="top-tab ${runtime.sideTab === "explorer" ? "is-active" : ""}" data-action="show-explorer" data-tooltip="Explorateur de fichier" aria-label="Explorateur de fichier">${icon("folder")}</button>
           <button class="top-tab ${runtime.sideTab === "bookmarks" ? "is-active" : ""}" data-action="show-bookmarks" data-tooltip="Signets" aria-label="Signets">${icon("bookmark")}</button>
         </div>` : ""}
+        <div class="history-tabs" aria-label="Historique">
+          <button class="top-tab" data-action="history-back" data-tooltip="Revenir en arriere" aria-label="Revenir en arriere">${icon("arrowLeft")}</button>
+          <button class="top-tab" data-action="history-forward" data-tooltip="Repartir en avant" aria-label="Repartir en avant">${icon("arrowRight")}</button>
+        </div>
         <div class="tabs-strip" aria-label="Onglets ouverts">
           ${tabs.map((tab) => `
             <button class="doc-tab ${tab.id === activeId ? "is-active" : ""}" data-tab-id="${tab.id}" aria-label="${escapeHtml(tab.title)}">
@@ -4275,6 +4295,32 @@
           runtime.contextMenu = null;
           render();
         }
+      });
+      card.addEventListener("dragstart", (event) => {
+        runtime.dragBoxId = card.dataset.boxCardId;
+        card.classList.add("is-dragging");
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", runtime.dragBoxId);
+      });
+      card.addEventListener("dragend", () => {
+        card.classList.remove("is-dragging");
+        app.querySelectorAll(".box-card.drop-before, .box-card.drop-after").forEach((item) => item.classList.remove("drop-before", "drop-after"));
+        runtime.dragBoxId = null;
+      });
+      card.addEventListener("dragover", (event) => {
+        if (!runtime.dragBoxId || runtime.dragBoxId === card.dataset.boxCardId) return;
+        event.preventDefault();
+        const position = boxCardDropPosition(event, card);
+        card.classList.toggle("drop-before", position === "before");
+        card.classList.toggle("drop-after", position === "after");
+      });
+      card.addEventListener("dragleave", () => card.classList.remove("drop-before", "drop-after"));
+      card.addEventListener("drop", (event) => {
+        event.preventDefault();
+        card.classList.remove("drop-before", "drop-after");
+        const draggedId = runtime.dragBoxId;
+        runtime.dragBoxId = null;
+        reorderBoxes(draggedId, card.dataset.boxCardId, boxCardDropPosition(event, card));
       });
       card.addEventListener("contextmenu", (event) => {
         const box = state.boxes.find((item) => item.id === card.dataset.boxCardId);

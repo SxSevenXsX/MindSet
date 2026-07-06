@@ -280,7 +280,7 @@ body.is-resizing-nav {
   grid-column: 2 / -1;
   grid-row: 1;
   display: grid;
-  grid-template-columns: 74px minmax(126px, var(--nav)) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(126px, var(--nav)) 74px minmax(0, 1fr) auto;
   min-width: 0;
   height: 36px;
   border-bottom: 1px solid var(--border);
@@ -2641,6 +2641,34 @@ body.is-graph-panning {
   padding: 18px;
   background: var(--surface);
   box-shadow: var(--shadow-soft);
+}
+
+.box-card[draggable="true"] {
+  cursor: grab;
+}
+
+.box-card.is-dragging {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+
+.box-card.drop-before::before,
+.box-card.drop-after::after {
+  content: "";
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--selection-color);
+}
+
+.box-card.drop-before::before {
+  left: -9px;
+}
+
+.box-card.drop-after::after {
+  right: -9px;
 }
 
 .box-lock-button {
