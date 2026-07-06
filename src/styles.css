@@ -2817,10 +2817,11 @@ body.is-graph-panning {
   display: flex;
   flex-direction: column;
   width: min(860px, calc(100vw - 48px));
-  max-height: min(86vh, 820px);
+  height: min(86vh, 820px);
 }
 
 .settings-modal .modal-body {
+  flex: 1;
   min-height: 0;
 }
 
