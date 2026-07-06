@@ -31,6 +31,13 @@
     noteHistories: new Map(),
     restoringEditorHistory: false,
     itemClipboard: null,
+    updateStatus: { status: "idle", message: "" },
+    fontFolderOpenedAt: 0,
+    fontFolderScanTimer: 0,
+    applyingNavigationHistory: false,
+    navigationReady: false,
+    autofocusKey: "",
+    pointerIsDown: false,
   };
 
   const icons = {
@@ -60,6 +67,8 @@
     trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 15h10l1-15"/><path d="M10 11v6"/><path d="M14 11v6"/>',
     copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
     filePdf: '<path d="M7 3h7l4 4v14H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M14 3v5h5"/><path d="M8 13h2.5a1.5 1.5 0 0 1 0 3H8v-3Z"/><path d="M13 13h1.5a2 2 0 0 1 0 4H13v-4Z"/><path d="M17 13h3"/><path d="M17 15h2"/>',
+    fileWord: '<path d="M7 3h7l4 4v14H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M14 3v5h5"/><path d="M7.8 13h1.2l.8 4 1.2-3 1.2 3 .8-4h1.2"/>',
+    fileText: '<path d="M7 3h7l4 4v14H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M14 3v5h5"/><path d="M8 13h8"/><path d="M8 16h8"/><path d="M8 19h5"/>',
     printer: '<path d="M6 9V4h12v5"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v7H6z"/><path d="M18 12h.01"/>',
     lock: '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
     unlock: '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 7.4-2.1"/>',
@@ -381,6 +390,8 @@
         family: normalizeFontFamily(font?.family, id),
         format: String(font?.format || "").toLowerCase(),
         dataUrl,
+        source: String(font?.source || "").slice(0, 40),
+        path: String(font?.path || "").slice(0, 260),
       };
       const key = `${normalized.family}:${normalized.dataUrl.slice(0, 120)}`;
       if (seen.has(key)) return null;
@@ -470,6 +481,42 @@
     if (chars) chars.textContent = `${stats.chars} caracteres`;
   }
 
+  function defaultPrintOptions() {
+    return {
+      showTitle: false,
+      showDate: false,
+      showTime: false,
+      showPageNumbers: true,
+    };
+  }
+
+  function normalizePrintOptions(options = {}) {
+    const defaults = defaultPrintOptions();
+    return {
+      showTitle: options.showTitle === true,
+      showDate: options.showDate === true,
+      showTime: options.showTime === true,
+      showPageNumbers: options.showPageNumbers !== false && defaults.showPageNumbers,
+    };
+  }
+
+  function printOptionsFromForm(form) {
+    return normalizePrintOptions({
+      showTitle: form.has("showTitle"),
+      showDate: form.has("showDate"),
+      showTime: form.has("showTime"),
+      showPageNumbers: form.has("showPageNumbers"),
+    });
+  }
+
+  function formatPrintDate(value = new Date()) {
+    return new Intl.DateTimeFormat("fr-FR", { dateStyle: "long" }).format(value);
+  }
+
+  function formatPrintTime(value = new Date()) {
+    return new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" }).format(value);
+  }
+
   function safePrintCssValue(value, fallback) {
     const cleaned = String(value || fallback || "").replace(/[<>{};]/g, "").trim();
     return cleaned || fallback || "";
@@ -526,31 +573,52 @@
     return template.innerHTML || "<p><br></p>";
   }
 
-  function printableNoteBody(sourceHtml) {
+  function printableNoteHeader(note, options) {
+    const rows = [];
+    const printedAt = new Date();
+    if (options.showDate) rows.push(`<span>${escapeHtml(formatPrintDate(printedAt))}</span>`);
+    if (options.showTime) rows.push(`<span>${escapeHtml(formatPrintTime(printedAt))}</span>`);
+    if (!options.showTitle && !rows.length) return "";
+    return `
+      <header class="print-note-header">
+        ${options.showTitle ? `<h1>${escapeHtml(note?.title || "Note MindSet")}</h1>` : ""}
+        ${rows.length ? `<div class="print-note-meta">${rows.join("")}</div>` : ""}
+      </header>
+    `;
+  }
+
+  function printableNoteBody(note, sourceHtml, options) {
     const source = document.createElement("div");
     source.innerHTML = sanitizePrintableHtml(sourceHtml);
     const sheets = [...source.querySelectorAll(".page-sheet")];
+    const header = printableNoteHeader(note, options);
     if (sheets.length) {
-      return sheets.map((sheet) => `<section class="print-sheet note-editor">${sheet.innerHTML || "<p><br></p>"}</section>`).join("");
+      return sheets.map((sheet, index) => `<section class="print-sheet note-editor">${index === 0 ? header : ""}${sheet.innerHTML || "<p><br></p>"}</section>`).join("");
     }
-    return `<section class="print-sheet note-editor">${source.innerHTML || "<p><br></p>"}</section>`;
+    return `<section class="print-sheet note-editor">${header}${source.innerHTML || "<p><br></p>"}</section>`;
   }
 
-  function printableNoteDocument(note, sourceHtml) {
+  function printableNoteDocument(note, sourceHtml, options = defaultPrintOptions(), mode = "print") {
+    options = normalizePrintOptions(options);
     const setup = normalizePageSetup(state.settings?.pageSetup, state.settings?.pageMarginPreset, state.settings);
     const dimensions = pageSizeDimensions(setup);
     const margins = setup.margins;
     const title = escapeHtml(note?.title || "Note MindSet");
+    const documentTitle = options.showTitle ? `${title} - MindSet` : "";
     const todoColor = cleanColor(state.settings?.todoColor, state.settings?.selectionColor || "#0f6b58");
+    const pageNumberMarginBox = options.showPageNumbers
+      ? '@bottom-center{content:"Page " counter(page);font:700 10px Inter,ui-sans-serif,system-ui,sans-serif;color:#657169;}'
+      : "";
+    const actionLabel = mode === "pdf" || mode === "system-pdf" ? "Enregistrer PDF" : "Imprimer";
     return `<!doctype html>
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <title>${title} - MindSet</title>
+  <title>${documentTitle}</title>
   <style>
     ${printableFontFaces()}
     :root{${printableHeadingCssVariables()};--todo-color:${todoColor};--accent:${cleanColor(state.settings?.selectionColor, "#0f6b58")};}
-    @page{size:${dimensions.widthCm}cm ${dimensions.heightCm}cm;margin:${margins.top}cm ${margins.right}cm ${margins.bottom}cm ${margins.left}cm;}
+    @page{size:${dimensions.widthCm}cm ${dimensions.heightCm}cm;margin:${margins.top}cm ${margins.right}cm ${margins.bottom}cm ${margins.left}cm;${pageNumberMarginBox}}
     *{box-sizing:border-box;}
     body{margin:0;background:#f0f1f0;color:#17201c;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}
     .print-toolbar{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 16px;border-bottom:1px solid #d8ddda;background:rgba(247,247,247,.94);backdrop-filter:blur(12px);}
@@ -560,6 +628,9 @@
     .print-button:hover{background:#f1f3f2;}
     .print-preview{padding:28px 18px;}
     .print-sheet{width:${dimensions.widthCm}cm;min-height:${dimensions.heightCm}cm;margin:0 auto 22px;padding:${margins.top}cm ${margins.right}cm ${margins.bottom}cm ${margins.left}cm;background:#fff;border:1px solid #dfe3e1;border-radius:6px;box-shadow:0 18px 42px rgba(35,48,43,.12);overflow:hidden;}
+    .print-note-header{display:grid;gap:6px;margin:0 0 18px;padding:0 0 12px;border-bottom:1px solid #dfe3e1;}
+    .print-note-header h1{margin:0;color:#17201c;font:820 22px Inter,ui-sans-serif,system-ui,sans-serif;line-height:1.2;}
+    .print-note-meta{display:flex;flex-wrap:wrap;gap:8px 14px;color:#657169;font-size:11px;font-weight:760;}
     .note-editor{font-family:var(--normal-font);font-size:var(--normal-size);font-weight:var(--normal-weight);color:var(--normal-color);line-height:1.65;}
     .note-editor h1,.note-editor h2,.note-editor h3{margin:1.2em 0 .45em;line-height:1.18;}
     .note-editor h1{font-family:var(--h1-font);font-size:var(--h1-size);font-weight:var(--h1-weight);color:var(--h1-color);}
@@ -591,13 +662,343 @@
 <body>
   <div class="print-toolbar">
     <div><strong>${title}</strong><span> - impression MindSet</span></div>
-    <button class="print-button" onclick="window.print()">Imprimer</button>
+    <button class="print-button" onclick="window.print()">${actionLabel}</button>
   </div>
   <main class="print-preview">
-    ${printableNoteBody(sourceHtml)}
+    ${printableNoteBody(note, sourceHtml, options)}
   </main>
 </body>
 </html>`;
+  }
+
+  function cmToPoints(value) {
+    return (Number(value) || 0) * 72 / 2.54;
+  }
+
+  function pdfPlainText(value) {
+    const replacements = {
+      "\u0153": "oe",
+      "\u0152": "OE",
+      "\u00e6": "ae",
+      "\u00c6": "AE",
+      "\u00df": "ss",
+      "\u2013": "-",
+      "\u2014": "-",
+      "\u2018": "'",
+      "\u2019": "'",
+      "\u201c": '"',
+      "\u201d": '"',
+      "\u2026": "...",
+      "\u00a0": " ",
+    };
+    return String(value || "")
+      .replace(/[\u0153\u0152\u00e6\u00c6\u00df\u2013\u2014\u2018\u2019\u201c\u201d\u2026\u00a0]/g, (char) => replacements[char] || " ")
+      .replace(/\t/g, "    ")
+      .replace(/[\r\n]/g, " ")
+      .replace(/[^\x20-\x7E\u00A0-\u00FF]/g, (char) => (
+        char.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, "")
+      ));
+  }
+
+  function pdfTextHex(value) {
+    return `<${[...pdfPlainText(value)]
+      .map((char) => char.charCodeAt(0))
+      .filter((code) => code === 0x09 || code === 0x0a || code === 0x0d || code >= 0x20)
+      .map((code) => (code <= 0x7E || (code >= 0xA0 && code <= 0xFF) ? code : 0x3F))
+      .map((code) => code.toString(16).padStart(2, "0").toUpperCase())
+      .join("")}>`;
+  }
+
+  function noteExportBaseName(note) {
+    return String(note?.title || "Note MindSet")
+      .replace(/[<>:"/\\|?*\x00-\x1f]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 90) || "Note MindSet";
+  }
+
+  function noteExportFileName(note, extension) {
+    return `${noteExportBaseName(note)}.${extension}`;
+  }
+
+  function pdfFileName(note) {
+    return noteExportFileName(note, "pdf");
+  }
+
+  function nodeTextWithBreaks(node) {
+    const clone = node.cloneNode(true);
+    clone.querySelectorAll?.("br").forEach((br) => br.replaceWith("\n"));
+    return clone.textContent || "";
+  }
+
+  function printableTextLinesFromRoot(root) {
+    const blocks = [...root.querySelectorAll("h1, h2, h3, h4, h5, h6, p, li, blockquote, pre")];
+    if (!blocks.length) {
+      const text = nodeTextWithBreaks(root).replace(/\r/g, "");
+      const lines = text.split("\n").map((line) => line.replace(/\s+$/g, ""));
+      return lines.length ? lines : [""];
+    }
+    const lines = [];
+    blocks.forEach((block) => {
+      let prefix = "";
+      if (block.matches("li")) {
+        if (block.closest(".check-list")) {
+          prefix = block.dataset.checked === "true" ? "[x] " : "[ ] ";
+        } else if (block.closest(".arrow-list")) {
+          prefix = "-> ";
+        } else if (block.closest(".circle-list")) {
+          prefix = "o ";
+        } else if (block.closest(".triangle-list")) {
+          prefix = "^ ";
+        } else if (block.closest(".square-list")) {
+          prefix = "[] ";
+        } else {
+          prefix = "- ";
+        }
+      }
+      const text = nodeTextWithBreaks(block).replace(/\r/g, "");
+      const blockLines = text.split("\n");
+      if (!blockLines.some((line) => line.trim())) {
+        lines.push("");
+        return;
+      }
+      blockLines.forEach((line, index) => {
+        const cleaned = line.replace(/\s+/g, " ").trim();
+        if (!cleaned && index > 0) {
+          lines.push("");
+          return;
+        }
+        if (cleaned) lines.push(`${index === 0 ? prefix : ""}${cleaned}`);
+      });
+      if (block.matches("h1, h2, h3")) lines.push("");
+    });
+    return lines.length ? lines : [""];
+  }
+
+  function printableTextPages(sourceHtml) {
+    const source = document.createElement("div");
+    source.innerHTML = sanitizePrintableHtml(sourceHtml);
+    const sheets = [...source.querySelectorAll(".page-sheet")];
+    const roots = sheets.length ? sheets : [source];
+    return roots.map((root) => printableTextLinesFromRoot(root));
+  }
+
+  function wrapPdfLine(line, maxChars) {
+    const text = pdfPlainText(line).replace(/\s+/g, " ").trim();
+    if (!text) return [""];
+    const words = text.split(" ");
+    const wrapped = [];
+    let current = "";
+    words.forEach((word) => {
+      if (word.length > maxChars) {
+        if (current) {
+          wrapped.push(current);
+          current = "";
+        }
+        for (let index = 0; index < word.length; index += maxChars) {
+          wrapped.push(word.slice(index, index + maxChars));
+        }
+        return;
+      }
+      const next = current ? `${current} ${word}` : word;
+      if (next.length > maxChars && current) {
+        wrapped.push(current);
+        current = word;
+      } else {
+        current = next;
+      }
+    });
+    if (current) wrapped.push(current);
+    return wrapped.length ? wrapped : [""];
+  }
+
+  function paginatePdfLines(note, sourceHtml, options, setup) {
+    const dimensions = pageSizeDimensions(setup);
+    const margins = setup.margins;
+    const widthPt = cmToPoints(dimensions.widthCm);
+    const heightPt = cmToPoints(dimensions.heightCm);
+    const marginLeftPt = cmToPoints(margins.left);
+    const marginRightPt = cmToPoints(margins.right);
+    const marginTopPt = cmToPoints(margins.top);
+    const marginBottomPt = cmToPoints(margins.bottom);
+    const bodyFontSize = 11;
+    const lineHeight = 15;
+    const contentWidth = Math.max(widthPt - marginLeftPt - marginRightPt, 120);
+    const contentHeight = Math.max(heightPt - marginTopPt - marginBottomPt - (options.showPageNumbers ? 18 : 0), 120);
+    const maxChars = Math.max(Math.floor(contentWidth / (bodyFontSize * 0.52)), 22);
+    const maxLines = Math.max(Math.floor(contentHeight / lineHeight), 1);
+    const rawPages = printableTextPages(sourceHtml);
+    const headerLines = [];
+    const now = new Date();
+    if (options.showTitle) headerLines.push(note?.title || "Note MindSet");
+    if (options.showDate) headerLines.push(formatPrintDate(now));
+    if (options.showTime) headerLines.push(formatPrintTime(now));
+    if (headerLines.length) headerLines.push("");
+
+    const pages = [];
+    let current = [];
+    const pushPage = () => {
+      pages.push(current);
+      current = [];
+    };
+    const addLine = (line) => {
+      wrapPdfLine(line, maxChars).forEach((wrappedLine) => {
+        if (current.length >= maxLines) pushPage();
+        current.push(wrappedLine);
+      });
+    };
+
+    rawPages.forEach((rawPage, pageIndex) => {
+      if (pageIndex > 0) pushPage();
+      if (pageIndex === 0) headerLines.forEach(addLine);
+      (rawPage.length ? rawPage : [""]).forEach(addLine);
+    });
+    if (current.length || !pages.length) pushPage();
+
+    return {
+      pages,
+      metrics: {
+        widthPt,
+        heightPt,
+        marginLeftPt,
+        marginTopPt,
+        marginBottomPt,
+        bodyFontSize,
+        lineHeight,
+      },
+    };
+  }
+
+  function pdfObject(content) {
+    return String(content || "");
+  }
+
+  function pdfContentStreamLength(content) {
+    return content.length;
+  }
+
+  function renderPdfPageContent(lines, pageIndex, pageCount, metrics, options) {
+    const yStart = metrics.heightPt - metrics.marginTopPt;
+    const commands = ["BT", `/F1 ${metrics.bodyFontSize} Tf`];
+    lines.forEach((line, index) => {
+      const y = yStart - index * metrics.lineHeight;
+      commands.push(`1 0 0 1 ${metrics.marginLeftPt.toFixed(2)} ${y.toFixed(2)} Tm ${pdfTextHex(line)} Tj`);
+    });
+    if (options.showPageNumbers) {
+      const label = `Page ${pageIndex + 1} / ${pageCount}`;
+      const fontSize = 9;
+      const estimatedWidth = pdfPlainText(label).length * fontSize * 0.5;
+      const x = Math.max((metrics.widthPt - estimatedWidth) / 2, 8);
+      const y = Math.max(metrics.marginBottomPt * 0.45, 12);
+      commands.push(`/F1 ${fontSize} Tf`);
+      commands.push(`1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm ${pdfTextHex(label)} Tj`);
+    }
+    commands.push("ET");
+    return commands.join("\n");
+  }
+
+  function buildPdfDocument(pages, metrics, options) {
+    const objects = [
+      "<< /Type /Catalog /Pages 2 0 R >>",
+      "",
+      "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    ];
+    const pageIds = [];
+    pages.forEach((lines, index) => {
+      const content = renderPdfPageContent(lines, index, pages.length, metrics, options);
+      const contentId = objects.push(pdfObject(`<< /Length ${pdfContentStreamLength(content)} >>\nstream\n${content}\nendstream`));
+      const pageId = objects.push(pdfObject(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${metrics.widthPt.toFixed(2)} ${metrics.heightPt.toFixed(2)}] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentId} 0 R >>`));
+      pageIds.push(pageId);
+    });
+    objects[1] = `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pageIds.length} >>`;
+
+    let pdf = "%PDF-1.4\n% MindSet\n";
+    const offsets = [0];
+    objects.forEach((object, index) => {
+      offsets.push(pdf.length);
+      pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+    });
+    const xrefOffset = pdf.length;
+    pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+    for (let index = 1; index <= objects.length; index += 1) {
+      pdf += `${String(offsets[index]).padStart(10, "0")} 00000 n \n`;
+    }
+    pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+    return pdf;
+  }
+
+  function createPrintableNotePdf(note, sourceHtml, options = defaultPrintOptions()) {
+    options = normalizePrintOptions(options);
+    const setup = normalizePageSetup(state.settings?.pageSetup, state.settings?.pageMarginPreset, state.settings);
+    const { pages, metrics } = paginatePdfLines(note, sourceHtml, options, setup);
+    const pdf = buildPdfDocument(pages, metrics, options);
+    return {
+      blob: new Blob([pdf], { type: "application/pdf" }),
+      fileName: pdfFileName(note),
+      pageCount: pages.length,
+    };
+  }
+
+  function triggerFileDownload(blob, fileName) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName || "Note MindSet";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1200);
+  }
+
+  function triggerPdfDownload(url, fileName) {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName || "Note MindSet.pdf";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+
+  function downloadPrintableNotePdf(note, sourceHtml, options = defaultPrintOptions()) {
+    const printable = createPrintableNotePdf(note, sourceHtml, options);
+    const url = URL.createObjectURL(printable.blob);
+    triggerPdfDownload(url, printable.fileName);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1200);
+    setToast("PDF MindSet enregistre sans en-tetes du navigateur.");
+  }
+
+  function clearPdfPreviewUrl(modal = runtime.modal) {
+    if (modal?.type === "pdf-preview" && modal.pdfUrl) {
+      URL.revokeObjectURL(modal.pdfUrl);
+    }
+  }
+
+  function setModal(nextModal) {
+    if (runtime.modal?.pdfUrl && runtime.modal.pdfUrl !== nextModal?.pdfUrl) {
+      clearPdfPreviewUrl(runtime.modal);
+    }
+    const currentKey = runtime.modal ? `${runtime.modal.type}:${runtime.modal.boxId || ""}:${runtime.modal.itemId || ""}:${runtime.modal.mode || ""}` : "";
+    const nextKey = nextModal ? `${nextModal.type}:${nextModal.boxId || ""}:${nextModal.itemId || ""}:${nextModal.mode || ""}` : "";
+    if (currentKey !== nextKey) runtime.autofocusKey = "";
+    runtime.modal = nextModal;
+  }
+
+  function openPrintableNotePdfPreview(box, note, options = defaultPrintOptions(), sourceOverride = "") {
+    if (!box || note?.type !== "note") return;
+    const sourceHtml = sourceOverride || activePrintableSource(box, note);
+    flushActiveEditorContent();
+    const freshNote = findItem(box, note.id) || note;
+    const printable = createPrintableNotePdf(freshNote, sourceHtml, options);
+    const pdfUrl = URL.createObjectURL(printable.blob);
+    setModal({
+      type: "pdf-preview",
+      noteId: freshNote.id,
+      options: normalizePrintOptions(options),
+      pdfUrl,
+      fileName: printable.fileName,
+      pageCount: printable.pageCount,
+    });
+    render();
   }
 
   function activePrintableSource(box, note) {
@@ -608,18 +1009,101 @@
     return note?.content || "<p><br></p>";
   }
 
-  function openPrintableNoteWindow(box, note, mode = "print") {
+  function wordNoteDocument(note, sourceHtml) {
+    const setup = normalizePageSetup(state.settings?.pageSetup, state.settings?.pageMarginPreset, state.settings);
+    const dimensions = pageSizeDimensions(setup);
+    const margins = setup.margins;
+    const headings = state.settings?.headingPresets || headingDefaults;
+    const preset = (key) => ({ ...headingDefaults[key], ...(headings[key] || {}) });
+    const normal = preset("normal");
+    const h1 = preset("h1");
+    const h2 = preset("h2");
+    const h3 = preset("h3");
+    const todoColor = cleanColor(state.settings?.todoColor, state.settings?.selectionColor || "#0f6b58");
+    const accentColor = cleanColor(state.settings?.selectionColor, "#0f6b58");
+    return `<!doctype html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>${escapeHtml(note?.title || "Note MindSet")}</title>
+  <!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->
+  <style>
+    ${printableFontFaces()}
+    @page Section1{size:${dimensions.widthCm}cm ${dimensions.heightCm}cm;margin:${margins.top}cm ${margins.right}cm ${margins.bottom}cm ${margins.left}cm;}
+    body{margin:0;color:${cleanColor(normal.color, headingDefaults.normal.color)};font-family:${safePrintCssValue(normal.fontFamily, headingDefaults.normal.fontFamily)};}
+    .Section1{page:Section1;}
+    .print-sheet{page-break-after:always;}
+    .print-sheet:last-child{page-break-after:auto;}
+    .note-editor{font-family:${safePrintCssValue(normal.fontFamily, headingDefaults.normal.fontFamily)};font-size:${safePrintCssValue(normal.size, headingDefaults.normal.size)};font-weight:${safePrintCssValue(normal.weight, headingDefaults.normal.weight)};color:${cleanColor(normal.color, headingDefaults.normal.color)};line-height:1.55;}
+    .note-editor h1,.note-editor h2,.note-editor h3{margin:1.2em 0 .45em;line-height:1.18;}
+    .note-editor h1{font-family:${safePrintCssValue(h1.fontFamily, headingDefaults.h1.fontFamily)};font-size:${safePrintCssValue(h1.size, headingDefaults.h1.size)};font-weight:${safePrintCssValue(h1.weight, headingDefaults.h1.weight)};color:${cleanColor(h1.color, headingDefaults.h1.color)};}
+    .note-editor h2{font-family:${safePrintCssValue(h2.fontFamily, headingDefaults.h2.fontFamily)};font-size:${safePrintCssValue(h2.size, headingDefaults.h2.size)};font-weight:${safePrintCssValue(h2.weight, headingDefaults.h2.weight)};color:${cleanColor(h2.color, headingDefaults.h2.color)};}
+    .note-editor h3{font-family:${safePrintCssValue(h3.fontFamily, headingDefaults.h3.fontFamily)};font-size:${safePrintCssValue(h3.size, headingDefaults.h3.size)};font-weight:${safePrintCssValue(h3.weight, headingDefaults.h3.weight)};color:${cleanColor(h3.color, headingDefaults.h3.color)};}
+    .note-editor p{margin:.55em 0;}
+    .note-editor ul,.note-editor ol{margin:.65em 0;padding-left:1.6em;}
+    .note-editor .dash-list,.note-editor .arrow-list,.note-editor .circle-list,.note-editor .check-list,.note-editor .triangle-list,.note-editor .square-list{list-style:none;padding-left:0;}
+    .note-editor .dash-list li::before{content:"- ";font-weight:700;}
+    .note-editor .arrow-list li::before{content:"-> ";font-weight:700;}
+    .note-editor .circle-list li::before{content:"o ";font-weight:700;}
+    .note-editor .triangle-list li::before{content:"^ ";font-weight:700;color:#d58f27;}
+    .note-editor .square-list li::before{content:"[] ";font-weight:700;}
+    .note-editor .check-list li::before{content:"[ ] ";font-weight:700;color:${accentColor};}
+    .note-editor .check-list li[data-checked="true"]{color:#657169;text-decoration:line-through;}
+    .note-editor .check-list li[data-checked="true"]::before{content:"[x] ";color:${todoColor};}
+    .note-editor img{max-width:100%;height:auto;}
+  </style>
+</head>
+<body>
+  <div class="Section1">
+    ${printableNoteBody(note, sourceHtml, defaultPrintOptions())}
+  </div>
+</body>
+</html>`;
+  }
+
+  function plainTextFromNoteHtml(sourceHtml) {
+    return printableTextPages(sourceHtml)
+      .map((lines) => lines.join("\r\n").replace(/[ \t]+\r\n/g, "\r\n").trimEnd())
+      .join("\r\n\r\n")
+      .trim();
+  }
+
+  function exportNoteAsWord(box, note) {
     if (!box || note?.type !== "note") return;
-    const sourceHtml = activePrintableSource(box, note);
     flushActiveEditorContent();
     const freshNote = findItem(box, note.id) || note;
+    const sourceHtml = activePrintableSource(box, freshNote);
+    const documentHtml = wordNoteDocument(freshNote, sourceHtml);
+    triggerFileDownload(new Blob(["\ufeff", documentHtml], { type: "application/msword;charset=utf-8" }), noteExportFileName(freshNote, "doc"));
+    setToast("Note exportee en format Word.");
+  }
+
+  function exportNoteAsTxt(box, note) {
+    if (!box || note?.type !== "note") return;
+    flushActiveEditorContent();
+    const freshNote = findItem(box, note.id) || note;
+    const sourceHtml = activePrintableSource(box, freshNote);
+    const text = plainTextFromNoteHtml(sourceHtml);
+    triggerFileDownload(new Blob(["\ufeff", text], { type: "text/plain;charset=utf-8" }), noteExportFileName(freshNote, "txt"));
+    setToast("Note exportee en TXT.");
+  }
+
+  function openPrintableNoteWindow(box, note, mode = "print", options = defaultPrintOptions(), sourceOverride = "") {
+    if (!box || note?.type !== "note") return;
+    const sourceHtml = sourceOverride || activePrintableSource(box, note);
+    flushActiveEditorContent();
+    const freshNote = findItem(box, note.id) || note;
+    if (mode === "mindset-pdf") {
+      openPrintableNotePdfPreview(box, freshNote, options, sourceHtml);
+      return;
+    }
     const printWindow = window.open("", "_blank", "width=980,height=740");
     if (!printWindow) {
       setToast("Autorise les fenetres pour imprimer ou exporter la note.");
       return;
     }
     printWindow.document.open();
-    printWindow.document.write(printableNoteDocument(freshNote, sourceHtml));
+    printWindow.document.write(printableNoteDocument(freshNote, sourceHtml, options, mode));
     printWindow.document.close();
     let started = false;
     const startPrint = () => {
@@ -630,7 +1114,7 @@
     };
     printWindow.addEventListener?.("load", () => window.setTimeout(startPrint, 120));
     window.setTimeout(startPrint, 320);
-    setToast(mode === "pdf" ? "Choisis Enregistrer en PDF dans la fenetre d'impression." : "Fenetre d'impression ouverte.");
+    setToast(mode === "system-pdf" ? "Apercu systeme ouvert." : "Fenetre d'impression ouverte.");
   }
 
   function isHexColor(value) {
@@ -645,6 +1129,11 @@
   function normalizeRecentColors(colors) {
     if (!Array.isArray(colors)) return [];
     return [...new Set(colors.map((color) => cleanColor(color, "")).filter(Boolean))].slice(0, 8);
+  }
+
+  function normalizeRecentColorSlots(colors) {
+    const unique = normalizeRecentColors(colors);
+    return [0, 1, 2].map((index) => unique[index] || "");
   }
 
   function defaultTreeGuideColor(theme) {
@@ -685,8 +1174,10 @@
       navWidth: Math.min(Math.max(Number(previousSettings.navWidth) || 282, 218), 430),
       lastTextColor: cleanColor(previousSettings.lastTextColor, "#000000"),
       lastHighlightColor: cleanColor(previousSettings.lastHighlightColor, "#fff0a8"),
-      recentTextColors: normalizeRecentColors(previousSettings.recentTextColors),
-      recentHighlightColors: normalizeRecentColors(previousSettings.recentHighlightColors),
+      recentTextColors: normalizeRecentColorSlots(previousSettings.recentTextColors),
+      recentHighlightColors: normalizeRecentColorSlots(previousSettings.recentHighlightColors),
+      recentTextColorSlot: Math.min(Math.max(Number(previousSettings.recentTextColorSlot) || 0, 0), 2),
+      recentHighlightColorSlot: Math.min(Math.max(Number(previousSettings.recentHighlightColorSlot) || 0, 0), 2),
       graphDirection: normalizeGraphDirection(previousSettings.graphDirection),
       graphZoom: clampGraphZoom(previousSettings.graphZoom || 1),
       graphPanX: clampGraphPan(previousSettings.graphPanX),
@@ -800,13 +1291,17 @@
               parsed.currentBoxId = null;
             }
           }
-          return normalizeStateShape(parsed);
+          const normalized = normalizeStateShape(parsed);
+          normalized.currentBoxId = null;
+          return normalized;
         }
       } catch (error) {
         console.warn("MindSet state reset", error);
       }
     }
-    return normalizeStateShape(createSeedState());
+    const seeded = normalizeStateShape(createSeedState());
+    seeded.currentBoxId = null;
+    return seeded;
   }
 
   function saveState() {
@@ -829,7 +1324,7 @@
       const restored = normalizeStateShape(JSON.parse(snapshot));
       Object.keys(state).forEach((key) => delete state[key]);
       Object.assign(state, restored);
-      runtime.modal = null;
+      setModal(null);
       runtime.contextMenu = null;
       runtime.paletteQuery = "";
       runtime.boxMenuOpen = false;
@@ -894,6 +1389,10 @@
       window.requestAnimationFrame(() => {
         const nowTime = Date.now();
         if (nowTime < runtime.suppressIdleRenderUntil) return;
+        if (runtime.pointerIsDown) {
+          scheduleRenderWhenIdle();
+          return;
+        }
         if (nowTime - runtime.lastEditorPointerAt < 650) return;
         if (activeEditableTarget()) return;
         render();
@@ -905,6 +1404,10 @@
     const target = app.querySelector("[autofocus]");
     const active = activeEditableTarget();
     if (!target || (active && active !== target)) return;
+    const modalKey = runtime.modal ? `${runtime.modal.type}:${runtime.modal.boxId || ""}:${runtime.modal.itemId || ""}:${runtime.modal.mode || ""}` : "";
+    const focusKey = `${modalKey}:${target.name || target.dataset.paletteSearch || target.dataset.selectAutofocus || target.tagName}`;
+    if (runtime.autofocusKey === focusKey) return;
+    runtime.autofocusKey = focusKey;
     window.requestAnimationFrame(() => {
       const nextActive = activeEditableTarget();
       if (!document.body.contains(target) || (nextActive && nextActive !== target)) return;
@@ -912,6 +1415,80 @@
       placeAutofocusCaret(target);
       window.setTimeout(() => placeAutofocusCaret(target), 0);
     });
+  }
+
+  function captureNoteEditorFocus() {
+    const active = document.activeElement;
+    if (!active || !app.contains(active)) return null;
+    const field = active.closest?.("[data-note-title], [data-search], [data-box-title]");
+    if (field) {
+      return {
+        kind: "field",
+        selector: field.matches("[data-note-title]") ? "[data-note-title]" : field.matches("[data-search]") ? "[data-search]" : "[data-box-title]",
+        start: typeof field.selectionStart === "number" ? field.selectionStart : null,
+        end: typeof field.selectionEnd === "number" ? field.selectionEnd : null,
+      };
+    }
+    const editor = active.closest?.("[data-note-editor]");
+    if (!editor) return null;
+    const offsets = getEditorSelectionOffsets(editor);
+    flushActiveEditorContent();
+    return {
+      kind: "editor",
+      offsets,
+      noteId: editor.dataset.editorNoteId || activeBox()?.activeItemId || "",
+    };
+  }
+
+  function restoreNoteEditorFocus(snapshot) {
+    if (!snapshot || modalBlocksGlobalShortcuts()) return false;
+    if (snapshot.kind === "field") {
+      const field = app.querySelector(snapshot.selector);
+      if (!field) return false;
+      field.focus({ preventScroll: true });
+      if (typeof field.setSelectionRange === "function" && snapshot.start !== null && typeof field.value === "string") {
+        const start = Math.min(snapshot.start, field.value.length);
+        const end = Math.min(snapshot.end ?? snapshot.start, field.value.length);
+        field.setSelectionRange(start, end);
+      }
+      return true;
+    }
+    if (snapshot.noteId && activeBox()?.activeItemId !== snapshot.noteId) return false;
+    const editor = app.querySelector("[data-note-editor]");
+    if (!editor) return false;
+    const focusTarget = isIndependentPageMode() ? (currentPageSheet(editor) || editor) : editor;
+    focusTarget.focus({ preventScroll: true });
+    if (snapshot.offsets) restoreEditorSelectionOffsets(editor, snapshot.offsets);
+    saveEditorSelection(editor);
+    return true;
+  }
+
+  function captureModalFieldFocus() {
+    const active = document.activeElement;
+    const field = active?.closest?.(".modal input, .modal textarea, .modal select");
+    if (!field || !field.name) return null;
+    return {
+      modalKey: runtime.modal ? `${runtime.modal.type}:${runtime.modal.boxId || ""}:${runtime.modal.itemId || ""}:${runtime.modal.mode || ""}` : "",
+      name: field.name,
+      value: typeof field.value === "string" ? field.value : "",
+      selectionStart: typeof field.selectionStart === "number" ? field.selectionStart : null,
+      selectionEnd: typeof field.selectionEnd === "number" ? field.selectionEnd : null,
+    };
+  }
+
+  function restoreModalFieldFocus(snapshot) {
+    if (!snapshot) return false;
+    const modalKey = runtime.modal ? `${runtime.modal.type}:${runtime.modal.boxId || ""}:${runtime.modal.itemId || ""}:${runtime.modal.mode || ""}` : "";
+    if (snapshot.modalKey !== modalKey) return false;
+    const field = [...app.querySelectorAll(".modal input, .modal textarea, .modal select")]
+      .find((item) => item.name === snapshot.name);
+    if (!field) return false;
+    if (typeof field.value === "string" && field.value !== snapshot.value) field.value = snapshot.value;
+    field.focus({ preventScroll: true });
+    if (typeof field.setSelectionRange === "function" && snapshot.selectionStart !== null) {
+      field.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd ?? snapshot.selectionStart);
+    }
+    return true;
   }
 
   function placeAutofocusCaret(target) {
@@ -939,7 +1516,7 @@
     const quickNoteId = uid("note");
 
     return {
-      currentBoxId: boxId,
+      currentBoxId: null,
       settings: {
         theme: "light",
         selectionColor: "#0f6b58",
@@ -1059,6 +1636,106 @@
     return box;
   }
 
+  function navigationSnapshot() {
+    const box = activeBox();
+    return {
+      boxId: state.currentBoxId || "",
+      itemId: box?.activeItemId || "",
+      viewMode: box?.viewMode || "",
+      sideTab: runtime.sideTab || "explorer",
+      iconFolderId: box?.iconFolderId || "",
+    };
+  }
+
+  function normalizeNavigationSnapshot(snapshot = {}) {
+    return {
+      boxId: String(snapshot.boxId || ""),
+      itemId: String(snapshot.itemId || ""),
+      viewMode: String(snapshot.viewMode || ""),
+      sideTab: String(snapshot.sideTab || "explorer"),
+      iconFolderId: String(snapshot.iconFolderId || ""),
+    };
+  }
+
+  function sameNavigationSnapshot(a, b) {
+    return !!a && !!b
+      && a.boxId === b.boxId
+      && a.itemId === b.itemId
+      && a.viewMode === b.viewMode
+      && a.sideTab === b.sideTab
+      && a.iconFolderId === b.iconFolderId;
+  }
+
+  function pushNavigationPoint() {
+    if (runtime.applyingNavigationHistory || !runtime.navigationReady || !window.history?.pushState) return;
+    const snapshot = navigationSnapshot();
+    const current = normalizeNavigationSnapshot(window.history.state?.mindsetNav || {});
+    if (sameNavigationSnapshot(snapshot, current)) return;
+    try {
+      window.history.pushState({ mindsetNav: snapshot }, "", window.location.href);
+    } catch (error) {
+      console.warn("MindSet navigation history push failed", error);
+    }
+  }
+
+  function replaceNavigationPoint() {
+    if (!window.history?.replaceState) return;
+    try {
+      window.history.replaceState({ mindsetNav: navigationSnapshot() }, "", window.location.href);
+      runtime.navigationReady = true;
+    } catch (error) {
+      console.warn("MindSet navigation history replace failed", error);
+      runtime.navigationReady = false;
+    }
+  }
+
+  function applyNavigationSnapshot(rawSnapshot) {
+    const snapshot = normalizeNavigationSnapshot(rawSnapshot);
+    runtime.applyingNavigationHistory = true;
+    flushActiveEditorContent();
+    cancelDeferredEditorWork({ suppressIdleMs: 650 });
+    runtime.editorRange = null;
+    runtime.contextMenu = null;
+    runtime.boxMenuOpen = false;
+    setModal(null);
+
+    const box = snapshot.boxId ? state.boxes.find((item) => item.id === snapshot.boxId) : null;
+    if (!box) {
+      state.currentBoxId = null;
+      runtime.sideTab = snapshot.sideTab || "explorer";
+      saveState();
+      render();
+      runtime.applyingNavigationHistory = false;
+      return;
+    }
+    if (box.passwordHash && !runtime.unlockedBoxIds.has(box.id)) {
+      state.currentBoxId = null;
+      runtime.sideTab = snapshot.sideTab || "explorer";
+      setModal({ type: "unlock-box", boxId: box.id });
+      saveState();
+      render();
+      runtime.applyingNavigationHistory = false;
+      return;
+    }
+
+    state.currentBoxId = box.id;
+    runtime.sideTab = snapshot.sideTab || "explorer";
+    if (["tree", "list", "icons"].includes(snapshot.viewMode)) box.viewMode = snapshot.viewMode;
+    const target = snapshot.itemId ? findItem(box, snapshot.itemId) : null;
+    box.activeItemId = target ? target.id : box.root.id;
+    box.selectedIds = target && target.id !== box.root.id ? [target.id] : [];
+    runtime.selectionAnchorId = target && target.id !== box.root.id ? target.id : null;
+    runtime.focusedItemId = target?.id || null;
+    if (!Array.isArray(box.openTabIds)) box.openTabIds = [];
+    if (target && !box.openTabIds.includes(target.id)) box.openTabIds.push(target.id);
+    if (snapshot.iconFolderId && findItem(box, snapshot.iconFolderId)?.type === "folder") {
+      box.iconFolderId = snapshot.iconFolderId;
+    }
+    saveState();
+    render();
+    runtime.applyingNavigationHistory = false;
+  }
+
   function touchBox(box) {
     box.modifiedAt = now();
   }
@@ -1167,19 +1844,244 @@
   }
 
   async function sha256(text) {
-    const data = new TextEncoder().encode(text);
-    const hash = await crypto.subtle.digest("SHA-256", data);
-    return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    const subtle = window.crypto?.subtle || globalThis.crypto?.subtle;
+    const data = new TextEncoder().encode(String(text || ""));
+    if (subtle?.digest) {
+      try {
+        const hash = await subtle.digest("SHA-256", data);
+        return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
+      } catch (error) {
+        console.warn("MindSet WebCrypto hash failed, using fallback", error);
+      }
+    }
+    return sha256Fallback(String(text || ""));
+  }
+
+  function sha256Fallback(text) {
+    const bytes = [...new TextEncoder().encode(text)];
+    const bitLength = bytes.length * 8;
+    bytes.push(0x80);
+    while ((bytes.length % 64) !== 56) bytes.push(0);
+    for (let shift = 56; shift >= 0; shift -= 8) bytes.push((bitLength / 2 ** shift) & 255);
+
+    const constants = [
+      0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+      0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+      0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+      0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+      0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+      0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+      0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+      0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    ];
+    const hash = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    const rotr = (value, bits) => (value >>> bits) | (value << (32 - bits));
+
+    for (let offset = 0; offset < bytes.length; offset += 64) {
+      const words = new Array(64).fill(0);
+      for (let index = 0; index < 16; index += 1) {
+        const start = offset + index * 4;
+        words[index] = ((bytes[start] << 24) | (bytes[start + 1] << 16) | (bytes[start + 2] << 8) | bytes[start + 3]) >>> 0;
+      }
+      for (let index = 16; index < 64; index += 1) {
+        const s0 = (rotr(words[index - 15], 7) ^ rotr(words[index - 15], 18) ^ (words[index - 15] >>> 3)) >>> 0;
+        const s1 = (rotr(words[index - 2], 17) ^ rotr(words[index - 2], 19) ^ (words[index - 2] >>> 10)) >>> 0;
+        words[index] = (words[index - 16] + s0 + words[index - 7] + s1) >>> 0;
+      }
+      let [a, b, c, d, e, f, g, h] = hash;
+      for (let index = 0; index < 64; index += 1) {
+        const s1 = (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) >>> 0;
+        const ch = ((e & f) ^ (~e & g)) >>> 0;
+        const temp1 = (h + s1 + ch + constants[index] + words[index]) >>> 0;
+        const s0 = (rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) >>> 0;
+        const maj = ((a & b) ^ (a & c) ^ (b & c)) >>> 0;
+        const temp2 = (s0 + maj) >>> 0;
+        h = g; g = f; f = e; e = (d + temp1) >>> 0; d = c; c = b; b = a; a = (temp1 + temp2) >>> 0;
+      }
+      [a, b, c, d, e, f, g, h].forEach((value, index) => {
+        hash[index] = (hash[index] + value) >>> 0;
+      });
+    }
+    return hash.map((value) => value.toString(16).padStart(8, "0")).join("");
+  }
+
+  function normalizeBoxCode(value) {
+    return String(value || "").trim();
+  }
+
+  async function boxCodeMatches(value, hash) {
+    if (!hash) return false;
+    const raw = String(value || "");
+    const normalized = normalizeBoxCode(raw);
+    if (await sha256(normalized) === hash) return true;
+    return raw !== normalized && await sha256(raw) === hash;
+  }
+
+  function modalError(message) {
+    runtime.modal = runtime.modal ? { ...runtime.modal, error: message } : runtime.modal;
+    render();
+  }
+
+  function paintToast() {
+    const existing = app.querySelector(".toast");
+    if (!runtime.toast) {
+      existing?.remove();
+      return;
+    }
+    if (existing) {
+      existing.textContent = runtime.toast;
+      return;
+    }
+    const toast = document.createElement("div");
+    toast.className = "toast";
+    toast.textContent = runtime.toast;
+    app.appendChild(toast);
   }
 
   function setToast(message) {
     runtime.toast = message;
-    render();
+    paintToast();
     window.clearTimeout(setToast.timer);
     setToast.timer = window.setTimeout(() => {
       runtime.toast = "";
-      render();
+      paintToast();
     }, 2400);
+  }
+
+  function closeBoxMenuLightly() {
+    if (!runtime.boxMenuOpen) return;
+    runtime.boxMenuOpen = false;
+    app.querySelector("[data-box-menu]")?.remove();
+    const switcherButton = app.querySelector(".box-switcher-main");
+    switcherButton?.setAttribute("aria-expanded", "false");
+    app.querySelector(".box-chevron.is-open")?.classList.remove("is-open");
+  }
+
+  function desktopBridge() {
+    return window.mindsetDesktop || null;
+  }
+
+  function normalizeDesktopUpdateStatus(payload = {}) {
+    const status = String(payload.status || "idle");
+    const percent = Number.isFinite(Number(payload.percent)) ? Number(payload.percent) : null;
+    const messages = {
+      idle: "Aucune recherche lancee.",
+      checking: "Recherche d'une mise a jour...",
+      available: "Mise a jour trouvee. Tu peux la telecharger.",
+      downloading: percent === null ? "Telechargement en cours..." : `Telechargement : ${Math.round(percent)}%`,
+      downloaded: "Mise a jour prete a installer.",
+      "not-available": "MindSet est deja a jour.",
+      development: "Les mises a jour se testent dans l'application installee.",
+      installing: "Installation de la mise a jour...",
+      error: "Impossible de verifier les mises a jour.",
+    };
+    return {
+      status,
+      percent,
+      version: payload.version || "",
+      message: payload.message || messages[status] || messages.idle,
+    };
+  }
+
+  function updateBusy(status) {
+    return ["checking", "downloading", "installing"].includes(status);
+  }
+
+  function updateCanCheck(status, desktopReady) {
+    return desktopReady && !updateBusy(status);
+  }
+
+  function updateCanDownload(status, desktopReady) {
+    return desktopReady && ["available", "download-error"].includes(status);
+  }
+
+  function updateCanInstall(status, desktopReady) {
+    return desktopReady && status === "downloaded";
+  }
+
+  function updateProgressValue(updateStatus) {
+    if (updateStatus.status === "downloaded") return 100;
+    if (updateStatus.status !== "downloading") return 0;
+    return Math.min(Math.max(Math.round(updateStatus.percent ?? 0), 0), 100);
+  }
+
+  function paintUpdateStatus() {
+    const panel = app.querySelector("[data-update-panel]");
+    if (!panel) return false;
+    const desktopReady = !!desktopBridge()?.isDesktop;
+    const updateStatus = normalizeDesktopUpdateStatus(runtime.updateStatus);
+    const progress = updateProgressValue(updateStatus);
+
+    panel.dataset.updateStatus = updateStatus.status;
+    const message = panel.querySelector("[data-update-message]");
+    if (message) message.textContent = updateStatus.message;
+
+    const version = panel.querySelector("[data-update-version]");
+    if (version) {
+      version.textContent = updateStatus.version ? `Version ${updateStatus.version}` : "";
+      version.hidden = !updateStatus.version;
+    }
+
+    const progressBar = panel.querySelector("[data-update-progress-bar]");
+    if (progressBar) {
+      progressBar.style.width = `${progress}%`;
+      progressBar.setAttribute("aria-valuenow", String(progress));
+    }
+
+    const progressText = panel.querySelector("[data-update-progress-text]");
+    if (progressText) {
+      progressText.textContent = updateStatus.status === "downloading" || updateStatus.status === "downloaded"
+        ? `${progress}%`
+        : "En attente";
+    }
+
+    const check = panel.querySelector('[data-action="check-updates"]');
+    const download = panel.querySelector('[data-action="download-update"]');
+    const install = panel.querySelector('[data-action="install-update"]');
+    if (check) check.disabled = !updateCanCheck(updateStatus.status, desktopReady);
+    if (download) download.disabled = !updateCanDownload(updateStatus.status, desktopReady);
+    if (install) install.disabled = !updateCanInstall(updateStatus.status, desktopReady);
+    return true;
+  }
+
+  function setUpdateStatus(payload) {
+    runtime.updateStatus = normalizeDesktopUpdateStatus(payload);
+    paintUpdateStatus();
+  }
+
+  async function runDesktopUpdateAction(kind) {
+    const bridge = desktopBridge();
+    if (!bridge?.isDesktop) {
+      setUpdateStatus({ status: "development", message: "Les mises a jour seront disponibles dans l'app Windows installee." });
+      return;
+    }
+
+    const methodByKind = {
+      check: "checkForUpdates",
+      download: "downloadUpdate",
+      install: "installUpdate",
+    };
+    const method = methodByKind[kind];
+    if (!method || typeof bridge[method] !== "function") return;
+
+    if (kind === "check") setUpdateStatus({ status: "checking" });
+    if (kind === "download") setUpdateStatus({ status: "downloading" });
+    if (kind === "install") setUpdateStatus({ status: "installing" });
+
+    try {
+      const result = await bridge[method]();
+      if (result) setUpdateStatus(result);
+    } catch (error) {
+      setUpdateStatus({ status: "error", message: error?.message || "Erreur de mise a jour." });
+    }
+  }
+
+  function bindDesktopUpdates() {
+    const bridge = desktopBridge();
+    if (!bridge?.onUpdateStatus) return;
+    bridge.onUpdateStatus((payload) => {
+      setUpdateStatus(payload);
+    });
   }
 
   function setActiveItem(box, id, event) {
@@ -1191,6 +2093,7 @@
     if (id === box.root.id) {
       box.selectedIds = [];
       runtime.selectionAnchorId = null;
+      pushNavigationPoint();
       saveState();
       render();
       return;
@@ -1211,6 +2114,7 @@
       box.selectedIds = [id];
       runtime.selectionAnchorId = id;
     }
+    pushNavigationPoint();
     saveState();
     render();
   }
@@ -1228,7 +2132,7 @@
     const item = findItem(box, id);
     if (!box || !item || item.id === box.root.id) return;
     runtime.contextMenu = null;
-    runtime.modal = null;
+    setModal(null);
     box.activeItemId = item.id;
     box.selectedIds = [item.id];
     runtime.selectionAnchorId = item.id;
@@ -1240,6 +2144,7 @@
     }
     if (!Array.isArray(box.openTabIds)) box.openTabIds = [];
     if (!box.openTabIds.includes(item.id)) box.openTabIds.push(item.id);
+    pushNavigationPoint();
     saveState();
     render();
   }
@@ -1363,13 +2268,18 @@
       paintSelection(nextSelection);
     };
 
-    const finish = (pointerEvent) => {
-      update(pointerEvent);
+    const cleanup = () => {
       overlay.remove();
       document.body.classList.remove("is-marquee-selecting");
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", cancel);
       runtime.marquee = null;
+    };
+
+    const finish = (pointerEvent) => {
+      update(pointerEvent);
+      cleanup();
       runtime.ignoreSurfaceClick = true;
       window.setTimeout(() => {
         runtime.ignoreSurfaceClick = false;
@@ -1382,6 +2292,12 @@
       render();
     };
 
+    const cancel = () => {
+      cleanup();
+      paintSelection([...baseSelection]);
+      box.selectedIds = [...baseSelection].filter((id) => id !== box.root.id);
+    };
+
     const move = (pointerEvent) => {
       pointerEvent.preventDefault();
       update(pointerEvent);
@@ -1391,6 +2307,7 @@
     event.preventDefault();
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", finish, { once: true });
+    window.addEventListener("pointercancel", cancel, { once: true });
   }
 
   function closeTab(box, id) {
@@ -1399,6 +2316,7 @@
     if (box.activeItemId === id) {
       box.activeItemId = box.openTabIds[box.openTabIds.length - 1] || box.root.id;
       box.selectedIds = box.activeItemId === box.root.id ? [] : [box.activeItemId];
+      pushNavigationPoint();
     }
     saveState();
     render();
@@ -1444,6 +2362,7 @@
     if (!box.openTabIds.includes(note.id)) box.openTabIds.push(note.id);
     if (!box.expandedIds.includes(folder.id)) box.expandedIds.push(folder.id);
     touchBox(box);
+    pushNavigationPoint();
     saveState();
     render();
     requestAnimationFrame(() => document.querySelector("[data-note-editor]")?.focus());
@@ -1495,10 +2414,86 @@
     runtime.contextMenu = null;
     runtime.boxMenuOpen = false;
     if (target.passwordHash && !runtime.unlockedBoxIds.has(target.id)) {
-      runtime.modal = { type: "unlock-box", boxId: target.id };
+      setModal({ type: "unlock-box", boxId: target.id });
     } else {
-      state.currentBoxId = target.id;
+      openUnlockedBox(target);
+      return;
     }
+    saveState();
+    render();
+  }
+
+  function openUnlockedBox(box, options = {}) {
+    if (!box) return;
+    cancelDeferredEditorWork({ suppressIdleMs: 650 });
+    runtime.editorRange = null;
+    runtime.contextMenu = null;
+    runtime.boxMenuOpen = false;
+    state.currentBoxId = box.id;
+    runtime.unlockedBoxIds.add(box.id);
+    if (!findItem(box, box.activeItemId)) box.activeItemId = box.root.id;
+    if (!Array.isArray(box.openTabIds)) box.openTabIds = [];
+    if (box.activeItemId && !box.openTabIds.includes(box.activeItemId)) box.openTabIds.push(box.activeItemId);
+    if (!box.openTabIds.length) box.openTabIds = [box.root.id];
+    if (!Array.isArray(box.expandedIds)) box.expandedIds = [box.root.id];
+    if (!box.expandedIds.includes(box.root.id)) box.expandedIds.unshift(box.root.id);
+    setModal(null);
+    saveState();
+    pushNavigationPoint();
+    render();
+    if (options.focusEditor) {
+      requestAnimationFrame(() => document.querySelector("[data-note-editor]")?.focus({ preventScroll: true }));
+    }
+  }
+
+  function openBoxProtectedAction(boxId, intent) {
+    const target = state.boxes.find((item) => item.id === boxId);
+    if (!target) return;
+    runtime.contextMenu = null;
+    if (target.passwordHash && ["rename", "delete"].includes(intent)) {
+      setModal({ type: "box-auth", boxId, intent });
+      render();
+      return;
+    }
+    openBoxActionAfterAuth(boxId, intent);
+  }
+
+  function openBoxActionAfterAuth(boxId, intent) {
+    const target = state.boxes.find((item) => item.id === boxId);
+    if (!target) return;
+    runtime.contextMenu = null;
+    if (intent === "rename") {
+      setModal({ type: "rename-box", boxId });
+    } else if (intent === "delete") {
+      setModal({ type: "confirm-delete-box-first", boxId });
+    } else if (intent === "add-password") {
+      setModal({ type: "box-password", boxId, mode: "add" });
+    } else if (intent === "change-password") {
+      setModal({ type: "box-password", boxId, mode: "change" });
+    }
+    render();
+  }
+
+  function lockBox(boxId) {
+    const target = state.boxes.find((item) => item.id === boxId);
+    if (!target?.passwordHash) return;
+    runtime.unlockedBoxIds.delete(boxId);
+    if (state.currentBoxId === boxId) state.currentBoxId = null;
+    pushNavigationPoint();
+    saveState();
+    render();
+  }
+
+  function deleteBoxById(boxId) {
+    const target = state.boxes.find((item) => item.id === boxId);
+    if (!target) return;
+    rememberState("Suppression de boite");
+    state.boxes = state.boxes.filter((box) => box.id !== boxId);
+    runtime.unlockedBoxIds.delete(boxId);
+    if (state.currentBoxId === boxId) state.currentBoxId = null;
+    runtime.contextMenu = null;
+    setModal(null);
+    pushNavigationPoint();
     saveState();
     render();
   }
@@ -1524,11 +2519,11 @@
     const ids = [...new Set(idsToDelete)]
       .filter((id) => id !== box.root.id && findItem(box, id));
     if (!ids.length) return;
-    runtime.modal = {
+    setModal({
       type: "confirm-delete",
       ids,
       returnToGraph: options.returnToGraph || graphViewVisible(),
-    };
+    });
     render();
   }
 
@@ -1792,6 +2787,31 @@
     return event.clientY < rect.top + rect.height / 2 ? "before" : "after";
   }
 
+  function treeDropZone(event, element) {
+    const rect = element.getBoundingClientRect();
+    const y = event.clientY - rect.top;
+    const edge = Math.min(Math.max(rect.height * 0.34, 8), 16);
+    if (y <= edge) return "before";
+    if (y >= rect.height - edge) return "after";
+    return "into";
+  }
+
+  function itemDropIntent(event, element, box, target) {
+    const draggedIds = runtime.dragIds?.length ? runtime.dragIds : [runtime.dragId];
+    const canDropInto = target?.type === "folder"
+      && !draggedIds.includes(target.id)
+      && !draggedIds.some((id) => isDescendant(box, id, target.id));
+
+    if (box.customSortActive && element.matches(".tree-row")) {
+      const zone = canDropInto ? treeDropZone(event, element) : dropPosition(event, element);
+      return zone === "into" ? { type: "into" } : { type: "reorder", position: zone };
+    }
+
+    if (canDropInto) return { type: "into" };
+    if (box.customSortActive) return { type: "reorder", position: dropPosition(event, element) };
+    return null;
+  }
+
   function reorderItem(box, draggedId, targetId, position) {
     if (!draggedId || !targetId || draggedId === targetId) return;
     if (isDescendant(box, draggedId, targetId)) return;
@@ -1840,8 +2860,10 @@
 
   function render() {
     const previousModalType = runtime.modal?.type;
+    const previousEditorFocus = captureNoteEditorFocus();
+    const previousModalFocus = captureModalFieldFocus();
     const previousSettingsScroll = previousModalType === "settings"
-      ? app.querySelector(".settings-modal .modal-body")?.scrollTop || 0
+      ? app.querySelector(".settings-modal .settings-content")?.scrollTop || 0
       : 0;
     applyAppearance();
     const box = activeBox();
@@ -1849,10 +2871,10 @@
     bindEvents();
     bindGraphCanvas();
     bindTabMarquees();
-    focusAutofocusTarget();
+    if (!restoreNoteEditorFocus(previousEditorFocus) && !restoreModalFieldFocus(previousModalFocus)) focusAutofocusTarget();
     if (previousModalType === "settings" && runtime.modal?.type === "settings") {
       requestAnimationFrame(() => {
-        const body = app.querySelector(".settings-modal .modal-body");
+        const body = app.querySelector(".settings-modal .settings-content");
         if (body) body.scrollTop = previousSettingsScroll;
       });
     }
@@ -1865,15 +2887,17 @@
           <div class="lobby-header">
             <div>
               <h1>MindSet</h1>
+              <span class="lobby-count">${state.boxes.length} boite${state.boxes.length > 1 ? "s" : ""}</span>
               <p>Choisis une boîte ou crée un nouvel espace pour un projet, une idée, un cours ou une zone de vie.</p>
             </div>
             <button class="button" data-action="create-box-modal">${icon("plus")} Nouvelle boîte</button>
           </div>
           <div class="box-grid">
-            ${state.boxes.map(renderBoxCard).join("")}
+            ${state.boxes.map(renderBoxCardV2).join("")}
           </div>
         </div>
       </section>
+      ${renderBoxContextMenu()}
       ${renderModal()}
       ${renderToast()}
     `;
@@ -1889,6 +2913,32 @@
         </div>
         <div class="box-card-footer">
           <span class="selection-count">${box.passwordHash ? `${icon("lock")} Protégée` : `${icon("unlock")} Libre`}</span>
+          <button class="button" data-action="open-box" data-box-id="${box.id}">Ouvrir</button>
+        </div>
+      </article>
+    `;
+  }
+
+  function renderBoxCardV2(box) {
+    const count = allItems(box).length;
+    const protectedBox = !!box.passwordHash;
+    const unlocked = !protectedBox || runtime.unlockedBoxIds.has(box.id);
+    return `
+      <article class="box-card" data-box-card-id="${box.id}">
+        <button
+          class="box-lock-button ${protectedBox ? "is-protected" : "is-open"} ${unlocked ? "is-unlocked" : "is-locked"}"
+          type="button"
+          data-action="box-lock-click"
+          data-box-id="${box.id}"
+          aria-label="${protectedBox ? (unlocked ? "Verrouiller la boite" : "Boite protegee") : "Ajouter un code"}"
+          data-tooltip="${protectedBox ? (unlocked ? "Verrouiller" : "Protegee") : "Ajouter un code"}"
+        >${icon(protectedBox && !unlocked ? "lock" : "unlock")}</button>
+        <div>
+          <h2>${escapeHtml(box.name)}</h2>
+          <p>${count} element${count > 1 ? "s" : ""} - modifiee le ${formatShortDate(box.modifiedAt)}</p>
+        </div>
+        <div class="box-card-footer">
+          <span class="box-protection-status ${protectedBox ? "is-protected" : "is-unprotected"}">${protectedBox ? "Protégé" : "Non protégé"}</span>
           <button class="button" data-action="open-box" data-box-id="${box.id}">Ouvrir</button>
         </div>
       </article>
@@ -1927,6 +2977,10 @@
     const activeId = box.activeItemId;
     return `
       <div class="app-tabs-bar">
+        <div class="history-tabs" aria-label="Historique">
+          <button class="top-tab" data-action="history-back" data-tooltip="Revenir en arriere" aria-label="Revenir en arriere">${icon("arrowLeft")}</button>
+          <button class="top-tab" data-action="history-forward" data-tooltip="Repartir en avant" aria-label="Repartir en avant">${icon("arrowRight")}</button>
+        </div>
         ${leftOpen ? `<div class="top-tabs" aria-label="Navigation principale">
           <button class="top-tab" data-action="show-lobby" data-tooltip="Accueil" aria-label="Accueil">${icon("home")}</button>
           <button class="top-tab ${runtime.sideTab === "explorer" ? "is-active" : ""}" data-action="show-explorer" data-tooltip="Explorateur de fichier" aria-label="Explorateur de fichier">${icon("folder")}</button>
@@ -2233,10 +3287,15 @@
     const presets = kind === "highlight" ? baseColorPresets : textColorPresets;
     const current = cleanColor(value, kind === "highlight" ? "#fff0a8" : "#000000");
     const presetValues = new Set(presets.map((color) => color.value));
-    const recents = (state.settings?.[recentKey] || []).filter((color) => !presetValues.has(color));
+    const recents = normalizeRecentColorSlots(state.settings?.[recentKey]).map((color) => presetValues.has(color) ? "" : color);
     const swatches = [
       ...presets.map((color) => ({ ...color, recent: false })),
-      ...recents.slice(0, 3).map((color) => ({ label: `Récent ${color}`, value: color, recent: true })),
+      ...recents.map((color, index) => ({
+        label: color ? `Memoire ${index + 1} ${color}` : `Memoire ${index + 1} vide`,
+        value: color,
+        recent: true,
+        empty: !color,
+      })),
     ];
 
     return `
@@ -2249,10 +3308,11 @@
         <div class="quick-colors" aria-label="${escapeHtml(label)}">
           ${swatches.map((color) => `
             <button
-              class="quick-color ${color.value === current ? "is-active" : ""} ${color.recent ? "is-recent" : ""} ${color.value === "#ffffff" ? "is-light" : ""}"
+              class="quick-color ${color.value === current ? "is-active" : ""} ${color.recent ? "is-recent" : ""} ${color.empty ? "is-empty" : ""} ${color.value === "#ffffff" ? "is-light" : ""}"
               style="--quick-color:${color.value}"
               data-color-swatch="${kind}"
               data-color-value="${color.value}"
+              ${color.empty ? "disabled" : ""}
               title="${escapeHtml(color.label)}"
               aria-label="${escapeHtml(color.label)}"
             ></button>
@@ -2335,6 +3395,8 @@
             <span data-page-count>1 page</span>
             <div class="toolbar-export-actions">
               <button class="stats-action-button" data-action="export-note-pdf" data-tooltip="Exporter en PDF" aria-label="Exporter en PDF">${icon("filePdf")}</button>
+              <button class="stats-action-button" data-action="export-note-word" data-tooltip="Exporter en Word" aria-label="Exporter en Word">${icon("fileWord")}</button>
+              <button class="stats-action-button" data-action="export-note-txt" data-tooltip="Exporter en TXT" aria-label="Exporter en TXT">${icon("fileText")}</button>
               <button class="stats-action-button" data-action="print-note" data-tooltip="Imprimer" aria-label="Imprimer">${icon("printer")}</button>
             </div>
           </div>
@@ -2358,8 +3420,8 @@
         <section class="editor-page ${pageMode ? "is-page-mode" : ""} ${splitMode ? "is-split-mode" : ""}" style="${pageStyle}">
           <input class="title-input" data-note-title value="${escapeHtml(note.title)}" aria-label="Titre de la note" />
           ${pageMode
-            ? `<div class="page-editor-viewport" data-page-viewport><div class="page-editor-scale" data-page-scale><div class="note-editor page-document" data-note-editor data-page-flow="${pageFlowMode}" contenteditable="${pageFlowMode === "independent" ? "false" : "true"}" spellcheck="true"></div></div></div>`
-            : `<div class="note-editor" data-note-editor contenteditable="true" spellcheck="true">${note.content || ""}</div>`}
+            ? `<div class="page-editor-viewport" data-page-viewport><div class="page-editor-scale" data-page-scale><div class="note-editor page-document" data-note-editor data-editor-note-id="${note.id}" data-page-flow="${pageFlowMode}" contenteditable="${pageFlowMode === "independent" ? "false" : "true"}" spellcheck="true"></div></div></div>`
+            : `<div class="note-editor" data-note-editor data-editor-note-id="${note.id}" contenteditable="true" spellcheck="true">${note.content || ""}</div>`}
           <div class="editor-status" aria-live="polite">
             ${pageMode && pageFlowMode === "independent" ? `<span class="page-full-notice" data-page-full-notice></span>` : ""}
             <span data-word-count>${stats.words} mots</span>
@@ -2537,6 +3599,19 @@
     return itemIconMarkup(node) || icon(node.type === "folder" ? "folder" : "note");
   }
 
+  function renderPrintOptionToggle(name, label, detail, checked) {
+    return `
+      <label class="print-option-toggle">
+        <input type="checkbox" name="${name}" ${checked ? "checked" : ""} />
+        <span class="print-option-control" aria-hidden="true"></span>
+        <span class="print-option-copy">
+          <strong>${escapeHtml(label)}</strong>
+          <small>${escapeHtml(detail)}</small>
+        </span>
+      </label>
+    `;
+  }
+
   function renderContextMenu(box) {
     if (!runtime.contextMenu) return "";
     const item = findItem(box, runtime.contextMenu.itemId);
@@ -2583,6 +3658,32 @@
     `;
   }
 
+  function renderBoxContextMenu() {
+    if (runtime.contextMenu?.source !== "box") return "";
+    const box = state.boxes.find((item) => item.id === runtime.contextMenu.boxId);
+    if (!box) return "";
+    const x = Math.min(runtime.contextMenu.x || 0, Math.max(window.innerWidth - 238, 8));
+    const y = Math.min(runtime.contextMenu.y || 0, Math.max(window.innerHeight - 220, 8));
+    return `
+      <div class="context-menu" style="left:${x}px; top:${y}px" data-context-menu>
+        ${box.passwordHash ? `
+          <button class="context-row" data-action="change-box-password" data-box-id="${box.id}">
+            ${icon("lock")}
+            <span>Modifier le code</span>
+          </button>
+        ` : ""}
+        <button class="context-row" data-action="rename-box" data-box-id="${box.id}">
+          ${icon("edit")}
+          <span>Renommer</span>
+        </button>
+        <button class="context-row danger" data-action="delete-box" data-box-id="${box.id}">
+          ${icon("trash")}
+          <span>Supprimer</span>
+        </button>
+      </div>
+    `;
+  }
+
   function renderModal() {
     if (!runtime.modal) return "";
     if (runtime.modal.type === "create-box") {
@@ -2612,6 +3713,7 @@
 
     if (runtime.modal.type === "unlock-box") {
       const box = state.boxes.find((item) => item.id === runtime.modal.boxId);
+      const error = runtime.modal.error || "";
       return `
         <div class="modal-backdrop">
           <form class="modal" data-unlock-box-form>
@@ -2625,10 +3727,141 @@
               </label>
             </div>
             <div class="modal-actions">
+              <span class="modal-error" ${error ? "" : "hidden"}>${escapeHtml(error)}</span>
               <button class="ghost-button" type="button" data-action="close-modal">Annuler</button>
               <button class="button" type="submit">${icon("unlock")} Ouvrir</button>
             </div>
           </form>
+        </div>
+      `;
+    }
+
+    if (runtime.modal.type === "box-auth") {
+      const box = state.boxes.find((item) => item.id === runtime.modal.boxId);
+      const error = runtime.modal.error || "";
+      return `
+        <div class="modal-backdrop">
+          <form class="modal" data-box-auth-form>
+            <div class="modal-head">
+              <h2>Code requis</h2>
+              <button class="icon-button" type="button" data-action="close-modal" title="Fermer">${icon("close")}</button>
+            </div>
+            <div class="modal-body">
+              <p class="modal-copy">${escapeHtml(box?.name || "Cette boite")} est protegee.</p>
+              <label class="modal-label">Code actuel
+                <input class="modal-field" name="password" type="password" required autofocus />
+              </label>
+            </div>
+            <div class="modal-actions">
+              <span class="modal-error" ${error ? "" : "hidden"}>${escapeHtml(error)}</span>
+              <button class="ghost-button" type="button" data-action="close-modal">Annuler</button>
+              <button class="button" type="submit">${icon("unlock")} Continuer</button>
+            </div>
+          </form>
+        </div>
+      `;
+    }
+
+    if (runtime.modal.type === "rename-box") {
+      const box = state.boxes.find((item) => item.id === runtime.modal.boxId);
+      return `
+        <div class="modal-backdrop">
+          <form class="modal" data-rename-box-form>
+            <div class="modal-head">
+              <h2>Renommer la boite</h2>
+              <button class="icon-button" type="button" data-action="close-modal" title="Fermer">${icon("close")}</button>
+            </div>
+            <div class="modal-body">
+              <label class="modal-label">Nom
+                <input class="modal-field" name="name" value="${escapeHtml(box?.name || "")}" required autofocus data-select-autofocus="true" />
+              </label>
+            </div>
+            <div class="modal-actions">
+              <button class="ghost-button" type="button" data-action="close-modal">Annuler</button>
+              <button class="button" type="submit">${icon("check")} Renommer</button>
+            </div>
+          </form>
+        </div>
+      `;
+    }
+
+    if (runtime.modal.type === "box-password") {
+      const box = state.boxes.find((item) => item.id === runtime.modal.boxId);
+      const change = runtime.modal.mode === "change";
+      const error = runtime.modal.error || "";
+      const draft = runtime.modal.draft || {};
+      return `
+        <div class="modal-backdrop">
+          <form class="modal" data-box-password-form>
+            <div class="modal-head">
+              <h2>${change ? "Modifier le code" : "Ajouter un code"}</h2>
+              <button class="icon-button" type="button" data-action="close-modal" title="Fermer">${icon("close")}</button>
+            </div>
+            <div class="modal-body modal-grid">
+              <p class="modal-copy">${escapeHtml(box?.name || "Boite")}</p>
+              ${change ? `
+                <label class="modal-label">Ancien code
+                  <input class="modal-field" name="oldPassword" type="password" value="${escapeHtml(draft.oldPassword || "")}" required />
+                </label>
+              ` : ""}
+              <label class="modal-label">Nouveau code
+                <input class="modal-field" name="newPassword" type="password" value="${escapeHtml(draft.newPassword || "")}" required />
+              </label>
+              <label class="modal-label">Confirmer le nouveau code
+                <input class="modal-field" name="confirmPassword" type="password" value="${escapeHtml(draft.confirmPassword || "")}" required />
+              </label>
+            </div>
+            <div class="modal-actions">
+              <span class="modal-error" ${error ? "" : "hidden"}>${escapeHtml(error)}</span>
+              <button class="ghost-button" type="button" data-action="close-modal">Annuler</button>
+              <button class="button" type="submit" data-box-password-submit>${icon("check")} Valider</button>
+            </div>
+          </form>
+        </div>
+      `;
+    }
+
+    if (runtime.modal.type === "box-add-password-prompt") {
+      const box = state.boxes.find((item) => item.id === runtime.modal.boxId);
+      return `
+        <div class="modal-backdrop">
+          <div class="modal confirm-modal">
+            <div class="modal-head">
+              <h2>Ajouter un code ?</h2>
+              <button class="icon-button" type="button" data-action="close-modal" title="Fermer">${icon("close")}</button>
+            </div>
+            <div class="modal-body">
+              <p class="modal-copy">Voulez-vous ajouter un code a ${escapeHtml(box?.name || "cette boite")} ?</p>
+            </div>
+            <div class="modal-actions">
+              <button class="ghost-button" type="button" data-action="close-modal">Non</button>
+              <button class="button" type="button" data-action="confirm-add-box-password" data-box-id="${box?.id || ""}">Oui</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    if (runtime.modal.type === "confirm-delete-box-first" || runtime.modal.type === "confirm-delete-box-final") {
+      const box = state.boxes.find((item) => item.id === runtime.modal.boxId);
+      const final = runtime.modal.type === "confirm-delete-box-final";
+      return `
+        <div class="modal-backdrop">
+          <div class="modal confirm-modal">
+            <div class="modal-head">
+              <h2>${final ? "Suppression definitive" : "Supprimer cette boite ?"}</h2>
+              <button class="icon-button" type="button" data-action="close-modal" title="Fermer">${icon("close")}</button>
+            </div>
+            <div class="modal-body">
+              <p class="modal-copy">${final
+                ? `Cette action sera definitive et vous perdrez toutes les informations contenues dans ${escapeHtml(box?.name || "cette boite")}. Etes-vous sur de vouloir continuer ?`
+                : `Etes-vous sur de vouloir supprimer ${escapeHtml(box?.name || "cette boite")} ?`}</p>
+            </div>
+            <div class="modal-actions">
+              <button class="ghost-button" type="button" data-action="close-modal">Non</button>
+              <button class="button ${final ? "danger-button" : ""}" type="button" data-action="${final ? "confirm-delete-box-final" : "confirm-delete-box-first"}" data-box-id="${box?.id || ""}">Oui</button>
+            </div>
+          </div>
         </div>
       `;
     }
@@ -2711,6 +3944,70 @@
       `;
     }
 
+    if (runtime.modal.type === "print-options") {
+      const box = activeBox();
+      const note = box ? findItem(box, runtime.modal.noteId) : null;
+      const mode = runtime.modal.mode === "pdf" ? "pdf" : "print";
+      const options = normalizePrintOptions(runtime.modal.options);
+      const title = mode === "pdf" ? "Exporter en PDF" : "Imprimer";
+      const action = mode === "pdf" ? "Apercu systeme" : "Imprimer";
+      const hint = mode === "pdf"
+        ? "L'apercu systeme est celui d'avant. Si date, heure ou adresse apparaissent, decoche les en-tetes et pieds de page dans cette fenetre."
+        : "Pour l'impression, le navigateur peut encore proposer ses propres en-tetes dans sa fenetre d'impression.";
+      return `
+        <div class="modal-backdrop">
+          <form class="modal print-options-modal" data-print-options-form>
+            <div class="modal-head">
+              <h2>${title}</h2>
+              <button class="icon-button" type="button" data-action="close-modal" data-tooltip="Fermer" aria-label="Fermer">${icon("close")}</button>
+            </div>
+            <div class="modal-body">
+              <p class="modal-copy">${escapeHtml(note?.title || "Note MindSet")}</p>
+              <div class="print-options-list">
+                ${renderPrintOptionToggle("showTitle", "Titre de la note", "Afficher le titre dans le document", options.showTitle)}
+                ${renderPrintOptionToggle("showDate", "Date", "Afficher la date d'export ou d'impression", options.showDate)}
+                ${renderPrintOptionToggle("showTime", "Heure", "Afficher l'heure d'export ou d'impression", options.showTime)}
+                ${renderPrintOptionToggle("showPageNumbers", "Numerotation des pages", "Afficher le numero de page", options.showPageNumbers)}
+              </div>
+              <p class="modal-hint">${hint}</p>
+            </div>
+            <div class="modal-actions">
+              <button class="ghost-button" type="button" data-action="close-modal">Annuler</button>
+              ${mode === "pdf" ? `<button class="ghost-button" type="button" data-action="open-mindset-pdf-preview">Apercu MindSet</button>` : ""}
+              <button class="button" type="submit">${icon(mode === "pdf" ? "filePdf" : "printer")} ${action}</button>
+            </div>
+          </form>
+        </div>
+      `;
+    }
+
+    if (runtime.modal.type === "pdf-preview") {
+      const box = activeBox();
+      const note = box ? findItem(box, runtime.modal.noteId) : null;
+      const pageCount = Math.max(Number(runtime.modal.pageCount) || 1, 1);
+      return `
+        <div class="modal-backdrop">
+          <div class="modal pdf-preview-modal">
+            <div class="modal-head">
+              <div>
+                <h2>Apercu PDF</h2>
+                <p class="modal-subtitle">${escapeHtml(note?.title || runtime.modal.fileName || "Note MindSet")} - ${pageCount} page${pageCount > 1 ? "s" : ""}</p>
+              </div>
+              <button class="icon-button" type="button" data-action="close-modal" data-tooltip="Fermer" aria-label="Fermer">${icon("close")}</button>
+            </div>
+            <div class="modal-body pdf-preview-body">
+              <iframe class="pdf-preview-frame" src="${escapeHtml(runtime.modal.pdfUrl || "")}#toolbar=0&navpanes=0" title="Apercu PDF MindSet"></iframe>
+              <p class="modal-hint">Cet apercu est le PDF qui sera enregistre, sans les en-tetes automatiques du navigateur.</p>
+            </div>
+            <div class="modal-actions">
+              <button class="ghost-button" type="button" data-action="pdf-preview-back">Retour options</button>
+              <button class="button" type="button" data-action="download-preview-pdf">${icon("filePdf")} Enregistrer PDF</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     if (runtime.modal.type === "settings") {
       const settings = state.settings || {};
       const headings = settings.headingPresets || headingDefaults;
@@ -2731,6 +4028,16 @@
       const pageSetup = normalizePageSetup(settings.pageSetup, settings.pageMarginPreset, settings);
       const pageLimits = pageMarginLimits(pageSetup);
       const activeMarginPreset = marginPresetForSetup(pageSetup, settings);
+      const updateStatus = normalizeDesktopUpdateStatus(runtime.updateStatus);
+      const desktopReady = !!desktopBridge()?.isDesktop;
+      const progressValue = updateProgressValue(updateStatus);
+      const settingsNav = [
+        ["settings-appearance", "Apparence"],
+        ["settings-page", "Mise en page"],
+        ["settings-text", "Texte"],
+        ["settings-fonts", "Polices"],
+        ["settings-updates", "Mises a jour"],
+      ];
       return `
         <div class="modal-backdrop">
           <div class="modal settings-modal">
@@ -2738,8 +4045,14 @@
               <h2>Paramètres</h2>
               <button class="icon-button" type="button" data-action="close-modal" data-tooltip="Fermer" aria-label="Fermer">${icon("close")}</button>
             </div>
-            <div class="modal-body modal-grid">
-              <section class="settings-section">
+            <div class="modal-body settings-body">
+              <nav class="settings-nav" aria-label="Navigation des parametres">
+                ${settingsNav.map(([target, label], index) => `
+                  <button class="settings-nav-button ${index === 0 ? "is-active" : ""}" type="button" data-settings-jump="${target}">${escapeHtml(label)}</button>
+                `).join("")}
+              </nav>
+              <div class="settings-content">
+              <section class="settings-section" id="settings-appearance" data-settings-section>
                 <h3>Apparence</h3>
                 <label class="modal-label">Thème
                   <select class="modal-field" data-theme-select>
@@ -2766,7 +4079,7 @@
                   ${todoColors.map((color) => `<button class="color-swatch ${color === todoColor ? "is-active" : ""} ${color === "#ffffff" ? "is-light" : ""}" style="--swatch:${color}" data-todo-swatch="${color}" aria-label="Couleur ${color}"></button>`).join("")}
                 </div>
               </section>
-              <section class="settings-section" data-page-setup-section>
+              <section class="settings-section" id="settings-page" data-settings-section data-page-setup-section>
                 <h3>Mise en page</h3>
                 <p class="settings-hint">Dimensions en cm, converties en taille CSS absolue pour garder des feuilles fideles a l'impression. A4 portrait est le format initial.</p>
                 <div class="page-layout-grid">
@@ -2803,7 +4116,7 @@
                 </div>
                 <p class="settings-hint">Limite basse : ${cm(minPageMarginCm)}. MindSet garde toujours au moins ${cm(minPageContentCm)} de zone utile sur chaque axe.</p>
               </section>
-              <section class="settings-section">
+              <section class="settings-section" id="settings-text" data-settings-section>
                 <h3>Presets de texte</h3>
                 ${presetRows.map((row) => {
                   const level = row.level;
@@ -2823,13 +4136,20 @@
                   `;
                 }).join("")}
               </section>
-              <section class="settings-section">
+              <section class="settings-section" id="settings-fonts" data-settings-section>
                 <h3>Polices locales</h3>
-                <p class="settings-hint">Formats acceptes : .ttf, .otf, .woff, .woff2. En prototype web, importe directement le fichier; dans l'app Windows, ce raccourci pourra ouvrir le dossier des polices.</p>
-                <label class="button font-import-button">
-                  ${icon("plus")} Ajouter une police
-                  <input type="file" accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2" data-font-import multiple />
-                </label>
+                <p class="settings-hint">Formats acceptes : .ttf, .otf, .woff, .woff2. Dans l'app Windows, MindSet ouvre directement son dossier de polices : glisse le fichier dedans, puis reviens dans MindSet.</p>
+                <div class="font-actions">
+                  ${desktopReady ? `
+                    <button class="button font-import-button" type="button" data-open-font-folder>${icon("plus")} Ajouter une police</button>
+                    <button class="ghost-button" type="button" data-scan-font-folder>Actualiser</button>
+                  ` : `
+                    <label class="button font-import-button">
+                      ${icon("plus")} Ajouter une police
+                      <input type="file" accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2" data-font-import multiple />
+                    </label>
+                  `}
+                </div>
                 <div class="local-font-list">
                   ${localFonts.length ? localFonts.map((font) => `
                     <div class="local-font-row">
@@ -2840,6 +4160,26 @@
                   `).join("") : '<p class="settings-hint">Aucune police importee pour le moment.</p>'}
                 </div>
               </section>
+              <section class="settings-section" id="settings-updates" data-settings-section data-update-panel data-update-status="${escapeHtml(updateStatus.status)}">
+                <h3>Mises a jour</h3>
+                <p class="settings-hint">${desktopReady ? "Les mises a jour seront recuperees depuis les releases GitHub de MindSet." : "Cette option apparait vraiment dans l'application Windows installee."}</p>
+                <div class="update-status-line">
+                  <strong data-update-message>${escapeHtml(updateStatus.message)}</strong>
+                  <small data-update-version ${updateStatus.version ? "" : "hidden"}>${updateStatus.version ? `Version ${escapeHtml(updateStatus.version)}` : ""}</small>
+                </div>
+                <div class="update-progress-wrap">
+                  <div class="update-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progressValue}" aria-label="Progression du telechargement">
+                    <span class="update-progress-bar" data-update-progress-bar style="width:${progressValue}%"></span>
+                  </div>
+                  <span data-update-progress-text>${updateStatus.status === "downloading" || updateStatus.status === "downloaded" ? `${progressValue}%` : "En attente"}</span>
+                </div>
+                <div class="update-actions">
+                  <button class="ghost-button" type="button" data-action="check-updates" ${updateCanCheck(updateStatus.status, desktopReady) ? "" : "disabled"}>Rechercher</button>
+                  <button class="ghost-button" type="button" data-action="download-update" ${updateCanDownload(updateStatus.status, desktopReady) ? "" : "disabled"}>Telecharger</button>
+                  <button class="button" type="button" data-action="install-update" ${updateCanInstall(updateStatus.status, desktopReady) ? "" : "disabled"}>Redemarrer</button>
+                </div>
+              </section>
+              </div>
             </div>
           </div>
         </div>
@@ -2863,7 +4203,7 @@
 
   function closeModalOrRestoreGraph() {
     const returnToGraph = !!runtime.modal?.returnToGraph;
-    runtime.modal = returnToGraph ? { type: "graph-full" } : null;
+    setModal(returnToGraph ? { type: "graph-full" } : null);
     runtime.paletteQuery = "";
     runtime.contextMenu = null;
     render();
@@ -2879,7 +4219,7 @@
         event.preventDefault();
         event.stopPropagation();
         flushActiveEditorContent();
-        runtime.modal = { type: "settings", focus: "page-setup" };
+        setModal({ type: "settings", focus: "page-setup" });
         render();
       });
     });
@@ -2910,11 +4250,61 @@
       });
     });
 
+    app.querySelectorAll("[data-settings-jump]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const target = document.getElementById(button.dataset.settingsJump);
+        if (!target) return;
+        app.querySelectorAll("[data-settings-jump]").forEach((item) => item.classList.toggle("is-active", item === button));
+        target.scrollIntoView({ block: "start", behavior: "smooth" });
+      });
+    });
+
     app.querySelectorAll("[data-box-option]").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
         switchBoxById(button.dataset.boxOption);
+      });
+    });
+
+    app.querySelectorAll("[data-box-card-id]").forEach((card) => {
+      card.addEventListener("click", () => {
+        if (runtime.contextMenu?.source === "box") {
+          runtime.contextMenu = null;
+          render();
+        }
+      });
+      card.addEventListener("contextmenu", (event) => {
+        const box = state.boxes.find((item) => item.id === card.dataset.boxCardId);
+        if (!box) return;
+        event.preventDefault();
+        event.stopPropagation();
+        runtime.contextMenu = {
+          source: "box",
+          boxId: box.id,
+          x: event.clientX,
+          y: event.clientY,
+        };
+        render();
+      });
+    });
+
+    app.querySelector(".lobby")?.addEventListener("click", (event) => {
+      if (event.target.closest("[data-box-card-id], [data-context-menu], button, input, select, textarea")) return;
+      if (runtime.contextMenu?.source !== "box") return;
+      runtime.contextMenu = null;
+      render();
+    });
+
+    app.querySelectorAll("[data-action='box-lock-click']").forEach((button) => {
+      button.addEventListener("contextmenu", (event) => {
+        const box = state.boxes.find((item) => item.id === button.dataset.boxId);
+        if (!box?.passwordHash) return;
+        event.preventDefault();
+        event.stopPropagation();
+        openBoxProtectedAction(box.id, "change-password");
       });
     });
 
@@ -2928,6 +4318,7 @@
         box.activeItemId = folder.id;
         box.selectedIds = folder.id === box.root.id ? [] : [folder.id];
         runtime.selectionAnchorId = folder.id === box.root.id ? null : folder.id;
+        pushNavigationPoint();
         saveState();
         render();
       });
@@ -2960,6 +4351,7 @@
           runtime.selectionAnchorId = item.id;
           if (!Array.isArray(box.openTabIds)) box.openTabIds = [];
           if (!box.openTabIds.includes(item.id)) box.openTabIds.push(item.id);
+          pushNavigationPoint();
           saveState();
           render();
           return;
@@ -3034,19 +4426,12 @@
         const box = activeBox();
         if (!sortableTarget || !box || !runtime.dragId || runtime.dragId === row.dataset.itemId) return;
         const target = findItem(box, row.dataset.itemId);
-        const canDropInto = target?.type === "folder" && !runtime.dragIds.includes(target.id) && !runtime.dragIds.some((id) => isDescendant(box, id, target.id));
-        if (canDropInto) {
-          event.preventDefault();
-          row.classList.add("drop-into");
-          row.classList.remove("drop-before", "drop-after");
-          return;
-        }
-        if (!box.customSortActive) return;
+        const intent = itemDropIntent(event, row, box, target);
+        if (!intent) return;
         event.preventDefault();
-        const position = dropPosition(event, row);
-        row.classList.toggle("drop-before", position === "before");
-        row.classList.toggle("drop-after", position === "after");
-        row.classList.remove("drop-into");
+        row.classList.toggle("drop-into", intent.type === "into");
+        row.classList.toggle("drop-before", intent.type === "reorder" && intent.position === "before");
+        row.classList.toggle("drop-after", intent.type === "reorder" && intent.position === "after");
       });
       row.addEventListener("dragleave", () => row.classList.remove("drop-before", "drop-after", "drop-into"));
       row.addEventListener("drop", (event) => {
@@ -3054,15 +4439,15 @@
         const box = activeBox();
         if (!sortableTarget || !box || !runtime.dragId) return;
         const target = findItem(box, row.dataset.itemId);
-        const canDropInto = target?.type === "folder" && !runtime.dragIds.includes(target.id) && !runtime.dragIds.some((id) => isDescendant(box, id, target.id));
-        if (canDropInto) {
+        const intent = itemDropIntent(event, row, box, target);
+        if (!intent) return;
+        if (intent.type === "into") {
           moveItemsToFolder(box, runtime.dragIds.length ? runtime.dragIds : [runtime.dragId], target.id);
           runtime.dragId = null;
           runtime.dragIds = [];
           return;
         }
-        if (!box.customSortActive) return;
-        reorderItem(box, runtime.dragId, row.dataset.itemId, dropPosition(event, row));
+        reorderItem(box, runtime.dragId, row.dataset.itemId, intent.position);
         box.selectedIds = [runtime.dragId];
         runtime.dragId = null;
         runtime.dragIds = [];
@@ -3094,16 +4479,10 @@
     if (search) {
       search.addEventListener("input", () => {
         const box = activeBox();
+        if (!box) return;
         box.searchQuery = search.value;
         saveState();
         render();
-        requestAnimationFrame(() => {
-          const next = app.querySelector("[data-search]");
-          if (next) {
-            next.focus();
-            next.setSelectionRange(next.value.length, next.value.length);
-          }
-        });
       });
     }
 
@@ -3280,6 +4659,16 @@
       fontImport.addEventListener("change", () => importLocalFonts(fontImport.files));
     }
 
+    const openFontFolder = app.querySelector("[data-open-font-folder]");
+    if (openFontFolder) {
+      openFontFolder.addEventListener("click", () => openDesktopFontFolder());
+    }
+
+    const scanFontFolder = app.querySelector("[data-scan-font-folder]");
+    if (scanFontFolder) {
+      scanFontFolder.addEventListener("click", () => syncDesktopFontFolder({ silent: false, rerender: true }));
+    }
+
     app.querySelectorAll("[data-remove-local-font]").forEach((button) => {
       button.addEventListener("click", () => {
         state.settings.localFonts = (state.settings.localFonts || []).filter((font) => font.id !== button.dataset.removeLocalFont);
@@ -3299,6 +4688,7 @@
           const target = selectedFolder || (active?.type === "folder" ? active : findParent(box, active?.id) || iconViewFolder(box));
           setIconViewFolder(box, target?.id || box.root.id);
         }
+        pushNavigationPoint();
         saveState();
         render();
       });
@@ -3326,28 +4716,20 @@
       });
     }
 
-    if (runtime.contextMenu) {
-      app.addEventListener("click", (event) => {
-        if (!event.target.closest("[data-context-menu]") && !event.target.closest("[data-item-id]")) {
-          runtime.contextMenu = null;
-          render();
-        }
-      });
-    }
-
     if (runtime.boxMenuOpen) {
-      app.addEventListener("click", (event) => {
-        if (!event.target.closest(".box-switcher")) {
-          runtime.boxMenuOpen = false;
-          render();
-        }
-      });
+      window.addEventListener("pointerdown", (event) => {
+        if (!event.target.closest(".box-switcher")) closeBoxMenuLightly();
+      }, { capture: true, once: true });
     }
 
     if (runtime.modal?.focus === "page-setup" && !runtime.modal.focusApplied) {
       runtime.modal.focusApplied = true;
       requestAnimationFrame(() => {
-        app.querySelector("[data-page-setup-section]")?.scrollIntoView({ block: "start" });
+        const target = app.querySelector("[data-page-setup-section]");
+        if (target) {
+          app.querySelectorAll("[data-settings-jump]").forEach((item) => item.classList.toggle("is-active", item.dataset.settingsJump === "settings-page"));
+          target.scrollIntoView({ block: "start" });
+        }
       });
     }
 
@@ -3362,14 +4744,31 @@
     saveState();
 
     const viewport = canvas?.querySelector("[data-graph-viewport]");
-    if (viewport) viewport.style.setProperty("--graph-zoom", next);
     const label = app.querySelector("[data-graph-zoom-label]");
     if (label) label.textContent = graphZoomLabel(next);
 
     if (canvas && anchor && previous !== next) {
-      canvas.scrollLeft = anchor.contentX * next - anchor.pointerX;
-      canvas.scrollTop = anchor.contentY * next - anchor.pointerY;
+      const panX = clampGraphPan(state.settings?.graphPanX);
+      const panY = clampGraphPan(state.settings?.graphPanY);
+      canvas.scrollLeft = (anchor.worldX * next) + panX - anchor.pointerX;
+      canvas.scrollTop = (anchor.worldY * next) + panY - anchor.pointerY;
     }
+    if (viewport) viewport.style.setProperty("--graph-zoom", next);
+  }
+
+  function graphCanvasCenterAnchor(canvas = app.querySelector("[data-graph-canvas]")) {
+    if (!canvas) return null;
+    const previous = clampGraphZoom(state.settings.graphZoom || 1);
+    const panX = clampGraphPan(state.settings?.graphPanX);
+    const panY = clampGraphPan(state.settings?.graphPanY);
+    const pointerX = canvas.clientWidth / 2;
+    const pointerY = canvas.clientHeight / 2;
+    return {
+      pointerX,
+      pointerY,
+      worldX: (canvas.scrollLeft + pointerX - panX) / previous,
+      worldY: (canvas.scrollTop + pointerY - panY) / previous,
+    };
   }
 
   function bindGraphCanvas() {
@@ -3383,11 +4782,13 @@
       const rect = canvas.getBoundingClientRect();
       const pointerX = event.clientX - rect.left;
       const pointerY = event.clientY - rect.top;
+      const panX = clampGraphPan(state.settings?.graphPanX);
+      const panY = clampGraphPan(state.settings?.graphPanY);
       updateGraphZoom(previous * factor, canvas, {
         pointerX,
         pointerY,
-        contentX: (canvas.scrollLeft + pointerX) / previous,
-        contentY: (canvas.scrollTop + pointerY) / previous,
+        worldX: (canvas.scrollLeft + pointerX - panX) / previous,
+        worldY: (canvas.scrollTop + pointerY - panY) / previous,
       });
     }, { passive: false });
   }
@@ -3552,7 +4953,7 @@
     const box = activeBox();
 
     if (action === "create-box-modal") {
-      runtime.modal = { type: "create-box" };
+      setModal({ type: "create-box", returnToLobby: !box });
       render();
       return;
     }
@@ -3560,12 +4961,33 @@
       closeModalOrRestoreGraph();
       return;
     }
+    if (action === "download-preview-pdf") {
+      if (runtime.modal?.type === "pdf-preview" && runtime.modal.pdfUrl) {
+        triggerPdfDownload(runtime.modal.pdfUrl, runtime.modal.fileName);
+        setToast("PDF MindSet enregistre sans en-tetes du navigateur.");
+      }
+      return;
+    }
+    if (action === "pdf-preview-back") {
+      const previousModal = runtime.modal;
+      if (previousModal?.type === "pdf-preview") {
+        setModal({
+          type: "print-options",
+          mode: "pdf",
+          noteId: previousModal.noteId,
+          options: normalizePrintOptions(previousModal.options),
+        });
+        render();
+      }
+      return;
+    }
     if (action === "show-lobby") {
       if (box) flushActiveEditorContent();
       cancelDeferredEditorWork({ suppressIdleMs: 650 });
       runtime.editorRange = null;
       state.currentBoxId = null;
-      runtime.modal = null;
+      setModal(null);
+      pushNavigationPoint();
       saveState();
       render();
       return;
@@ -3574,17 +4996,102 @@
       switchBoxById(event.currentTarget.dataset.boxId);
       return;
     }
+    if (action === "box-lock-click") {
+      const target = state.boxes.find((item) => item.id === event.currentTarget.dataset.boxId);
+      if (!target) return;
+      if (target.passwordHash) {
+        if (runtime.unlockedBoxIds.has(target.id)) {
+          lockBox(target.id);
+        }
+      } else {
+        runtime.contextMenu = null;
+        setModal({ type: "box-add-password-prompt", boxId: target.id });
+        render();
+      }
+      return;
+    }
+    if (action === "rename-box") {
+      openBoxProtectedAction(event.currentTarget.dataset.boxId, "rename");
+      return;
+    }
+    if (action === "delete-box") {
+      openBoxProtectedAction(event.currentTarget.dataset.boxId, "delete");
+      return;
+    }
+    if (action === "change-box-password") {
+      openBoxProtectedAction(event.currentTarget.dataset.boxId, "change-password");
+      return;
+    }
+    if (action === "confirm-add-box-password") {
+      openBoxActionAfterAuth(event.currentTarget.dataset.boxId, "add-password");
+      return;
+    }
+    if (action === "confirm-delete-box-first") {
+      setModal({ type: "confirm-delete-box-final", boxId: event.currentTarget.dataset.boxId });
+      render();
+      return;
+    }
+    if (action === "confirm-delete-box-final") {
+      deleteBoxById(event.currentTarget.dataset.boxId);
+      return;
+    }
+    if (action === "check-updates") {
+      runDesktopUpdateAction("check");
+      return;
+    }
+    if (action === "download-update") {
+      runDesktopUpdateAction("download");
+      return;
+    }
+    if (action === "install-update") {
+      runDesktopUpdateAction("install");
+      return;
+    }
+    if (action === "history-back" || action === "history-forward") {
+      window.history.go(action === "history-back" ? -1 : 1);
+      return;
+    }
     if (!box) return;
+
+    if (action === "open-mindset-pdf-preview") {
+      const note = findItem(box, runtime.modal?.noteId);
+      if (note?.type === "note") {
+        const form = event.currentTarget.closest("[data-print-options-form]");
+        const options = printOptionsFromForm(new FormData(form));
+        const sourceHtml = activePrintableSource(box, note);
+        openPrintableNotePdfPreview(box, note, options, sourceHtml);
+      }
+      return;
+    }
 
     if (action === "confirm-delete") {
       deleteSelected(box, runtime.modal?.ids || []);
       return;
     }
 
+    if (action === "export-note-word" || action === "export-note-txt") {
+      const note = findItem(box, box.activeItemId);
+      if (note?.type === "note") {
+        if (action === "export-note-word") {
+          exportNoteAsWord(box, note);
+        } else {
+          exportNoteAsTxt(box, note);
+        }
+      }
+      return;
+    }
+
     if (action === "export-note-pdf" || action === "print-note") {
       const note = findItem(box, box.activeItemId);
       if (note?.type === "note") {
-        openPrintableNoteWindow(box, note, action === "export-note-pdf" ? "pdf" : "print");
+        flushActiveEditorContent();
+        setModal({
+          type: "print-options",
+          mode: action === "export-note-pdf" ? "pdf" : "print",
+          noteId: note.id,
+          options: defaultPrintOptions(),
+        });
+        render();
       }
       return;
     }
@@ -3609,13 +5116,13 @@
       render();
     }
     if (action === "open-settings") {
-      runtime.modal = { type: "settings" };
+      setModal({ type: "settings" });
       render();
     }
     if (action === "rename-item") {
       const returnToGraph = runtime.contextMenu?.source === "graph" || graphViewVisible();
       runtime.contextMenu = null;
-      runtime.modal = { type: "rename-item", itemId: event.currentTarget.dataset.renameTarget, returnToGraph };
+      setModal({ type: "rename-item", itemId: event.currentTarget.dataset.renameTarget, returnToGraph });
       render();
     }
     if (action === "duplicate-context-item") {
@@ -3636,10 +5143,12 @@
     }
     if (action === "show-explorer") {
       runtime.sideTab = "explorer";
+      pushNavigationPoint();
       render();
     }
     if (action === "show-bookmarks") {
       runtime.sideTab = "bookmarks";
+      pushNavigationPoint();
       render();
     }
     if (action === "toggle-explorer-tools") {
@@ -3746,12 +5255,12 @@
     }
     if (action === "open-selector") {
       runtime.paletteQuery = "";
-      runtime.modal = { type: "selector" };
+      setModal({ type: "selector" });
       render();
     }
     if (action === "quick-note") createNote(box, ensureQuickFolder(box), true);
     if (action === "toggle-graph") {
-      runtime.modal = runtime.modal?.type === "graph-full" ? null : { type: "graph-full" };
+      setModal(runtime.modal?.type === "graph-full" ? null : { type: "graph-full" });
       render();
     }
     if (action === "set-graph-direction") {
@@ -3759,11 +5268,11 @@
       saveState();
       render();
     }
-    if (action === "graph-zoom-in") updateGraphZoom((state.settings.graphZoom || 1) * 1.12);
-    if (action === "graph-zoom-out") updateGraphZoom((state.settings.graphZoom || 1) / 1.12);
-    if (action === "graph-zoom-reset") updateGraphZoom(1);
+    if (action === "graph-zoom-in") updateGraphZoom((state.settings.graphZoom || 1) * 1.12, undefined, graphCanvasCenterAnchor());
+    if (action === "graph-zoom-out") updateGraphZoom((state.settings.graphZoom || 1) / 1.12, undefined, graphCanvasCenterAnchor());
+    if (action === "graph-zoom-reset") updateGraphZoom(1, undefined, graphCanvasCenterAnchor());
     if (action === "close-graph") {
-      runtime.modal = null;
+      setModal(null);
       render();
     }
   }
@@ -3808,7 +5317,65 @@
 
     state.settings.localFonts = normalizeLocalFonts(nextFonts);
     saveState();
+    render();
     setToast(added ? `${added} police${added > 1 ? "s" : ""} ajoutee${added > 1 ? "s" : ""}.` : "Format de police non reconnu.");
+  }
+
+  function mergeDesktopFonts(fonts) {
+    const previous = JSON.stringify(state.settings.localFonts || []);
+    const manualFonts = (state.settings.localFonts || []).filter((font) => font.source !== "desktop-folder");
+    const desktopFonts = normalizeLocalFonts((fonts || []).map((font) => ({ ...font, source: "desktop-folder" })));
+    state.settings.localFonts = normalizeLocalFonts([...manualFonts, ...desktopFonts]);
+    return previous !== JSON.stringify(state.settings.localFonts || []);
+  }
+
+  async function syncDesktopFontFolder(options = {}) {
+    const bridge = desktopBridge();
+    if (!bridge?.scanFontsFolder) return false;
+    try {
+      const result = await bridge.scanFontsFolder();
+      if (result?.status === "error") {
+        if (!options.silent) setToast(result.message || "Impossible de lire le dossier des polices.");
+        return false;
+      }
+      const changed = mergeDesktopFonts(result?.fonts || []);
+      if (changed) {
+        saveState();
+        applyAppearance();
+        if (options.rerender || runtime.modal?.type === "settings") render();
+      }
+      if (!options.silent) {
+        const count = (result?.fonts || []).length;
+        setToast(count ? `${count} police${count > 1 ? "s" : ""} detectee${count > 1 ? "s" : ""}.` : "Dossier de polices ouvert. Glisse tes fichiers dedans.");
+      }
+      return changed;
+    } catch (error) {
+      if (!options.silent) setToast(error?.message || "Impossible de lire le dossier des polices.");
+      return false;
+    }
+  }
+
+  async function openDesktopFontFolder() {
+    const bridge = desktopBridge();
+    if (!bridge?.openFontsFolder) {
+      setToast("Cette option est disponible dans l'app Windows installee.");
+      return;
+    }
+    try {
+      const result = await bridge.openFontsFolder();
+      if (result?.status === "error") {
+        setToast(result.message || "Impossible d'ouvrir le dossier des polices.");
+        return;
+      }
+      runtime.fontFolderOpenedAt = Date.now();
+      mergeDesktopFonts(result?.fonts || []);
+      saveState();
+      applyAppearance();
+      if (runtime.modal?.type === "settings") render();
+      setToast("Dossier de polices ouvert. Glisse ta police dedans puis reviens ici.");
+    } catch (error) {
+      setToast(error?.message || "Impossible d'ouvrir le dossier des polices.");
+    }
   }
 
   function bindForms() {
@@ -3818,7 +5385,7 @@
         event.preventDefault();
         const form = new FormData(createBoxForm);
         const name = String(form.get("name") || "Nouvelle boîte").trim() || "Nouvelle boîte";
-        const password = String(form.get("password") || "");
+        const password = normalizeBoxCode(form.get("password"));
         const createdAt = now();
         rememberState("Creation de boite");
         const box = {
@@ -3852,9 +5419,9 @@
         box.openTabIds = [box.root.id];
         box.iconFolderId = box.root.id;
         state.boxes.push(box);
-        state.currentBoxId = box.id;
+        state.currentBoxId = runtime.modal?.returnToLobby ? null : box.id;
         if (password) runtime.unlockedBoxIds.add(box.id);
-        runtime.modal = null;
+        setModal(null);
         saveState();
         render();
       });
@@ -3864,17 +5431,136 @@
     if (unlockForm) {
       unlockForm.addEventListener("submit", async (event) => {
         event.preventDefault();
+        try {
+          const box = state.boxes.find((item) => item.id === runtime.modal?.boxId);
+          const password = new FormData(unlockForm).get("password");
+          if (box && await boxCodeMatches(password, box.passwordHash)) {
+            openUnlockedBox(box);
+          } else {
+            modalError("mot de passe incorrect");
+          }
+        } catch (error) {
+          console.error("MindSet unlock failed", error);
+          modalError("impossible d'ouvrir cette boite");
+        }
+      });
+    }
+
+    const boxAuthForm = app.querySelector("[data-box-auth-form]");
+    if (boxAuthForm) {
+      boxAuthForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const boxId = runtime.modal?.boxId;
+        const intent = runtime.modal?.intent;
+        const box = state.boxes.find((item) => item.id === boxId);
+        const password = new FormData(boxAuthForm).get("password");
+        try {
+          if (!box || !box.passwordHash || !(await boxCodeMatches(password, box.passwordHash))) {
+            modalError("mot de passe incorrect");
+            return;
+          }
+        } catch (error) {
+          console.error("MindSet box auth failed", error);
+          modalError("impossible de verifier le code");
+          return;
+        }
+        openBoxActionAfterAuth(box.id, intent);
+      });
+    }
+
+    const renameBoxForm = app.querySelector("[data-rename-box-form]");
+    if (renameBoxForm) {
+      renameBoxForm.addEventListener("submit", (event) => {
+        event.preventDefault();
         const box = state.boxes.find((item) => item.id === runtime.modal?.boxId);
-        const password = String(new FormData(unlockForm).get("password") || "");
-        if (box && await sha256(password) === box.passwordHash) {
+        const name = String(new FormData(renameBoxForm).get("name") || "").trim();
+        if (!box || !name) return;
+        rememberState("Renommage de boite");
+        box.name = name;
+        box.root.title = name;
+        box.modifiedAt = now();
+        setModal(null);
+        saveState();
+        render();
+      });
+    }
+
+    const boxPasswordForm = app.querySelector("[data-box-password-form]");
+    if (boxPasswordForm) {
+      let submittingBoxPassword = false;
+      const rememberBoxPasswordDraft = () => {
+        if (runtime.modal?.type !== "box-password") return;
+        const form = new FormData(boxPasswordForm);
+        runtime.modal = {
+          ...runtime.modal,
+          draft: {
+            oldPassword: String(form.get("oldPassword") || ""),
+            newPassword: String(form.get("newPassword") || ""),
+            confirmPassword: String(form.get("confirmPassword") || ""),
+          },
+        };
+      };
+      ["input", "change", "focusin", "focusout", "pointerdown", "keyup"].forEach((eventName) => {
+        boxPasswordForm.addEventListener(eventName, rememberBoxPasswordDraft);
+      });
+
+      const boxPasswordValues = () => {
+        rememberBoxPasswordDraft();
+        const draft = runtime.modal?.draft || {};
+        const fieldValue = (name) => {
+          const field = boxPasswordForm.elements?.[name];
+          return typeof field?.value === "string" ? field.value : draft[name] || "";
+        };
+        return {
+          oldPassword: fieldValue("oldPassword"),
+          newPassword: normalizeBoxCode(fieldValue("newPassword")),
+          confirmPassword: normalizeBoxCode(fieldValue("confirmPassword")),
+        };
+      };
+
+      const commitBoxPassword = async () => {
+        if (submittingBoxPassword) return;
+        submittingBoxPassword = true;
+        const modal = runtime.modal;
+        const box = state.boxes.find((item) => item.id === modal?.boxId);
+        const mode = modal?.mode === "change" ? "change" : "add";
+        const { oldPassword, newPassword, confirmPassword } = boxPasswordValues();
+        if (!box) {
+          submittingBoxPassword = false;
+          return;
+        }
+        try {
+          if (mode === "change" && (!box.passwordHash || !(await boxCodeMatches(oldPassword, box.passwordHash)))) {
+            modalError("mot de passe incorrect");
+            return;
+          }
+          if (!newPassword || newPassword !== confirmPassword) {
+            modalError("les deux nouveaux codes ne correspondent pas");
+            return;
+          }
+          rememberState(mode === "change" ? "Modification de code" : "Ajout de code");
+          box.passwordHash = await sha256(newPassword);
+          box.modifiedAt = now();
           runtime.unlockedBoxIds.add(box.id);
-          state.currentBoxId = box.id;
-          runtime.modal = null;
+          setModal(null);
           saveState();
           render();
-        } else {
-          setToast("Mot de passe incorrect.");
+          setToast(mode === "change" ? "Code de la boite modifie." : "Code ajoute a la boite.");
+        } catch (error) {
+          console.error("MindSet box password update failed", error);
+          modalError("impossible d'enregistrer le code");
+        } finally {
+          submittingBoxPassword = false;
         }
+      };
+
+      boxPasswordForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        commitBoxPassword();
+      });
+      boxPasswordForm.querySelector("[data-box-password-submit]")?.addEventListener("click", (event) => {
+        event.preventDefault();
+        commitBoxPassword();
       });
     }
 
@@ -3920,6 +5606,33 @@
         event.preventDefault();
         event.stopPropagation();
         commitRename();
+      });
+    }
+
+    const printOptionsForm = app.querySelector("[data-print-options-form]");
+    if (printOptionsForm) {
+      printOptionsForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const box = activeBox();
+        const note = box ? findItem(box, runtime.modal?.noteId) : null;
+        if (!box || note?.type !== "note") {
+          setModal(null);
+          render();
+          return;
+        }
+        const mode = runtime.modal?.mode === "pdf" ? "pdf" : "print";
+        const options = printOptionsFromForm(new FormData(printOptionsForm));
+        const sourceHtml = activePrintableSource(box, note);
+        if (mode === "pdf") {
+          setModal(null);
+          render();
+          openPrintableNoteWindow(box, note, "system-pdf", options, sourceHtml);
+          return;
+        }
+        setModal(null);
+        render();
+        openPrintableNoteWindow(box, note, mode, options, sourceHtml);
       });
     }
   }
@@ -4967,8 +6680,9 @@
         if (current) saveEditorSelection(current);
       });
       input.addEventListener("input", () => {
-        const clean = registerRecentColor(input.dataset.colorInput, input.value);
+        const clean = setLastEditorColor(input.dataset.colorInput, input.value);
         if (clean) input.value = clean;
+        paintColorTool(input.dataset.colorInput, clean);
         saveState();
       });
     });
@@ -5616,8 +7330,9 @@
     const editor = app.querySelector("[data-note-editor]");
     if (!editor) return false;
     const box = activeBox();
-    const note = box ? findItem(box, box.activeItemId) : null;
-    if (!box || note?.type !== "note") return false;
+    if (!box) return false;
+    const note = findItem(box, editor.dataset.editorNoteId || box.activeItemId);
+    if (note?.type !== "note") return false;
     note.content = editorSnapshotContent(editor);
     note.modifiedAt = now();
     touchBox(box);
@@ -5733,15 +7448,54 @@
     if (select.value !== value) select.value = value;
   }
 
-  function registerRecentColor(kind, color) {
+  function setLastEditorColor(kind, color) {
     const clean = cleanColor(color, "");
     if (!clean) return clean;
-    const recentKey = kind === "highlight" ? "recentHighlightColors" : "recentTextColors";
     const lastKey = kind === "highlight" ? "lastHighlightColor" : "lastTextColor";
-    const existing = normalizeRecentColors(state.settings[recentKey] || []);
     state.settings[lastKey] = clean;
-    state.settings[recentKey] = [clean, ...existing.filter((item) => item !== clean)].slice(0, 8);
     return clean;
+  }
+
+  function registerRecentColor(kind, color) {
+    const clean = setLastEditorColor(kind, color);
+    if (!clean) return clean;
+    const recentKey = kind === "highlight" ? "recentHighlightColors" : "recentTextColors";
+    const slotKey = kind === "highlight" ? "recentHighlightColorSlot" : "recentTextColorSlot";
+    const existing = normalizeRecentColorSlots(state.settings[recentKey] || []);
+    if (!existing.includes(clean)) {
+      const emptyIndex = existing.findIndex((item) => !item);
+      const targetIndex = emptyIndex >= 0 ? emptyIndex : Math.min(Math.max(Number(state.settings[slotKey]) || 0, 0), 2);
+      existing[targetIndex] = clean;
+      state.settings[slotKey] = (targetIndex + 1) % 3;
+    }
+    state.settings[recentKey] = existing;
+    return clean;
+  }
+
+  function paintColorTool(kind, currentColor) {
+    const tool = app.querySelector(`[data-color-tool="${kind}"]`);
+    if (!tool) return;
+    const recentKey = kind === "highlight" ? "recentHighlightColors" : "recentTextColors";
+    const presets = kind === "highlight" ? baseColorPresets : textColorPresets;
+    const presetValues = new Set(presets.map((color) => color.value));
+    const current = cleanColor(currentColor, "");
+    const recents = normalizeRecentColorSlots(state.settings?.[recentKey]).map((color) => presetValues.has(color) ? "" : color);
+
+    tool.querySelectorAll("[data-color-swatch]").forEach((button) => {
+      button.classList.toggle("is-active", !!current && button.dataset.colorValue === current);
+    });
+
+    tool.querySelectorAll(".quick-color.is-recent").forEach((button, index) => {
+      const color = recents[index] || "";
+      button.dataset.colorValue = color;
+      button.disabled = !color;
+      button.style.setProperty("--quick-color", color);
+      button.classList.toggle("is-empty", !color);
+      button.classList.toggle("is-light", color === "#ffffff");
+      button.classList.toggle("is-active", !!current && color === current);
+      button.title = color ? `Memoire ${index + 1} ${color}` : `Memoire ${index + 1} vide`;
+      button.setAttribute("aria-label", button.title);
+    });
   }
 
   function applyEditorColor(editor, note, box, kind, color) {
@@ -5751,6 +7505,7 @@
     restoreEditorSelection(editor);
     document.execCommand(kind === "highlight" ? "hiliteColor" : "foreColor", false, clean);
     syncEditorContent(editor, note, box);
+    paintColorTool(kind, clean);
   }
 
   function clearEditorHighlight(editor, note, box) {
@@ -5816,10 +7571,33 @@
     syncEditorContent(editor, note, box);
   }
 
+  document.addEventListener("click", (event) => {
+    if (!runtime.contextMenu) return;
+    if (event.target.closest?.("[data-context-menu]") || event.target.closest?.("[data-item-id]")) return;
+    runtime.contextMenu = null;
+    render();
+  });
+
+  document.addEventListener("pointerdown", () => {
+    runtime.pointerIsDown = true;
+  }, true);
+  ["pointerup", "pointercancel"].forEach((eventName) => {
+    document.addEventListener(eventName, () => {
+      runtime.pointerIsDown = false;
+    }, true);
+  });
+
   document.addEventListener("keydown", (event) => {
     if (event.defaultPrevented) return;
     const editingTarget = editableTarget(event.target);
     const editingEditor = editingTarget?.closest?.("[data-note-editor]");
+    if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && !editingTarget) {
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        window.history.go(event.key === "ArrowLeft" ? -1 : 1);
+        return;
+      }
+    }
     if ((event.ctrlKey || event.metaKey) && !event.altKey && editingEditor) {
       const key = event.key.toLowerCase();
       if (key === "z" || key === "y") {
@@ -5861,7 +7639,7 @@
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
       event.preventDefault();
       runtime.paletteQuery = "";
-      runtime.modal = { type: "selector" };
+      setModal({ type: "selector" });
       render();
     }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") {
@@ -5887,5 +7665,31 @@
     }
   });
 
+  window.addEventListener("mousedown", (event) => {
+    if (event.defaultPrevented || event.button < 3 || event.button > 4) return;
+    event.preventDefault();
+    window.history.go(event.button === 3 ? -1 : 1);
+  });
+
+  window.addEventListener("popstate", (event) => {
+    if (event.state?.mindsetNav) {
+      applyNavigationSnapshot(event.state.mindsetNav);
+    } else {
+      replaceNavigationPoint();
+    }
+  });
+
+  window.addEventListener("focus", () => {
+    const recentlyOpened = runtime.fontFolderOpenedAt && Date.now() - runtime.fontFolderOpenedAt < 10 * 60 * 1000;
+    if (!recentlyOpened) return;
+    window.clearTimeout(runtime.fontFolderScanTimer);
+    runtime.fontFolderScanTimer = window.setTimeout(() => {
+      syncDesktopFontFolder({ silent: true, rerender: runtime.modal?.type === "settings" });
+    }, 250);
+  });
+
+  bindDesktopUpdates();
   render();
+  replaceNavigationPoint();
+  syncDesktopFontFolder({ silent: true, rerender: false });
 })();

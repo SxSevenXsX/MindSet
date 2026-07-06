@@ -1,0 +1,76 @@
+{
+  "name": "mindset",
+  "version": "1.0.15",
+  "description": "Application locale de prise de notes personnalisee.",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win nsis",
+    "release": "electron-builder --win nsis --publish always"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SxSevenXsX/MindSet.git"
+  },
+  "keywords": [
+    "notes",
+    "mindset",
+    "electron"
+  ],
+  "author": "SxSevenXsX",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/SxSevenXsX/MindSet/issues"
+  },
+  "homepage": "https://github.com/SxSevenXsX/MindSet#readme",
+  "build": {
+    "appId": "com.sxsevenxsx.mindset",
+    "productName": "MindSet",
+    "directories": {
+      "output": "dist"
+    },
+    "artifactName": "${productName}-Setup-${version}.${ext}",
+    "files": [
+      "index.html",
+      "src/**/*",
+      "assets/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "MindSet"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "SxSevenXsX",
+        "repo": "MindSet",
+        "releaseType": "release"
+      }
+    ]
+  },
+  "devDependencies": {
+    "electron": "^43.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  }
+}

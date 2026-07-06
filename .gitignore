@@ -1,6 +1,9 @@
 output/
+dist/
 .agents/
+.claude/
 node_modules/
+release-*/
 *.log
 ~$*
 .DS_Store
