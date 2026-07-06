@@ -1405,10 +1405,10 @@ body.is-graph-dragging {
 }
 
 .toolbar-stats {
-  display: grid;
-  gap: 1px;
-  min-width: 78px;
-  margin-left: 2px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
   color: var(--faint);
   font-size: 10px;
   font-weight: 700;
@@ -1420,7 +1420,7 @@ body.is-graph-dragging {
   display: flex;
   align-items: center;
   gap: 3px;
-  margin-top: 4px;
+  margin-left: 2px;
 }
 
 .stats-action-button {

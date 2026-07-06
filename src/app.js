@@ -454,11 +454,34 @@
     return div.textContent || div.innerText || "";
   }
 
+  function normalizeStatsPrefs(value = {}) {
+    return {
+      charsCountSpaces: value?.charsCountSpaces !== false,
+      charsCountPunctuation: value?.charsCountPunctuation !== false,
+      wordsCountNumbers: value?.wordsCountNumbers !== false,
+      wordsCountPunctuation: value?.wordsCountPunctuation === true,
+    };
+  }
+
+  const statsPunctuationPattern = /[.,;:!?…'’"«»„“”()\[\]{}\-–—_\/\\|@#*+=~^<>%&§]/g;
+
   function noteStats(note) {
     const text = stripHtml(note?.content || "").replace(/\s+/g, " ").trim();
+    const prefs = normalizeStatsPrefs(state.settings?.statsPrefs);
+
+    let charSource = text;
+    if (!prefs.charsCountPunctuation) charSource = charSource.replace(statsPunctuationPattern, "");
+    if (!prefs.charsCountSpaces) charSource = charSource.replace(/ /g, "");
+
+    const words = (text ? text.split(" ") : []).filter((token) => {
+      if (!/[\p{L}\p{N}]/u.test(token)) return prefs.wordsCountPunctuation;
+      if (!prefs.wordsCountNumbers && !/\p{L}/u.test(token)) return false;
+      return true;
+    }).length;
+
     return {
-      words: text ? text.split(" ").length : 0,
-      chars: text.length,
+      words,
+      chars: charSource.length,
       pages: 1,
     };
   }
@@ -471,15 +494,16 @@
 
   function updateEditorStats(note) {
     const stats = noteStats(note);
-    const words = app.querySelector("[data-word-count]");
-    const chars = app.querySelector("[data-char-count]");
-    const pages = app.querySelector("[data-page-count]");
-    if (words) words.textContent = `${stats.words} mots`;
-    if (pages) {
-      const pageCount = visibleEditorPageCount();
-      pages.textContent = `${pageCount} page${pageCount > 1 ? "s" : ""}`;
-    }
-    if (chars) chars.textContent = `${stats.chars} caracteres`;
+    const pageCount = visibleEditorPageCount();
+    app.querySelectorAll("[data-word-count]").forEach((element) => {
+      element.textContent = `${stats.words} mots`;
+    });
+    app.querySelectorAll("[data-char-count]").forEach((element) => {
+      element.textContent = `${stats.chars} caracteres`;
+    });
+    app.querySelectorAll("[data-page-count]").forEach((element) => {
+      element.textContent = `${pageCount} page${pageCount > 1 ? "s" : ""}`;
+    });
   }
 
   function defaultPrintOptions() {
@@ -1189,6 +1213,7 @@
       pageMarginPreset: previousMarginPreset,
       customPageMarginPresets: previousCustomMargins,
       pageSetup: normalizePageSetup(previousSettings.pageSetup, previousMarginPreset, { customPageMarginPresets: previousCustomMargins }),
+      statsPrefs: normalizeStatsPrefs(previousSettings.statsPrefs),
       localFonts: normalizeLocalFonts(previousSettings.localFonts),
       headingPresets: {
         normal: { ...headingDefaults.normal, ...(previousHeadings.normal || {}) },
@@ -3409,17 +3434,6 @@
             <button class="format-button" data-list-type="triangle" title="Triangle">△</button>
             <button class="format-button" data-list-type="square" title="Carré">□</button>
           </div>
-          <div class="toolbar-stats" aria-live="polite">
-            <span data-char-count>${stats.chars} caracteres</span>
-            <span data-word-count>${stats.words} mots</span>
-            <span data-page-count>1 page</span>
-            <div class="toolbar-export-actions">
-              <button class="stats-action-button" data-action="export-note-pdf" data-tooltip="Exporter en PDF" aria-label="Exporter en PDF">${icon("filePdf")}</button>
-              <button class="stats-action-button" data-action="export-note-word" data-tooltip="Exporter en Word" aria-label="Exporter en Word">${icon("fileWord")}</button>
-              <button class="stats-action-button" data-action="export-note-txt" data-tooltip="Exporter en TXT" aria-label="Exporter en TXT">${icon("fileText")}</button>
-              <button class="stats-action-button" data-action="print-note" data-tooltip="Imprimer" aria-label="Imprimer">${icon("printer")}</button>
-            </div>
-          </div>
           </div>
           <div class="toolbar-row toolbar-secondary-row">
           <div class="toolbar-group">
@@ -3434,6 +3448,17 @@
             ` : ""}
             <button class="format-button" data-editor-action="toggle-heading-collapse" title="Replier / deplier le titre">${icon("collapse")}</button>
             <button class="format-button ${bookmarked ? "is-active" : ""}" data-action="toggle-bookmark" data-tooltip="${bookmarked ? "Retirer des signets" : "Ajouter aux signets"}" aria-label="${bookmarked ? "Retirer des signets" : "Ajouter aux signets"}">${icon(bookmarked ? "bookmarkFilled" : "bookmark")}</button>
+          </div>
+          <div class="toolbar-stats" aria-live="polite">
+            <span data-char-count>${stats.chars} caracteres</span>
+            <span data-word-count>${stats.words} mots</span>
+            <span data-page-count>1 page</span>
+            <div class="toolbar-export-actions">
+              <button class="stats-action-button" data-action="export-note-pdf" data-tooltip="Exporter en PDF" aria-label="Exporter en PDF">${icon("filePdf")}</button>
+              <button class="stats-action-button" data-action="export-note-word" data-tooltip="Exporter en Word" aria-label="Exporter en Word">${icon("fileWord")}</button>
+              <button class="stats-action-button" data-action="export-note-txt" data-tooltip="Exporter en TXT" aria-label="Exporter en TXT">${icon("fileText")}</button>
+              <button class="stats-action-button" data-action="print-note" data-tooltip="Imprimer" aria-label="Imprimer">${icon("printer")}</button>
+            </div>
           </div>
         </div>
         </div>
@@ -3617,6 +3642,19 @@
   function graphNodeIcon(node, root = false) {
     if (root) return icon("box");
     return itemIconMarkup(node) || icon(node.type === "folder" ? "folder" : "note");
+  }
+
+  function renderStatsPrefToggle(key, label, detail, checked) {
+    return `
+      <label class="print-option-toggle">
+        <input type="checkbox" data-stats-pref="${key}" ${checked ? "checked" : ""} />
+        <span class="print-option-control" aria-hidden="true"></span>
+        <span class="print-option-copy">
+          <strong>${escapeHtml(label)}</strong>
+          <small>${escapeHtml(detail)}</small>
+        </span>
+      </label>
+    `;
   }
 
   function renderPrintOptionToggle(name, label, detail, checked) {
@@ -4051,27 +4089,18 @@
       const updateStatus = normalizeDesktopUpdateStatus(runtime.updateStatus);
       const desktopReady = !!desktopBridge()?.isDesktop;
       const progressValue = updateProgressValue(updateStatus);
+      const statsPrefs = normalizeStatsPrefs(settings.statsPrefs);
       const settingsNav = [
         ["settings-appearance", "Apparence"],
         ["settings-page", "Mise en page"],
         ["settings-text", "Texte"],
+        ["settings-stats", "Statistiques"],
         ["settings-fonts", "Polices"],
         ["settings-updates", "Mises a jour"],
       ];
-      return `
-        <div class="modal-backdrop">
-          <div class="modal settings-modal">
-            <div class="modal-head">
-              <h2>Paramètres</h2>
-              <button class="icon-button" type="button" data-action="close-modal" data-tooltip="Fermer" aria-label="Fermer">${icon("close")}</button>
-            </div>
-            <div class="modal-body settings-body">
-              <nav class="settings-nav" aria-label="Navigation des parametres">
-                ${settingsNav.map(([target, label], index) => `
-                  <button class="settings-nav-button ${index === 0 ? "is-active" : ""}" type="button" data-settings-jump="${target}">${escapeHtml(label)}</button>
-                `).join("")}
-              </nav>
-              <div class="settings-content">
+      const activeSection = settingsNav.some(([id]) => id === runtime.modal.section) ? runtime.modal.section : settingsNav[0][0];
+      const sectionsHtml = {};
+      sectionsHtml["settings-appearance"] = `
               <section class="settings-section" id="settings-appearance" data-settings-section>
                 <h3>Apparence</h3>
                 <label class="modal-label">Thème
@@ -4098,7 +4127,8 @@
                 <div class="color-swatches">
                   ${todoColors.map((color) => `<button class="color-swatch ${color === todoColor ? "is-active" : ""} ${color === "#ffffff" ? "is-light" : ""}" style="--swatch:${color}" data-todo-swatch="${color}" aria-label="Couleur ${color}"></button>`).join("")}
                 </div>
-              </section>
+              </section>`;
+      sectionsHtml["settings-page"] = `
               <section class="settings-section" id="settings-page" data-settings-section data-page-setup-section>
                 <h3>Mise en page</h3>
                 <p class="settings-hint">Dimensions en cm, converties en taille CSS absolue pour garder des feuilles fideles a l'impression. A4 portrait est le format initial.</p>
@@ -4135,7 +4165,8 @@
                   `).join("")}
                 </div>
                 <p class="settings-hint">Limite basse : ${cm(minPageMarginCm)}. MindSet garde toujours au moins ${cm(minPageContentCm)} de zone utile sur chaque axe.</p>
-              </section>
+              </section>`;
+      sectionsHtml["settings-text"] = `
               <section class="settings-section" id="settings-text" data-settings-section>
                 <h3>Presets de texte</h3>
                 ${presetRows.map((row) => {
@@ -4155,7 +4186,19 @@
                     </div>
                   `;
                 }).join("")}
-              </section>
+              </section>`;
+      sectionsHtml["settings-stats"] = `
+              <section class="settings-section" id="settings-stats" data-settings-section>
+                <h3>Statistiques</h3>
+                <p class="settings-hint">Choisis ce que comptent les compteurs de caracteres et de mots du mini Word. Les compteurs se mettent a jour immediatement.</p>
+                <div class="print-options-list">
+                  ${renderStatsPrefToggle("charsCountSpaces", "Espaces dans les caracteres", "Compter les espaces dans le total de caracteres", statsPrefs.charsCountSpaces)}
+                  ${renderStatsPrefToggle("charsCountPunctuation", "Ponctuation dans les caracteres", "Compter les virgules, points et autres signes dans le total de caracteres", statsPrefs.charsCountPunctuation)}
+                  ${renderStatsPrefToggle("wordsCountNumbers", "Nombres comme mots", "Compter un nombre seul (ex : 2026) comme un mot", statsPrefs.wordsCountNumbers)}
+                  ${renderStatsPrefToggle("wordsCountPunctuation", "Ponctuation isolee comme mot", "Compter une virgule ou un tiret seul comme un mot", statsPrefs.wordsCountPunctuation)}
+                </div>
+              </section>`;
+      sectionsHtml["settings-fonts"] = `
               <section class="settings-section" id="settings-fonts" data-settings-section>
                 <h3>Polices locales</h3>
                 <p class="settings-hint">Formats acceptes : .ttf, .otf, .woff, .woff2. Dans l'app Windows, MindSet ouvre directement son dossier de polices : glisse le fichier dedans, puis reviens dans MindSet.</p>
@@ -4179,7 +4222,8 @@
                     </div>
                   `).join("") : '<p class="settings-hint">Aucune police importee pour le moment.</p>'}
                 </div>
-              </section>
+              </section>`;
+      sectionsHtml["settings-updates"] = `
               <section class="settings-section" id="settings-updates" data-settings-section data-update-panel data-update-status="${escapeHtml(updateStatus.status)}">
                 <h3>Mises a jour</h3>
                 <p class="settings-hint">${desktopReady ? "Les mises a jour seront recuperees depuis les releases GitHub de MindSet." : "Cette option apparait vraiment dans l'application Windows installee."}</p>
@@ -4198,7 +4242,22 @@
                   <button class="ghost-button" type="button" data-action="download-update" ${updateCanDownload(updateStatus.status, desktopReady) ? "" : "disabled"}>Telecharger</button>
                   <button class="button" type="button" data-action="install-update" ${updateCanInstall(updateStatus.status, desktopReady) ? "" : "disabled"}>Redemarrer</button>
                 </div>
-              </section>
+              </section>`;
+      return `
+        <div class="modal-backdrop">
+          <div class="modal settings-modal">
+            <div class="modal-head">
+              <h2>Paramètres</h2>
+              <button class="icon-button" type="button" data-action="close-modal" data-tooltip="Fermer" aria-label="Fermer">${icon("close")}</button>
+            </div>
+            <div class="modal-body settings-body">
+              <nav class="settings-nav" aria-label="Navigation des parametres">
+                ${settingsNav.map(([target, label]) => `
+                  <button class="settings-nav-button ${target === activeSection ? "is-active" : ""}" type="button" data-settings-page="${target}">${escapeHtml(label)}</button>
+                `).join("")}
+              </nav>
+              <div class="settings-content">
+              ${sectionsHtml[activeSection] || sectionsHtml[settingsNav[0][0]]}
               </div>
             </div>
           </div>
@@ -4239,7 +4298,7 @@
         event.preventDefault();
         event.stopPropagation();
         flushActiveEditorContent();
-        setModal({ type: "settings", focus: "page-setup" });
+        setModal({ type: "settings", section: "settings-page" });
         render();
       });
     });
@@ -4270,14 +4329,29 @@
       });
     });
 
-    app.querySelectorAll("[data-settings-jump]").forEach((button) => {
+    app.querySelectorAll("[data-settings-page]").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        const target = document.getElementById(button.dataset.settingsJump);
-        if (!target) return;
-        app.querySelectorAll("[data-settings-jump]").forEach((item) => item.classList.toggle("is-active", item === button));
-        target.scrollIntoView({ block: "start", behavior: "smooth" });
+        if (runtime.modal?.type !== "settings") return;
+        if (runtime.modal.section === button.dataset.settingsPage) return;
+        runtime.modal = { ...runtime.modal, section: button.dataset.settingsPage };
+        render();
+        const content = app.querySelector(".settings-modal .settings-content");
+        if (content) content.scrollTop = 0;
+      });
+    });
+
+    app.querySelectorAll("[data-stats-pref]").forEach((input) => {
+      input.addEventListener("change", () => {
+        state.settings.statsPrefs = {
+          ...normalizeStatsPrefs(state.settings.statsPrefs),
+          [input.dataset.statsPref]: input.checked,
+        };
+        saveState();
+        const box = activeBox();
+        const note = box ? findItem(box, box.activeItemId) : null;
+        if (note?.type === "note") updateEditorStats(note);
       });
     });
 
@@ -4766,17 +4840,6 @@
       window.addEventListener("pointerdown", (event) => {
         if (!event.target.closest(".box-switcher")) closeBoxMenuLightly();
       }, { capture: true, once: true });
-    }
-
-    if (runtime.modal?.focus === "page-setup" && !runtime.modal.focusApplied) {
-      runtime.modal.focusApplied = true;
-      requestAnimationFrame(() => {
-        const target = app.querySelector("[data-page-setup-section]");
-        if (target) {
-          app.querySelectorAll("[data-settings-jump]").forEach((item) => item.classList.toggle("is-active", item.dataset.settingsJump === "settings-page"));
-          target.scrollIntoView({ block: "start" });
-        }
-      });
     }
 
     bindEditor();
