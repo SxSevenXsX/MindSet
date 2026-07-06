@@ -3446,7 +3446,8 @@
               <button class="format-button" data-action="page-zoom-out" data-tooltip="Dezoomer les feuilles" aria-label="Dezoomer les feuilles">${icon("zoomOut")}</button>
               <button class="format-button" data-action="page-zoom-in" data-tooltip="Zoomer les feuilles" aria-label="Zoomer les feuilles">${icon("zoomIn")}</button>
             ` : ""}
-            <button class="format-button" data-editor-action="toggle-heading-collapse" title="Replier / deplier le titre">${icon("collapse")}</button>
+            <button class="format-button" data-editor-action="toggle-heading-collapse" data-tooltip="Replier / deplier le titre" aria-label="Replier / deplier le titre">${icon("collapse")}</button>
+            <button class="format-button" data-editor-action="toggle-all-headings" data-tooltip="Replier / deplier tous les titres" aria-label="Replier / deplier tous les titres">${icon("collapseIn")}</button>
             <button class="format-button ${bookmarked ? "is-active" : ""}" data-action="toggle-bookmark" data-tooltip="${bookmarked ? "Retirer des signets" : "Ajouter aux signets"}" aria-label="${bookmarked ? "Retirer des signets" : "Ajouter aux signets"}">${icon(bookmarked ? "bookmarkFilled" : "bookmark")}</button>
           </div>
           <div class="toolbar-stats" aria-live="polite">
@@ -6862,6 +6863,8 @@
         if (!current) return;
         if (button.dataset.editorAction === "toggle-heading-collapse") {
           toggleCurrentHeading(current, note, box);
+        } else if (button.dataset.editorAction === "toggle-all-headings") {
+          toggleAllHeadingSections(current, note, box);
         }
       });
     });
@@ -6942,6 +6945,41 @@
       return;
     }
     toggleHeadingSection(editor, note, box, heading);
+  }
+
+  function toggleAllHeadingSections(editor, note, box) {
+    const headings = [...editor.querySelectorAll("h1, h2, h3")];
+    if (!headings.length) {
+      setToast("Aucun titre dans cette note.");
+      return;
+    }
+    rememberEditorSnapshot(note, editor);
+    const collapse = headings.some((heading) => heading.dataset.collapsed !== "true");
+    if (collapse) {
+      headings.forEach((heading) => {
+        heading.dataset.collapsed = "true";
+        heading.classList.add("is-heading-collapsed");
+        setHeadingSectionVisibility(heading, true);
+      });
+    } else {
+      headings.forEach((heading) => {
+        heading.dataset.collapsed = "false";
+        heading.classList.remove("is-heading-collapsed");
+      });
+      editor.querySelectorAll("[data-collapsed-hidden]").forEach((node) => {
+        delete node.dataset.collapsedHidden;
+        node.style.display = "";
+      });
+    }
+    note.content = editorSnapshotContent(editor);
+    note.modifiedAt = now();
+    touchBox(box);
+    updateEditorStats(note);
+    commitEditorHistoryChange(note, note.content);
+    refreshPagedEditorIfNeeded(editor, note, "preserve", { force: true });
+    prepareCollapsibleHeadings(editor, note, box);
+    saveState();
+    setToast(collapse ? "Tous les titres replies." : "Tous les titres deplies.");
   }
 
   function toggleHeadingSection(editor, note, box, heading) {
