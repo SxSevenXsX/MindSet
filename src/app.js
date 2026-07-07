@@ -3703,13 +3703,10 @@
             <select class="toolbar-select font-select" data-font-family title="Police">
               ${fonts.map((font, index) => `<option value="${escapeHtml(font.value)}" ${index === 0 ? "selected" : ""}>${escapeHtml(font.label)}</option>`).join("")}
             </select>
-            <select class="toolbar-select" data-font-size title="Taille">
-              <option value="14px">14</option>
-              <option value="16px">16</option>
-              <option value="18px" selected>18</option>
-              <option value="22px">22</option>
-              <option value="28px">28</option>
-            </select>
+            <input class="toolbar-select size-input" data-font-size type="number" min="8" max="120" step="1" value="17" list="font-size-suggestions" title="Taille de police (8 a 120)" aria-label="Taille de police" />
+            <datalist id="font-size-suggestions">
+              ${[8, 9, 10, 11, 12, 14, 16, 17, 18, 20, 22, 24, 28, 32, 36, 48, 72].map((size) => `<option value="${size}"></option>`).join("")}
+            </datalist>
           </div>
           <div class="toolbar-group color-toolbar-group">
             ${renderColorTool("text", "Couleur du texte", state.settings?.lastTextColor || "#000000")}
@@ -7394,9 +7391,20 @@
         const current = activeEditor();
         if (current) saveEditorSelection(current);
       });
-      size.addEventListener("change", () => {
+      const applyFontSize = () => {
         const current = activeEditor();
-        if (current) applyInlineStyleToSelection(current, note, box, "font-size", size.value);
+        if (!current) return;
+        const parsed = Number.parseFloat(size.value);
+        if (!Number.isFinite(parsed)) return;
+        const clamped = Math.min(Math.max(Math.round(parsed), 8), 120);
+        size.value = String(clamped);
+        applyInlineStyleToSelection(current, note, box, "font-size", `${clamped}px`);
+      };
+      size.addEventListener("change", applyFontSize);
+      size.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        applyFontSize();
       });
     }
 
@@ -8592,20 +8600,10 @@
     setDynamicSelectValue(select, computedFamily, String(computedFamily).split(",")[0].replace(/["']/g, "").trim() || "Police");
   }
 
-  function syncFontSizeSelect(select, computedSize) {
-    removeDynamicSelectOption(select);
+  function syncFontSizeSelect(input, computedSize) {
+    if (!input || document.activeElement === input) return;
     const parsed = Number.parseFloat(computedSize);
-    if (!computedSize || !Number.isFinite(parsed)) {
-      select.selectedIndex = -1;
-      return;
-    }
-    const px = `${Math.round(parsed)}px`;
-    const option = [...select.options].find((item) => item.value === px);
-    if (option) {
-      select.value = px;
-      return;
-    }
-    setDynamicSelectValue(select, px, String(Math.round(parsed)));
+    input.value = computedSize && Number.isFinite(parsed) ? String(Math.round(parsed)) : "";
   }
 
   function updateEditorToolbarState(editorElement) {
@@ -8808,6 +8806,14 @@
       span.style.setProperty(property, value);
       node.before(span);
       span.appendChild(node);
+    });
+
+    // Les blocs et items vides de la selection recoivent aussi le style
+    // (comme la marque de paragraphe de Word) pour que la frappe a venir l'utilise.
+    selectedEditorBlocks(editor).forEach((block) => {
+      if (!block.textContent.trim() && fullyContainedInRange(workRange, block)) {
+        block.style.setProperty(property, value);
+      }
     });
 
     if (targets.length) {

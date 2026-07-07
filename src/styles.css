@@ -1479,6 +1479,12 @@ body.is-graph-dragging {
   max-width: 94px;
 }
 
+.size-input {
+  width: 52px;
+  padding: 0 4px 0 8px;
+  text-align: left;
+}
+
 .toolbar-color {
   width: 27px;
   height: 27px;
