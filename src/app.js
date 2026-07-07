@@ -454,7 +454,9 @@
   function stripHtml(html) {
     const div = document.createElement("div");
     div.innerHTML = html || "";
-    return div.textContent || div.innerText || "";
+    div.querySelectorAll("br").forEach((br) => br.replaceWith(" "));
+    div.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, div, tr").forEach((block) => block.append(" "));
+    return div.textContent || "";
   }
 
   function normalizeStatsPrefs(value = {}) {
@@ -6074,8 +6076,14 @@
     }
     const directText = [...node.childNodes].some((child) => child.nodeType === Node.TEXT_NODE && child.textContent.trim());
     const nestedBlocks = [...node.children].filter((child) => child.matches?.(paginationBlockSelector));
-    if (node.tagName === "DIV" && nestedBlocks.length && !directText) {
-      [...node.childNodes].forEach((child) => appendEditableNodeAsBlocks(child, blocks));
+    if ((node.tagName === "DIV" || node.tagName === "SPAN") && nestedBlocks.length && !directText) {
+      const inheritedStyle = node.getAttribute?.("style") || "";
+      [...node.childNodes].forEach((child) => {
+        if (inheritedStyle && child.nodeType === Node.ELEMENT_NODE) {
+          child.setAttribute("style", `${inheritedStyle};${child.getAttribute("style") || ""}`);
+        }
+        appendEditableNodeAsBlocks(child, blocks);
+      });
       return;
     }
     blocks.push(node);
@@ -6814,6 +6822,78 @@
     }, { passive: false });
   }
 
+  const pasteAllowedTags = new Set(["P", "H1", "H2", "H3", "H4", "H5", "H6", "UL", "OL", "LI", "BR", "B", "STRONG", "I", "EM", "U", "S", "STRIKE", "SPAN", "A", "IMG", "BLOCKQUOTE", "DIV", "PRE", "CODE", "SUB", "SUP"]);
+  const pasteAllowedStyles = ["font-family", "font-size", "color", "background-color", "font-weight", "font-style", "text-decoration", "text-align"];
+
+  function sanitizePastedHtml(html) {
+    const template = document.createElement("template");
+    template.innerHTML = String(html || "");
+    template.content.querySelectorAll("script, style, meta, link, title, iframe, object, embed, form, input, button, select, textarea, video, audio").forEach((node) => node.remove());
+
+    const commentWalker = document.createTreeWalker(template.content, NodeFilter.SHOW_COMMENT);
+    const comments = [];
+    while (commentWalker.nextNode()) comments.push(commentWalker.currentNode);
+    comments.forEach((comment) => comment.remove());
+
+    [...template.content.querySelectorAll("*")].forEach((element) => {
+      if (!element.isConnected && !template.content.contains(element)) return;
+      const tag = element.tagName;
+
+      if (tag === "FONT") {
+        const span = document.createElement("span");
+        if (element.getAttribute("face")) span.style.fontFamily = element.getAttribute("face");
+        if (element.getAttribute("color")) span.style.color = element.getAttribute("color");
+        while (element.firstChild) span.appendChild(element.firstChild);
+        element.replaceWith(span);
+        return;
+      }
+
+      if (!pasteAllowedTags.has(tag)) {
+        element.replaceWith(...element.childNodes);
+        return;
+      }
+
+      if (/^H[4-6]$/.test(tag)) {
+        const h3 = document.createElement("h3");
+        while (element.firstChild) h3.appendChild(element.firstChild);
+        element.replaceWith(h3);
+        return;
+      }
+
+      [...element.attributes].forEach((attribute) => {
+        const name = attribute.name.toLowerCase();
+        const value = String(attribute.value || "");
+        if (name === "style") return;
+        if (name === "class" && (tag === "UL" || tag === "OL")) {
+          const kept = customListClasses.filter((cls) => element.classList.contains(cls));
+          if (kept.length) {
+            element.setAttribute("class", kept.join(" "));
+            return;
+          }
+        }
+        if (name === "data-checked" && tag === "LI") return;
+        if (tag === "A" && name === "href" && /^(https?:|mailto:)/i.test(value.trim())) return;
+        if (tag === "IMG" && name === "src" && /^(https?:|data:image\/)/i.test(value.trim())) return;
+        element.removeAttribute(attribute.name);
+      });
+
+      if (element.hasAttribute("style")) {
+        const kept = [];
+        pasteAllowedStyles.forEach((property) => {
+          const value = element.style.getPropertyValue(property);
+          if (value) kept.push(`${property}:${value}`);
+        });
+        if (kept.length) {
+          element.setAttribute("style", kept.join(";"));
+        } else {
+          element.removeAttribute("style");
+        }
+      }
+    });
+
+    return template.innerHTML.trim();
+  }
+
   function bindEditor() {
     const box = activeBox();
     const note = box ? findItem(box, box.activeItemId) : null;
@@ -6937,6 +7017,20 @@
         rememberEditorSnapshot(note, boundEditor);
       });
       boundEditor.addEventListener("keydown", (event) => handleEditorAutomation(event, boundEditor, note, box, repaginatePagesInPlace));
+      boundEditor.addEventListener("paste", (event) => {
+        const html = event.clipboardData?.getData("text/html");
+        const text = event.clipboardData?.getData("text/plain");
+        if (!html && !text) return;
+        event.preventDefault();
+        rememberEditorSnapshot(note, boundEditor);
+        const cleaned = html ? sanitizePastedHtml(html) : "";
+        if (cleaned) {
+          document.execCommand("insertHTML", false, cleaned);
+        } else if (text) {
+          document.execCommand("insertText", false, text);
+        }
+        fixNestedListClasses(boundEditor);
+      });
       boundEditor.addEventListener("input", () => {
         if (enforceIndependentPageLimit(boundEditor, note, box)) return;
         if (ensureFirstContinuousPage(boundEditor, note, box)) return;
@@ -7023,7 +7117,7 @@
       });
       size.addEventListener("change", () => {
         const current = activeEditor();
-        if (current) applySpanStyle(current, note, box, `font-size:${size.value}`);
+        if (current) applyInlineStyleToSelection(current, note, box, "font-size", size.value);
       });
     }
 
@@ -7039,7 +7133,7 @@
       });
       fontFamily.addEventListener("change", () => {
         const current = activeEditor();
-        if (current) applySpanStyle(current, note, box, `font-family:${fontFamily.value}`);
+        if (current) applyInlineStyleToSelection(current, note, box, "font-family", fontFamily.value);
       });
     }
 
@@ -7323,22 +7417,33 @@
     }
 
     if (event.key === "Enter") {
+      const collapsed = !!window.getSelection()?.isCollapsed;
       const block = currentEditableBlock(editor);
       if (block === editor && normalizeEditorViewMode(state.settings?.editorViewMode) === "pages" && isContinuousPageFlow()) {
         event.preventDefault();
         insertBlankParagraphInCurrentSheet(editor, note, box);
         return;
       }
-      if (!event.shiftKey && isHeadingBlock(block)) {
+      if (!event.shiftKey && collapsed && isHeadingBlock(block)) {
         event.preventDefault();
         exitHeadingBlock(editor, note, box, block);
         return;
       }
 
       const li = currentListItem(editor);
-      if (li && (!li.textContent.trim() || isCaretAtStartOfListItem(li))) {
+      if (li && collapsed && (listItemIsEmpty(li) || isCaretAtStartOfListItem(li))) {
         event.preventDefault();
         exitListItem(editor, note, box, li);
+      }
+      if (!event.defaultPrevented && li && collapsed && li.closest(".check-list") && li.matches("[data-checked='true'], .is-checked")) {
+        window.requestAnimationFrame(() => {
+          const fresh = currentListItem(editor);
+          if (fresh && fresh !== li && !fresh.textContent.trim()) {
+            fresh.removeAttribute("data-checked");
+            fresh.classList.remove("is-checked");
+            syncEditorContent(editor, note, box);
+          }
+        });
       }
       if (!event.defaultPrevented && !event.shiftKey && !li && shouldPrepaginateEnter(editor, block)) {
         event.preventDefault();
@@ -7349,7 +7454,7 @@
 
     if (event.key === "Backspace") {
       const li = currentListItem(editor);
-      if (li && !li.textContent.trim()) {
+      if (li && window.getSelection()?.isCollapsed && listItemIsEmpty(li)) {
         event.preventDefault();
         exitListItem(editor, note, box, li);
         return;
@@ -7358,13 +7463,34 @@
     }
 
     if (event.key === "Tab") {
-      const li = currentListItem(editor);
-      if (!li) return;
       event.preventDefault();
-      editor.focus();
-      document.execCommand(event.shiftKey ? "outdent" : "indent", false, null);
+      const li = currentListItem(editor);
+      if (li) {
+        editor.focus();
+        document.execCommand(event.shiftKey ? "outdent" : "indent", false, null);
+        fixNestedListClasses(editor);
+        syncEditorContent(editor, note, box);
+        return;
+      }
+      if (event.shiftKey) {
+        document.execCommand("outdent", false, null);
+        syncEditorContent(editor, note, box);
+        return;
+      }
+      document.execCommand("insertHTML", false, "&nbsp;&nbsp;&nbsp;&nbsp;");
       syncEditorContent(editor, note, box);
     }
+  }
+
+  const customListClasses = ["dash-list", "arrow-list", "circle-list", "check-list", "triangle-list", "square-list"];
+
+  function fixNestedListClasses(editor) {
+    editor.querySelectorAll("ul ul, ul ol, ol ul, ol ol").forEach((nested) => {
+      if (customListClasses.some((cls) => nested.classList.contains(cls))) return;
+      const parentList = nested.parentElement?.closest?.("ul, ol");
+      const parentClass = parentList ? customListClasses.find((cls) => parentList.classList.contains(cls)) : null;
+      if (parentClass) nested.classList.add(parentClass);
+    });
   }
 
   function currentListItem(editor) {
@@ -7602,6 +7728,37 @@
 
   function exitHeadingBlock(editor, note, box, heading) {
     rememberEditorSnapshot(note, editor);
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount && selection.isCollapsed && heading.contains(selection.getRangeAt(0).startContainer)) {
+      const caret = selection.getRangeAt(0);
+      const beforeRange = caret.cloneRange();
+      beforeRange.selectNodeContents(heading);
+      beforeRange.setEnd(caret.startContainer, caret.startOffset);
+      const afterRange = caret.cloneRange();
+      afterRange.selectNodeContents(heading);
+      afterRange.setStart(caret.startContainer, caret.startOffset);
+      const hasTextBefore = !!beforeRange.toString().replace(/ /g, " ").trim();
+      const hasTextAfter = !!afterRange.toString().replace(/ /g, " ").trim();
+      if (hasTextAfter && hasTextBefore) {
+        const tail = document.createElement(heading.tagName.toLowerCase());
+        tail.appendChild(afterRange.extractContents());
+        heading.after(tail);
+        prepareCollapsibleHeadings(editor, note, box);
+        placeCaretInside(tail);
+        updateEditorToolbarState(editor);
+        syncEditorContent(editor, note, box);
+        return;
+      }
+      if (hasTextAfter && !hasTextBefore) {
+        const spacer = document.createElement("p");
+        spacer.appendChild(document.createElement("br"));
+        heading.before(spacer);
+        placeCaretInside(heading);
+        updateEditorToolbarState(editor);
+        syncEditorContent(editor, note, box);
+        return;
+      }
+    }
     const paragraph = document.createElement("p");
     paragraph.appendChild(document.createElement("br"));
     heading.after(paragraph);
@@ -7613,6 +7770,7 @@
   function currentLineMarker(editor) {
     const block = currentEditableBlock(editor);
     if (!block || block.tagName === "LI") return null;
+    if (block.querySelector?.("img, video, audio, iframe")) return null;
     const text = block.textContent.replace(/\u00a0/g, " ");
     const trimmed = text.trim();
     if (!trimmed || text.trimEnd() !== trimmed) return null;
@@ -7648,6 +7806,10 @@
     syncEditorContent(editor, note, box);
   }
 
+  function listItemIsEmpty(li) {
+    return !li.textContent.trim() && !li.querySelector("img, video, audio, iframe");
+  }
+
   function exitListItem(editor, note, box, li) {
     rememberEditorSnapshot(note, editor);
     const list = li.parentElement;
@@ -7657,6 +7819,32 @@
       const next = sibling.nextSibling;
       afterList.appendChild(sibling);
       sibling = next;
+    }
+
+    const parentItem = list.parentElement?.closest?.("li");
+    const outerList = list.parentElement?.closest?.("ul, ol");
+    if (outerList && editor.contains(outerList)) {
+      const properNesting = !!parentItem && list.parentElement === parentItem;
+      if (!li.textContent.trim() && !li.querySelector("br, img")) {
+        li.appendChild(document.createElement("br"));
+      }
+      if (properNesting) {
+        parentItem.after(li);
+      } else {
+        list.after(li);
+      }
+      placeCaretAtEnd(li);
+      if (afterList.children.length) {
+        if (properNesting) {
+          li.appendChild(afterList);
+        } else {
+          li.after(afterList);
+        }
+      }
+      if (!list.children.length) list.remove();
+      saveEditorSelection(editor);
+      syncEditorContent(editor, note, box);
+      return;
     }
 
     const paragraph = document.createElement("p");
@@ -7727,12 +7915,14 @@
   }
 
   function editorSnapshotContent(editor) {
-    if (normalizeEditorViewMode(state.settings?.editorViewMode) !== "pages") {
-      return editor?.innerHTML || "<p><br></p>";
+    if (!editor) return "<p><br></p>";
+    const pagedDom = !!(editor.closest?.(".editor-page.is-page-mode") && editor.querySelector?.(".page-sheet"));
+    if (!pagedDom) {
+      return editor.innerHTML || "<p><br></p>";
     }
     return mergePageEditorHtml({
       keepActiveBlankSheet: true,
-      keepSheets: normalizePageFlowMode(state.settings?.pageFlowMode) === "independent",
+      keepSheets: editor.dataset.pageFlow === "independent",
     });
   }
 
@@ -8053,30 +8243,163 @@
     });
   }
 
-  function applySpanStyle(editor, note, box, style) {
+  function fullyContainedInRange(range, target) {
+    const targetRange = document.createRange();
+    if (target.nodeType === Node.TEXT_NODE) {
+      targetRange.selectNodeContents(target);
+    } else {
+      targetRange.selectNode(target);
+    }
+    return range.compareBoundaryPoints(Range.START_TO_START, targetRange) <= 0
+      && range.compareBoundaryPoints(Range.END_TO_END, targetRange) >= 0;
+  }
+
+  function textNodesFullyInRange(editor, range) {
+    const nodes = [];
+    const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node) {
+      if (node.textContent.length && range.intersectsNode(node) && fullyContainedInRange(range, node)) {
+        nodes.push(node);
+      }
+      node = walker.nextNode();
+    }
+    return nodes;
+  }
+
+  function clearInlinePropertyInRange(editor, range, property) {
+    const container = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentElement;
+    if (!container) return;
+    container.querySelectorAll("[style], font").forEach((element) => {
+      if (!editor.contains(element) || element === editor || !fullyContainedInRange(range, element)) return;
+      element.style?.removeProperty?.(property);
+      if (element.tagName === "FONT") {
+        if (property === "font-family") element.removeAttribute("face");
+        if (property === "font-size") element.removeAttribute("size");
+        if (property === "color") element.removeAttribute("color");
+      }
+      if (element.getAttribute("style") === "") element.removeAttribute("style");
+    });
+  }
+
+  function applyInlineStyleToSelection(editor, note, box, property, value) {
     rememberEditorSnapshot(note, editor);
     restoreEditorSelection(editor);
     const selection = window.getSelection();
-    if (!selection || !selection.rangeCount || selection.isCollapsed) {
-      document.execCommand("insertHTML", false, `<span style="${style}">texte</span>`);
-    } else {
-      const range = selection.getRangeAt(0);
+    if (!selection || !selection.rangeCount) return;
+    const initialRange = selection.getRangeAt(0);
+    if (!selectionInsideEditor(editor, initialRange)) return;
+
+    if (initialRange.collapsed) {
+      document.execCommand("insertHTML", false, `<span style="${property}:${value}">​</span>`);
+      syncEditorContent(editor, note, box);
+      return;
+    }
+
+    let startNode = initialRange.startContainer;
+    let startOffset = initialRange.startOffset;
+    let endNode = initialRange.endContainer;
+    let endOffset = initialRange.endOffset;
+    if (endNode.nodeType === Node.TEXT_NODE && endOffset > 0 && endOffset < endNode.textContent.length) {
+      endNode.splitText(endOffset);
+      endOffset = endNode.textContent.length;
+    }
+    if (startNode.nodeType === Node.TEXT_NODE && startOffset > 0 && startOffset < startNode.textContent.length) {
+      const tail = startNode.splitText(startOffset);
+      if (endNode === startNode) {
+        endNode = tail;
+        endOffset = tail.textContent.length;
+      }
+      startNode = tail;
+      startOffset = 0;
+    }
+
+    const workRange = document.createRange();
+    try {
+      workRange.setStart(startNode, startNode.nodeType === Node.TEXT_NODE ? 0 : startOffset);
+      workRange.setEnd(endNode, endNode.nodeType === Node.TEXT_NODE ? endNode.textContent.length : endOffset);
+    } catch (error) {
+      return;
+    }
+
+    clearInlinePropertyInRange(editor, workRange, property);
+
+    const targets = textNodesFullyInRange(editor, workRange);
+    targets.forEach((node) => {
+      const parent = node.parentElement;
+      if (parent && parent !== editor && parent.tagName === "SPAN" && parent.childNodes.length === 1 && !parent.classList.contains("page-sheet")) {
+        parent.style.setProperty(property, value);
+        return;
+      }
       const span = document.createElement("span");
-      span.setAttribute("style", style);
-      span.appendChild(range.extractContents());
-      range.insertNode(span);
+      span.style.setProperty(property, value);
+      node.before(span);
+      span.appendChild(node);
+    });
+
+    if (targets.length) {
+      const restore = document.createRange();
+      restore.setStart(targets[0], 0);
+      restore.setEnd(targets[targets.length - 1], targets[targets.length - 1].textContent.length);
       selection.removeAllRanges();
-      const nextRange = document.createRange();
-      nextRange.selectNodeContents(span);
-      selection.addRange(nextRange);
+      selection.addRange(restore);
+      saveEditorSelection(editor);
     }
     syncEditorContent(editor, note, box);
+    updateEditorToolbarState(editor);
   }
 
   function insertList(editor, note, box, type) {
     rememberEditorSnapshot(note, editor);
     restoreEditorSelection(editor);
-    const listMap = {
+    const listClasses = {
+      bullet: "",
+      dash: "dash-list",
+      circle: "circle-list",
+      arrow: "arrow-list",
+      check: "check-list",
+      triangle: "triangle-list",
+      square: "square-list",
+    };
+    const className = listClasses[type] ?? "";
+    const selection = window.getSelection();
+    const range = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
+
+    const convertible = (candidate) => !!candidate
+      && candidate !== editor
+      && ["P", "DIV", "BLOCKQUOTE", "H1", "H2", "H3"].includes(candidate.tagName)
+      && !candidate.classList.contains("page-sheet");
+
+    let targetBlocks = [];
+    if (range && selectionInsideEditor(editor, range)) {
+      if (range.collapsed) {
+        const block = currentEditableBlock(editor);
+        if (convertible(block)) targetBlocks = [block];
+      } else {
+        targetBlocks = logicalEditorBlocks(editor).filter((block) => convertible(block) && range.intersectsNode(block));
+      }
+    }
+
+    if (targetBlocks.length) {
+      const list = document.createElement("ul");
+      if (className) list.className = className;
+      targetBlocks[0].before(list);
+      targetBlocks.forEach((block) => {
+        const item = document.createElement("li");
+        while (block.firstChild) item.appendChild(block.firstChild);
+        if (!item.textContent.trim() && !item.querySelector("br, img")) item.appendChild(document.createElement("br"));
+        list.appendChild(item);
+        block.remove();
+      });
+      placeCaretAtEnd(list.lastElementChild || list);
+      saveEditorSelection(editor);
+      syncEditorContent(editor, note, box);
+      return;
+    }
+
+    const placeholders = {
       bullet: '<ul><li>Nouvel élément</li></ul>',
       dash: '<ul class="dash-list"><li>Nouvel élément</li></ul>',
       circle: '<ul class="circle-list"><li>Nouvel élément</li></ul>',
@@ -8085,7 +8408,7 @@
       triangle: '<ul class="triangle-list"><li>Nouvel élément</li></ul>',
       square: '<ul class="square-list"><li>Nouvel élément</li></ul>',
     };
-    document.execCommand("insertHTML", false, listMap[type] || listMap.bullet);
+    document.execCommand("insertHTML", false, placeholders[type] || placeholders.bullet);
     syncEditorContent(editor, note, box);
   }
 
