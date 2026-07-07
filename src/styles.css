@@ -1480,9 +1480,13 @@ body.is-graph-dragging {
 }
 
 .size-input {
-  width: 52px;
-  padding: 0 4px 0 8px;
+  width: 72px;
+  padding: 0 2px 0 8px;
   text-align: left;
+}
+
+::highlight(mindset-held-selection) {
+  background-color: rgba(15, 107, 88, 0.3);
 }
 
 .toolbar-color {
@@ -2175,6 +2179,20 @@ body.is-graph-dragging {
 
 .note-editor .triangle-list li::before {
   color: var(--li-marker-color, #d58f27);
+}
+
+/* Continuation d'un item coupe par un saut de page : pas de nouvelle puce */
+.note-editor li.is-split-continuation {
+  list-style: none;
+}
+
+.note-editor :is(ul, ol) li.is-split-continuation::marker {
+  content: "";
+}
+
+.note-editor :is(.dash-list, .arrow-list, .circle-list, .check-list, .triangle-list, .square-list) li.is-split-continuation::before {
+  content: none;
+  display: none;
 }
 
 .folder-shell,

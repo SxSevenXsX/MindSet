@@ -681,6 +681,9 @@
     .note-editor .check-list li[data-checked="true"]{color:#657169;text-decoration:line-through;}
     .note-editor .check-list li[data-checked="true"]::before{background:var(--todo-color);border-color:var(--todo-color);}
     .note-editor .check-list li[data-checked="true"]::after{content:"";position:absolute;top:calc(.45em + 2px);left:4px;width:4px;height:8px;border-right:2px solid #fff;border-bottom:2px solid #fff;transform:rotate(42deg);}
+    .note-editor li.is-split-continuation{list-style:none;}
+    .note-editor li.is-split-continuation::before{content:none !important;}
+    .note-editor li.is-split-continuation::marker{content:"";}
     .note-editor img{max-width:100%;height:auto;}
     @media print{
       body{background:#fff;}
@@ -805,6 +808,7 @@
   const printableBlockSelector = "p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, ul, ol, table, div";
 
   function printableListItemPrefix(li) {
+    if (li.classList?.contains("is-split-continuation")) return "";
     if (li.closest(".check-list")) return li.dataset.checked === "true" ? "[x] " : "[ ] ";
     if (li.closest(".arrow-list")) return "-> ";
     if (li.closest(".circle-list")) return "o ";
@@ -1154,6 +1158,8 @@
     .note-editor .check-list li::before{content:"[ ] ";font-weight:700;color:${accentColor};}
     .note-editor .check-list li[data-checked="true"]{color:#657169;text-decoration:line-through;}
     .note-editor .check-list li[data-checked="true"]::before{content:"[x] ";color:${todoColor};}
+    .note-editor li.is-split-continuation{list-style:none;}
+    .note-editor li.is-split-continuation::before{content:"" !important;}
     .note-editor img{max-width:100%;height:auto;}
   </style>
 </head>
@@ -3689,6 +3695,9 @@
       ? `--page-zoom:${pageZoom};${pageSetupStyle(state.settings)}`
       : "";
     const fonts = availableFontOptions();
+    const flowContent = note.content && note.content.includes("data-split-continuation")
+      ? normalizedEditorHtml(note.content)
+      : note.content || "";
     return `
       <article class="editor-shell">
         <div class="editor-toolbar" aria-label="Barre de mise en forme">
@@ -3783,7 +3792,7 @@
           <input class="title-input" data-note-title value="${escapeHtml(note.title)}" aria-label="Titre de la note" />
           ${pageMode
             ? `<div class="page-editor-viewport" data-page-viewport><div class="page-editor-scale" data-page-scale><div class="note-editor page-document" data-note-editor data-editor-note-id="${note.id}" data-page-flow="${pageFlowMode}" contenteditable="${pageFlowMode === "independent" ? "false" : "true"}" spellcheck="true"></div></div></div>`
-            : `<div class="note-editor" data-note-editor data-editor-note-id="${note.id}" contenteditable="true" spellcheck="true">${note.content || ""}</div>`}
+            : `<div class="note-editor" data-note-editor data-editor-note-id="${note.id}" contenteditable="true" spellcheck="true">${flowContent}</div>`}
           <div class="editor-status" aria-live="polite">
             ${pageMode && pageFlowMode === "independent" ? `<span class="page-full-notice" data-page-full-notice></span>` : ""}
             <span data-word-count>${stats.words} mots</span>
@@ -6178,6 +6187,49 @@
     blocks.push(node);
   }
 
+  function stripContinuationMarkers(block) {
+    if (block.nodeType !== Node.ELEMENT_NODE) return;
+    delete block.dataset.splitContinuation;
+    block.classList?.remove("is-split-continuation");
+    if (block.getAttribute?.("class") === "") block.removeAttribute("class");
+  }
+
+  function mergeSplitContinuations(blocks) {
+    const merged = [];
+    blocks.forEach((block) => {
+      const isContinuation = block.nodeType === Node.ELEMENT_NODE && block.dataset?.splitContinuation === "true";
+      const previous = merged[merged.length - 1];
+      if (isContinuation && previous && previous.nodeType === Node.ELEMENT_NODE && previous.tagName === block.tagName) {
+        if (["UL", "OL"].includes(block.tagName)) {
+          const sameKind = previous.getAttribute("class") === block.getAttribute("class");
+          if (sameKind) {
+            const firstItem = block.firstElementChild;
+            if (firstItem?.dataset?.splitContinuation === "true" && previous.lastElementChild) {
+              while (firstItem.firstChild) previous.lastElementChild.appendChild(firstItem.firstChild);
+              firstItem.remove();
+              previous.lastElementChild.normalize();
+            }
+            while (block.firstChild) {
+              stripContinuationMarkers(block.firstChild);
+              previous.appendChild(block.firstChild);
+            }
+            return;
+          }
+        } else {
+          while (block.firstChild) previous.appendChild(block.firstChild);
+          previous.normalize();
+          return;
+        }
+      }
+      stripContinuationMarkers(block);
+      if (block.nodeType === Node.ELEMENT_NODE) {
+        block.querySelectorAll?.("[data-split-continuation]").forEach(stripContinuationMarkers);
+      }
+      merged.push(block);
+    });
+    return merged;
+  }
+
   function editableBlocksFromHtml(html) {
     const source = document.createElement("div");
     source.innerHTML = html || "<p><br></p>";
@@ -6185,14 +6237,21 @@
     const sourceNodes = pageSheets.length
       ? pageSheets.flatMap((sheet) => [...sheet.childNodes])
       : [...source.childNodes];
-    const blocks = [];
-    sourceNodes.forEach((node) => appendEditableNodeAsBlocks(node, blocks));
+    const collected = [];
+    sourceNodes.forEach((node) => appendEditableNodeAsBlocks(node, collected));
+    const blocks = mergeSplitContinuations(collected);
     if (!blocks.length) {
       const paragraph = document.createElement("p");
       paragraph.appendChild(document.createElement("br"));
       blocks.push(paragraph);
     }
     return blocks;
+  }
+
+  function normalizedEditorHtml(html) {
+    const container = document.createElement("div");
+    editableBlocksFromHtml(html).forEach((block) => container.appendChild(block));
+    return container.innerHTML || "<p><br></p>";
   }
 
   function isMeaningfulEditorHtml(html) {
@@ -6236,12 +6295,31 @@
     return editor?.querySelector?.(".page-sheet") || null;
   }
 
+  function sheetContentGap(sheet) {
+    const style = getComputedStyle(sheet);
+    const rect = sheet.getBoundingClientRect();
+    const innerBottom = rect.bottom - (Number.parseFloat(style.paddingBottom) || 0);
+    const children = [...sheet.children].filter((child) => child.dataset?.paginationProbe !== "true");
+    const last = children[children.length - 1];
+    if (!last) return Number.POSITIVE_INFINITY;
+    return innerBottom - last.getBoundingClientRect().bottom;
+  }
+
   function needsPagedLayoutRefresh(editor) {
     const sheets = [...(editor?.querySelectorAll?.(".page-sheet") || [])];
     if (!sheets.length) return true;
-    return sheets.some((sheet) => {
+    return sheets.some((sheet, index) => {
       if (sheet.classList.contains("is-overflow-accepted")) return sheet.children.length > 1;
-      return sheet.scrollHeight > sheet.clientHeight + 2;
+      if (sheet.scrollHeight > sheet.clientHeight + 2) return true;
+      const next = sheets[index + 1];
+      if (!next || !sheetHasUserStructure(next)) return false;
+      const gap = sheetContentGap(sheet);
+      if (gap < 34) return false;
+      const nextFirst = [...next.children].find((child) => child.dataset?.paginationProbe !== "true");
+      if (!nextFirst) return false;
+      const nextHeight = nextFirst.getBoundingClientRect().height;
+      const splittable = splittableTextBlock(nextFirst) || ["UL", "OL"].includes(nextFirst.tagName);
+      return nextHeight <= gap + 1 || splittable;
     }) || sheets.slice(1).some((sheet) => !sheetHasUserStructure(sheet));
   }
 
@@ -6615,21 +6693,33 @@
     const remainder = block.cloneNode(false);
     setBlockFragment(block, source, 0, best);
     setBlockFragment(remainder, source, best, textLength);
-    return (remainder.textContent || "").length ? remainder : null;
+    if (!(remainder.textContent || "").length) return null;
+    remainder.dataset.splitContinuation = "true";
+    if (remainder.tagName === "LI") remainder.classList.add("is-split-continuation");
+    return remainder;
   }
 
   function splitListBlockToFit(list, sheet) {
     if (!list || list.nodeType !== Node.ELEMENT_NODE || !["UL", "OL"].includes(list.tagName) || !sheetOverflows(sheet)) return null;
     const remainder = list.cloneNode(false);
+    delete remainder.dataset.splitContinuation;
     while (sheetOverflows(sheet) && list.children.length > 1) {
       remainder.insertBefore(list.lastElementChild, remainder.firstElementChild);
     }
-    if (remainder.children.length) return remainder;
+    if (remainder.children.length) {
+      if (sheetOverflows(sheet) && list.children.length === 1) {
+        const tailSplit = splitTextBlockToFit(list.firstElementChild, sheet);
+        if (tailSplit) remainder.insertBefore(tailSplit, remainder.firstElementChild);
+      }
+      remainder.dataset.splitContinuation = "true";
+      return remainder;
+    }
 
     const onlyItem = list.firstElementChild;
     const splitItem = splitTextBlockToFit(onlyItem, sheet);
     if (!splitItem) return null;
     remainder.appendChild(splitItem);
+    remainder.dataset.splitContinuation = "true";
     return remainder;
   }
 
@@ -7373,7 +7463,8 @@
       });
       formatBlock.addEventListener("focus", () => {
         const current = activeEditor();
-        if (current) saveEditorSelection(current);
+        const selection = window.getSelection();
+        if (current && selection && selection.rangeCount && !selection.isCollapsed) saveEditorSelection(current);
       });
       formatBlock.addEventListener("change", () => {
         const current = activeEditor();
@@ -7389,8 +7480,11 @@
       });
       size.addEventListener("focus", () => {
         const current = activeEditor();
-        if (current) saveEditorSelection(current);
+        const selection = window.getSelection();
+        if (current && selection && selection.rangeCount && !selection.isCollapsed) saveEditorSelection(current);
+        holdEditorSelectionHighlight();
       });
+      size.addEventListener("blur", releaseEditorSelectionHighlight);
       const applyFontSize = () => {
         const current = activeEditor();
         if (!current) return;
@@ -7416,8 +7510,11 @@
       });
       fontFamily.addEventListener("focus", () => {
         const current = activeEditor();
-        if (current) saveEditorSelection(current);
+        const selection = window.getSelection();
+        if (current && selection && selection.rangeCount && !selection.isCollapsed) saveEditorSelection(current);
+        holdEditorSelectionHighlight();
       });
+      fontFamily.addEventListener("blur", releaseEditorSelectionHighlight);
       fontFamily.addEventListener("change", () => {
         const current = activeEditor();
         if (current) applyInlineStyleToSelection(current, note, box, "font-family", fontFamily.value);
@@ -7431,8 +7528,11 @@
       });
       input.addEventListener("focus", () => {
         const current = activeEditor();
-        if (current) saveEditorSelection(current);
+        const selection = window.getSelection();
+        if (current && selection && selection.rangeCount && !selection.isCollapsed) saveEditorSelection(current);
+        holdEditorSelectionHighlight();
       });
+      input.addEventListener("blur", releaseEditorSelectionHighlight);
       input.addEventListener("input", () => {
         const clean = setLastEditorColor(input.dataset.colorInput, input.value);
         if (clean) input.value = clean;
@@ -8374,8 +8474,22 @@
     }
   }
 
+  function holdEditorSelectionHighlight() {
+    if (typeof Highlight === "undefined" || !CSS.highlights || !runtime.editorRange || runtime.editorRange.collapsed) return;
+    try {
+      CSS.highlights.set("mindset-held-selection", new Highlight(runtime.editorRange.cloneRange()));
+    } catch (error) {
+      /* surlignage indisponible : sans consequence */
+    }
+  }
+
+  function releaseEditorSelectionHighlight() {
+    CSS.highlights?.delete?.("mindset-held-selection");
+  }
+
   function restoreEditorSelection(editor) {
     if (!editor) return;
+    releaseEditorSelectionHighlight();
     const focusTarget = isIndependentPageMode() ? (currentPageSheet(editor) || editor) : editor;
     focusTarget.focus({ preventScroll: true });
     const selection = window.getSelection();
