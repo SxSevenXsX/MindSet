@@ -3202,6 +3202,7 @@
   }
 
   function render() {
+    removeImageToolbar();
     const previousModalType = runtime.modal?.type;
     const previousEditorFocus = captureNoteEditorFocus();
     const previousModalFocus = captureModalFieldFocus();
@@ -6902,7 +6903,8 @@
   }
 
   const pasteAllowedTags = new Set(["P", "H1", "H2", "H3", "H4", "H5", "H6", "UL", "OL", "LI", "BR", "B", "STRONG", "I", "EM", "U", "S", "STRIKE", "SPAN", "A", "IMG", "BLOCKQUOTE", "DIV", "PRE", "CODE", "SUB", "SUP"]);
-  const pasteAllowedStyles = ["font-family", "font-size", "color", "background-color", "font-weight", "font-style", "text-decoration", "text-align"];
+  const pasteAllowedStyles = ["font-family", "font-size", "color", "background-color", "font-weight", "font-style", "text-decoration", "text-align", "width"];
+  const imageLayoutClasses = ["img-float-left", "img-float-right", "img-block-center"];
 
   function sanitizePastedHtml(html) {
     const template = document.createElement("template");
@@ -6950,6 +6952,13 @@
             return;
           }
         }
+        if (name === "class" && tag === "IMG") {
+          const kept = imageLayoutClasses.filter((cls) => element.classList.contains(cls));
+          if (kept.length) {
+            element.setAttribute("class", kept.join(" "));
+            return;
+          }
+        }
         if (name === "data-checked" && tag === "LI") return;
         if (tag === "A" && name === "href" && /^(https?:|mailto:)/i.test(value.trim())) return;
         if (tag === "IMG" && name === "src" && /^(https?:|data:image\/)/i.test(value.trim())) return;
@@ -6971,6 +6980,112 @@
     });
 
     return template.innerHTML.trim();
+  }
+
+  function removeImageToolbar() {
+    document.querySelector("[data-image-toolbar]")?.remove();
+    app.querySelectorAll("img.is-image-selected").forEach((img) => img.classList.remove("is-image-selected"));
+  }
+
+  function imageWidthPercent(img) {
+    const styleWidth = Number.parseFloat(img.style.width);
+    if (Number.isFinite(styleWidth) && String(img.style.width).includes("%")) return Math.round(styleWidth);
+    const parentWidth = img.parentElement?.getBoundingClientRect().width || 0;
+    const rectWidth = img.getBoundingClientRect().width;
+    if (parentWidth > 0 && rectWidth > 0) return Math.min(Math.round((rectWidth / parentWidth) * 100), 100);
+    return 100;
+  }
+
+  function positionImageToolbar(img) {
+    const toolbar = document.querySelector("[data-image-toolbar]");
+    if (!toolbar || !document.body.contains(img)) return;
+    const rect = img.getBoundingClientRect();
+    toolbar.style.top = `${Math.max(rect.top - 44, 8)}px`;
+    toolbar.style.left = `${Math.max(Math.min(rect.left, window.innerWidth - 320), 8)}px`;
+  }
+
+  function paintImageToolbarState(img) {
+    const toolbar = document.querySelector("[data-image-toolbar]");
+    if (!toolbar) return;
+    const size = toolbar.querySelector("[data-image-size]");
+    if (size) size.textContent = `${imageWidthPercent(img)}%`;
+    const mode = img.classList.contains("img-float-left")
+      ? "left"
+      : img.classList.contains("img-float-right")
+        ? "right"
+        : img.classList.contains("img-block-center") ? "center" : "inline";
+    toolbar.querySelectorAll("[data-image-action]").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.imageAction === mode);
+    });
+  }
+
+  function applyImageLayout(editor, note, box, img, mode) {
+    rememberEditorSnapshot(note, editor);
+    img.classList.remove("img-float-left", "img-float-right", "img-block-center");
+    if (mode === "left") img.classList.add("img-float-left");
+    if (mode === "right") img.classList.add("img-float-right");
+    if (mode === "center") img.classList.add("img-block-center");
+    syncEditorContent(editor, note, box);
+    positionImageToolbar(img);
+    paintImageToolbarState(img);
+  }
+
+  function resizeEditorImage(editor, note, box, img, delta) {
+    rememberEditorSnapshot(note, editor);
+    const next = Math.min(Math.max(imageWidthPercent(img) + delta, 10), 100);
+    img.style.width = `${next}%`;
+    img.style.height = "auto";
+    syncEditorContent(editor, note, box);
+    positionImageToolbar(img);
+    paintImageToolbarState(img);
+  }
+
+  function selectEditorImage(editor, note, box, img) {
+    removeImageToolbar();
+    img.classList.add("is-image-selected");
+    const toolbar = document.createElement("div");
+    toolbar.className = "image-toolbar";
+    toolbar.dataset.imageToolbar = "true";
+    toolbar.innerHTML = `
+      <button type="button" data-image-action="left" data-tooltip="Image a gauche, texte autour" aria-label="Image a gauche, texte autour">${icon("alignLeft")}</button>
+      <button type="button" data-image-action="center" data-tooltip="Image centree" aria-label="Image centree">${icon("alignCenter")}</button>
+      <button type="button" data-image-action="right" data-tooltip="Image a droite, texte autour" aria-label="Image a droite, texte autour">${icon("alignRight")}</button>
+      <button type="button" data-image-action="inline" data-tooltip="Dans le texte" aria-label="Dans le texte">${icon("alignJustify")}</button>
+      <span class="image-toolbar-sep"></span>
+      <button type="button" data-image-action="smaller" data-tooltip="Reduire" aria-label="Reduire">−</button>
+      <span data-image-size></span>
+      <button type="button" data-image-action="bigger" data-tooltip="Agrandir" aria-label="Agrandir">+</button>
+      <span class="image-toolbar-sep"></span>
+      <button type="button" class="danger" data-image-action="delete" data-tooltip="Supprimer l'image" aria-label="Supprimer l'image">${icon("trash")}</button>
+    `;
+    document.body.appendChild(toolbar);
+    toolbar.addEventListener("mousedown", (event) => event.preventDefault());
+    toolbar.addEventListener("click", (event) => {
+      const action = event.target.closest("[data-image-action]")?.dataset.imageAction;
+      if (!action || !document.body.contains(img)) return;
+      if (action === "delete") {
+        rememberEditorSnapshot(note, editor);
+        const holder = img.parentElement;
+        img.remove();
+        if (holder && holder !== editor && !holder.textContent.trim() && !holder.querySelector("img, br")) {
+          holder.appendChild(document.createElement("br"));
+        }
+        removeImageToolbar();
+        syncEditorContent(editor, note, box);
+        return;
+      }
+      if (action === "smaller") {
+        resizeEditorImage(editor, note, box, img, -10);
+        return;
+      }
+      if (action === "bigger") {
+        resizeEditorImage(editor, note, box, img, 10);
+        return;
+      }
+      applyImageLayout(editor, note, box, img, action === "inline" ? "" : action);
+    });
+    positionImageToolbar(img);
+    paintImageToolbarState(img);
   }
 
   function bindEditor() {
@@ -7096,6 +7211,15 @@
         rememberEditorSnapshot(note, boundEditor);
       });
       boundEditor.addEventListener("keydown", (event) => handleEditorAutomation(event, boundEditor, note, box, repaginatePagesInPlace));
+      boundEditor.addEventListener("click", (event) => {
+        const img = event.target.closest?.("img");
+        if (img && boundEditor.contains(img)) {
+          event.preventDefault();
+          selectEditorImage(boundEditor, note, box, img);
+        } else if (document.querySelector("[data-image-toolbar]")) {
+          removeImageToolbar();
+        }
+      });
       boundEditor.addEventListener("paste", (event) => {
         const html = event.clipboardData?.getData("text/html");
         const text = event.clipboardData?.getData("text/plain");
@@ -7538,6 +7662,34 @@
         exitListItem(editor, note, box, li);
         return;
       }
+      if (window.getSelection()?.isCollapsed) {
+        const block = currentEditableBlock(editor);
+        if (block && block !== editor && isCaretAtStartOfBlock(block)) {
+          const previous = block.previousElementSibling;
+          const collapsedHeading = previous
+            ? (isHeadingBlock(previous) && previous.dataset.collapsed === "true" ? previous : collapsedHeadingForHiddenBlock(previous))
+            : null;
+          if (collapsedHeading) {
+            event.preventDefault();
+            toggleHeadingSection(editor, note, box, collapsedHeading);
+            setToast("Section depliee pour proteger son contenu.");
+            return;
+          }
+        }
+      }
+      return;
+    }
+
+    if (event.key === "Delete") {
+      if (window.getSelection()?.isCollapsed) {
+        const block = currentEditableBlock(editor);
+        if (isHeadingBlock(block) && block.dataset.collapsed === "true" && isCaretAtEndOfBlock(block)) {
+          event.preventDefault();
+          toggleHeadingSection(editor, note, box, block);
+          setToast("Section depliee pour proteger son contenu.");
+          return;
+        }
+      }
       return;
     }
 
@@ -7589,6 +7741,25 @@
     before.selectNodeContents(li);
     before.setEnd(range.startContainer, range.startOffset);
     return !before.toString().replace(/\u00a0/g, " ").trim();
+  }
+
+  function isCaretAtStartOfBlock(block) {
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount || !selection.isCollapsed || !block) return false;
+    const range = selection.getRangeAt(0);
+    if (!block.contains(range.startContainer)) return false;
+    const before = range.cloneRange();
+    before.selectNodeContents(block);
+    before.setEnd(range.startContainer, range.startOffset);
+    return !before.toString().replace(/ /g, " ").trim();
+  }
+
+  function collapsedHeadingForHiddenBlock(block) {
+    let cursor = block;
+    while (cursor && cursor.dataset?.collapsedHidden === "true") {
+      cursor = cursor.previousElementSibling;
+    }
+    return cursor && isHeadingBlock(cursor) && cursor.dataset.collapsed === "true" ? cursor : null;
   }
 
   function isCaretAtStartOfEditor(editor) {
@@ -8497,6 +8668,18 @@
     runtime.contextMenu = null;
     render();
   });
+
+  document.addEventListener("click", (event) => {
+    if (!document.querySelector("[data-image-toolbar]")) return;
+    if (event.target.closest?.("[data-image-toolbar]")) return;
+    if (event.target.closest?.("img") && event.target.closest?.("[data-note-editor]")) return;
+    removeImageToolbar();
+  });
+
+  document.addEventListener("scroll", () => {
+    const img = app.querySelector("img.is-image-selected");
+    if (img) positionImageToolbar(img);
+  }, true);
 
   document.addEventListener("pointerdown", () => {
     runtime.pointerIsDown = true;

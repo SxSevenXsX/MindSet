@@ -1772,6 +1772,90 @@ body.is-graph-dragging {
   max-height: none;
 }
 
+.note-editor img {
+  max-width: 100%;
+  height: auto;
+}
+
+.note-editor img.img-float-left {
+  float: left;
+  margin: 6px 16px 10px 0;
+}
+
+.note-editor img.img-float-right {
+  float: right;
+  margin: 6px 0 10px 16px;
+}
+
+.note-editor img.img-block-center {
+  display: block;
+  float: none;
+  margin: 12px auto;
+}
+
+.note-editor img.is-image-selected {
+  outline: 2px solid var(--selection-color);
+  outline-offset: 2px;
+}
+
+.image-toolbar {
+  position: fixed;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.image-toolbar button {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.image-toolbar button:hover {
+  background: var(--surface-soft);
+}
+
+.image-toolbar button.is-active {
+  background: var(--selection-soft);
+  color: var(--selection-color);
+}
+
+.image-toolbar button.danger {
+  color: var(--danger);
+}
+
+.image-toolbar .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.image-toolbar [data-image-size] {
+  min-width: 36px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+  text-align: center;
+}
+
+.image-toolbar-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+}
+
 .page-sheet:focus-within {
   box-shadow:
     0 0 0 1px var(--selection-border),
@@ -1868,6 +1952,20 @@ body.is-graph-dragging {
   padding-left: 26px;
 }
 
+/* Marqueurs de listes : glyphes fixes, jamais dependants de la police du texte */
+.note-editor ul > li::marker,
+.note-editor ol > li::marker {
+  font-family: "Segoe UI Symbol", "Segoe UI", Arial, sans-serif;
+}
+
+/* Puces par niveau d'imbrication pour les listes simples (* + espace, Tab pour descendre) */
+.note-editor ul:not([class]) > li::marker { content: "•  "; }
+.note-editor :is(ul, ol) ul:not([class]) > li::marker { content: "○  "; }
+.note-editor :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "■  "; }
+.note-editor :is(ul, ol) :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "□  "; }
+.note-editor :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "▲  "; }
+.note-editor :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "△  "; }
+
 .note-editor .dash-list {
   list-style: none;
   padding-left: 22px;
@@ -1960,6 +2058,14 @@ body.is-graph-dragging {
   border-top: 6px solid transparent;
   border-bottom: 6px solid transparent;
   border-left: 10px solid var(--amber);
+}
+
+.note-editor .dash-list li::before,
+.note-editor .arrow-list li::before,
+.note-editor .triangle-list li::before,
+.note-editor .square-list li::before,
+.note-editor .check-list li::before {
+  font-family: "Segoe UI Symbol", "Segoe UI", Arial, sans-serif;
 }
 
 .note-editor .square-list li::before {
