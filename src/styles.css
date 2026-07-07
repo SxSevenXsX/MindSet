@@ -1966,6 +1966,78 @@ body.is-graph-dragging {
 .note-editor :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "▲  "; }
 .note-editor :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "△  "; }
 
+.toolbar-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.toolbar-menu-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 45;
+  display: none;
+  align-items: center;
+  gap: 3px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.toolbar-menu:hover .toolbar-menu-panel,
+.toolbar-menu.is-open .toolbar-menu-panel {
+  display: flex;
+}
+
+.spacing-panel {
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 230px;
+}
+
+.spacing-values {
+  display: flex;
+  gap: 3px;
+}
+
+.spacing-values .format-button {
+  width: auto;
+  min-width: 32px;
+  padding: 0 7px;
+  font-size: 11px;
+}
+
+.menu-panel-label {
+  padding: 2px 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.menu-panel-sep {
+  height: 1px;
+  margin: 5px 0;
+  background: var(--border);
+}
+
+.menu-panel-item {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-panel-item:hover {
+  background: var(--surface-soft);
+}
+
 .note-editor .dash-list {
   list-style: none;
   padding-left: 22px;
@@ -2075,7 +2147,13 @@ body.is-graph-dragging {
   height: 9px;
   margin-right: 11px;
   border: 1.5px solid var(--accent);
+  background: var(--accent);
   vertical-align: 1px;
+}
+
+/* Carre plein au premier niveau (-- + espace), carre vide une fois imbrique */
+.note-editor :is(ul, ol) .square-list li::before {
+  background: transparent;
 }
 
 .folder-shell,

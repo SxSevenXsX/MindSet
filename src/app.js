@@ -101,6 +101,7 @@
     splitColumns: '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M12 5v14"/><path d="M8 9h1"/><path d="M8 13h1"/><path d="M15 9h1"/><path d="M15 13h1"/>',
     ruler: '<path d="M4 18 18 4l2 2L6 20H4v-2Z"/><path d="m14 8 2 2"/><path d="m11 11 2 2"/><path d="m8 14 2 2"/>',
     linkedPages: '<path d="M7 7h4v10H7a3 3 0 0 1-3-3v-4a3 3 0 0 1 3-3Z"/><path d="M13 7h4a3 3 0 0 1 3 3v4a3 3 0 0 1-3 3h-4V7Z"/><path d="M10 12h4"/>',
+    lineSpacing: '<path d="M4 6h9"/><path d="M4 12h9"/><path d="M4 18h9"/><path d="M19 5v14"/><path d="m16.5 7.5 2.5-2.5 2.5 2.5"/><path d="m16.5 16.5 2.5 2.5 2.5-2.5"/>',
     splitPages: '<path d="M7 7h4v10H7a3 3 0 0 1-3-3v-4a3 3 0 0 1 3-3Z"/><path d="M13 7h4a3 3 0 0 1 3 3v4a3 3 0 0 1-3 3h-4V7Z"/><path d="M12 5v14"/>',
   };
 
@@ -3726,13 +3727,30 @@
             <button class="format-button" data-editor-cmd="justifyFull" title="Justifier en bloc">${icon("alignJustify")}</button>
           </div>
           <div class="toolbar-group">
-            <button class="format-button" data-list-type="bullet" title="Point">•</button>
-            <button class="format-button" data-list-type="dash" title="Tiret">-</button>
-            <button class="format-button" data-list-type="circle" title="Rond">○</button>
-            <button class="format-button" data-list-type="arrow" title="Flèche">→</button>
-            <button class="format-button" data-list-type="check" title="To Do">☐</button>
-            <button class="format-button" data-list-type="triangle" title="Triangle">△</button>
-            <button class="format-button" data-list-type="square" title="Carré">□</button>
+            <div class="toolbar-menu" data-toolbar-menu>
+              <button class="format-button" type="button" data-menu-trigger data-tooltip="Types de listes (raccourcis : * - -- -> [] au debut d'une ligne)" aria-label="Types de listes">${icon("list")}</button>
+              <div class="toolbar-menu-panel list-panel">
+                <button class="format-button" data-list-type="bullet" title="Point (* + espace)">•</button>
+                <button class="format-button" data-list-type="dash" title="Tiret (- + espace)">-</button>
+                <button class="format-button" data-list-type="circle" title="Rond">○</button>
+                <button class="format-button" data-list-type="arrow" title="Flèche (-> + espace)">→</button>
+                <button class="format-button" data-list-type="check" title="To Do ([] + espace)">☐</button>
+                <button class="format-button" data-list-type="triangle" title="Triangle">△</button>
+                <button class="format-button" data-list-type="square" title="Carré (-- + espace)">■</button>
+              </div>
+            </div>
+            <div class="toolbar-menu" data-toolbar-menu>
+              <button class="format-button" type="button" data-menu-trigger data-tooltip="Interligne et espacement" aria-label="Interligne et espacement">${icon("lineSpacing")}</button>
+              <div class="toolbar-menu-panel spacing-panel">
+                <span class="menu-panel-label">Interligne</span>
+                <div class="spacing-values">
+                  ${["1", "1.15", "1.5", "2", "3"].map((value) => `<button class="format-button" data-line-spacing="${value}" title="Interligne ${value.replace(".", ",")}">${value.replace(".", ",")}</button>`).join("")}
+                </div>
+                <span class="menu-panel-sep"></span>
+                <button class="menu-panel-item" type="button" data-paragraph-space="before">Espace avant le paragraphe</button>
+                <button class="menu-panel-item" type="button" data-paragraph-space="after">Espace apres le paragraphe</button>
+              </div>
+            </div>
           </div>
           </div>
           <div class="toolbar-row toolbar-secondary-row">
@@ -6903,7 +6921,7 @@
   }
 
   const pasteAllowedTags = new Set(["P", "H1", "H2", "H3", "H4", "H5", "H6", "UL", "OL", "LI", "BR", "B", "STRONG", "I", "EM", "U", "S", "STRIKE", "SPAN", "A", "IMG", "BLOCKQUOTE", "DIV", "PRE", "CODE", "SUB", "SUP"]);
-  const pasteAllowedStyles = ["font-family", "font-size", "color", "background-color", "font-weight", "font-style", "text-decoration", "text-align", "width"];
+  const pasteAllowedStyles = ["font-family", "font-size", "color", "background-color", "font-weight", "font-style", "text-decoration", "text-align", "width", "line-height", "margin-top", "margin-bottom"];
   const imageLayoutClasses = ["img-float-left", "img-float-right", "img-block-center"];
 
   function sanitizePastedHtml(html) {
@@ -6980,6 +6998,62 @@
     });
 
     return template.innerHTML.trim();
+  }
+
+  function selectedEditorBlocks(editor) {
+    const selection = window.getSelection();
+    if (!editor || !selection || !selection.rangeCount) return [];
+    const range = selection.getRangeAt(0);
+    if (!selectionInsideEditor(editor, range)) return [];
+    const targets = [];
+    logicalEditorBlocks(editor).forEach((block) => {
+      if (!range.intersectsNode(block)) return;
+      if (["UL", "OL"].includes(block.tagName)) {
+        [...block.querySelectorAll("li")].forEach((li) => {
+          if (range.intersectsNode(li)) targets.push(li);
+        });
+        return;
+      }
+      targets.push(block);
+    });
+    if (!targets.length) {
+      const block = currentEditableBlock(editor);
+      if (block && block !== editor) targets.push(block);
+    }
+    return targets;
+  }
+
+  function applyLineSpacing(editor, note, box, value) {
+    rememberEditorSnapshot(note, editor);
+    restoreEditorSelection(editor);
+    const targets = selectedEditorBlocks(editor);
+    if (!targets.length) return;
+    targets.forEach((block) => block.style.setProperty("line-height", value));
+    syncEditorContent(editor, note, box);
+  }
+
+  function toggleParagraphSpacing(editor, note, box, side) {
+    rememberEditorSnapshot(note, editor);
+    restoreEditorSelection(editor);
+    const targets = selectedEditorBlocks(editor);
+    if (!targets.length) return;
+    const property = side === "before" ? "margin-top" : "margin-bottom";
+    const computed = Number.parseFloat(getComputedStyle(targets[0]).getPropertyValue(property)) || 0;
+    const nextValue = computed > 2 ? "0px" : "14px";
+    targets.forEach((block) => block.style.setProperty(property, nextValue));
+    syncEditorContent(editor, note, box);
+  }
+
+  function updateSpacingMenuLabels(menu, editor) {
+    const before = menu.querySelector('[data-paragraph-space="before"]');
+    const after = menu.querySelector('[data-paragraph-space="after"]');
+    if (!before && !after) return;
+    const block = editor ? currentEditableBlock(editor) : null;
+    const reference = block && block !== editor ? block : null;
+    const spacedBefore = reference ? (Number.parseFloat(getComputedStyle(reference).marginTop) || 0) > 2 : false;
+    const spacedAfter = reference ? (Number.parseFloat(getComputedStyle(reference).marginBottom) || 0) > 2 : true;
+    if (before) before.textContent = spacedBefore ? "Supprimer l'espace avant le paragraphe" : "Ajouter un espace avant le paragraphe";
+    if (after) after.textContent = spacedAfter ? "Supprimer l'espace apres le paragraphe" : "Ajouter un espace apres le paragraphe";
   }
 
   function removeImageToolbar() {
@@ -7397,6 +7471,49 @@
         const input = app.querySelector(`[data-color-input="${kind}"]`);
         if (input) input.value = button.dataset.colorValue;
         applyEditorColor(current, note, box, kind, button.dataset.colorValue);
+      });
+    });
+
+    app.querySelectorAll("[data-toolbar-menu]").forEach((menu) => {
+      const trigger = menu.querySelector("[data-menu-trigger]");
+      trigger?.addEventListener("mousedown", (event) => {
+        const current = activeEditor();
+        if (current) saveEditorSelection(current);
+        event.preventDefault();
+      });
+      trigger?.addEventListener("click", () => {
+        const wasOpen = menu.classList.contains("is-open");
+        app.querySelectorAll(".toolbar-menu.is-open").forEach((item) => item.classList.remove("is-open"));
+        menu.classList.toggle("is-open", !wasOpen);
+        updateSpacingMenuLabels(menu, activeEditor());
+      });
+      menu.addEventListener("mouseenter", () => updateSpacingMenuLabels(menu, activeEditor()));
+    });
+
+    app.querySelectorAll("[data-line-spacing]").forEach((button) => {
+      button.addEventListener("mousedown", (event) => {
+        const current = activeEditor();
+        if (current) saveEditorSelection(current);
+        event.preventDefault();
+      });
+      button.addEventListener("click", () => {
+        const current = activeEditor();
+        if (current) applyLineSpacing(current, note, box, button.dataset.lineSpacing);
+      });
+    });
+
+    app.querySelectorAll("[data-paragraph-space]").forEach((button) => {
+      button.addEventListener("mousedown", (event) => {
+        const current = activeEditor();
+        if (current) saveEditorSelection(current);
+        event.preventDefault();
+      });
+      button.addEventListener("click", () => {
+        const current = activeEditor();
+        if (!current) return;
+        toggleParagraphSpacing(current, note, box, button.dataset.paragraphSpace);
+        const menu = button.closest("[data-toolbar-menu]");
+        if (menu) updateSpacingMenuLabels(menu, current);
       });
     });
 
@@ -8027,6 +8144,7 @@
     const markers = {
       "*": { tag: "ul", className: "" },
       "-": { tag: "ul", className: "dash-list" },
+      "--": { tag: "ul", className: "square-list" },
       "+": { tag: "ul", className: "" },
       "1.": { tag: "ol", className: "" },
       "1)": { tag: "ol", className: "" },
@@ -8670,6 +8788,9 @@
   });
 
   document.addEventListener("click", (event) => {
+    if (!event.target.closest?.("[data-toolbar-menu]")) {
+      app.querySelectorAll(".toolbar-menu.is-open").forEach((menu) => menu.classList.remove("is-open"));
+    }
     if (!document.querySelector("[data-image-toolbar]")) return;
     if (event.target.closest?.("[data-image-toolbar]")) return;
     if (event.target.closest?.("img") && event.target.closest?.("[data-note-editor]")) return;
