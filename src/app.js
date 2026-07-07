@@ -6871,10 +6871,44 @@
     return moved;
   }
 
+  function caretViewportRect() {
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount) return null;
+    const range = selection.getRangeAt(0).cloneRange();
+    let rect = range.getBoundingClientRect();
+    if (!rect || (rect.top === 0 && rect.bottom === 0 && rect.left === 0)) {
+      let element = range.startContainer;
+      if (element?.nodeType === Node.TEXT_NODE) element = element.parentElement;
+      rect = element?.getBoundingClientRect?.() || null;
+    }
+    return rect;
+  }
+
+  function followCaretMinimally(container) {
+    if (!container || container.scrollHeight <= container.clientHeight + 1) return;
+    const rect = caretViewportRect();
+    if (!rect) return;
+    const containerRect = container.getBoundingClientRect();
+    const margin = 30;
+    if (rect.top >= containerRect.top + margin && rect.bottom <= containerRect.bottom - margin) return;
+    if (rect.bottom > containerRect.bottom - margin) {
+      container.scrollTop += rect.bottom - (containerRect.bottom - 120);
+    } else if (rect.top < containerRect.top + margin) {
+      container.scrollTop -= (containerRect.top + 120) - rect.top;
+    }
+  }
+
   function restorePagedViewport(snapshot, target, mode = "preserve") {
     const viewport = app.querySelector("[data-page-viewport]");
     const contentArea = app.querySelector(".content-area");
     const documentScroller = document.scrollingElement || document.documentElement;
+    if (mode === "caret") {
+      // Suivi minimal : l'ecran ne bouge que si le caret est sorti de la vue,
+      // et seulement du minimum necessaire. Aucun saut sinon.
+      followCaretMinimally(contentArea);
+      followCaretMinimally(viewport);
+      return;
+    }
     if (mode === "target" && target) {
       const movedContent = scrollContainerToTarget(contentArea, target);
       const movedViewport = scrollContainerToTarget(viewport, target);
@@ -7509,18 +7543,18 @@
                 || inputType === "deleteContentBackward"
                 || inputType === "deleteContentForward";
               if (immediatePagination) {
-                repaginatePagesInPlace(boundEditor, { scroll: "target" });
+                repaginatePagesInPlace(boundEditor, { scroll: "caret" });
               } else {
-                schedulePageRepagination(boundEditor, { scroll: "target", delay: 140 });
+                schedulePageRepagination(boundEditor, { scroll: "caret", delay: 140 });
               }
             } else {
               syncPagedEditorMetrics(boundEditor);
             }
-          } else if (needsPagedLayoutRefresh(boundEditor)) {
-            syncPagedEditorMetrics(boundEditor);
           } else {
             syncPagedEditorMetrics(boundEditor);
           }
+          // Le caret reste toujours en vue pendant la frappe (aucun effet s'il l'est deja)
+          window.requestAnimationFrame(() => restorePagedViewport(null, null, "caret"));
         } else {
           syncPagedEditorMetrics(boundEditor);
         }
@@ -7996,10 +8030,8 @@
           }
         });
       }
-      if (!event.defaultPrevented && !event.shiftKey && collapsed && shouldPrepaginateEnter(editor, block)) {
-        event.preventDefault();
-        insertHardPageBreakAtCaret(editor, note, box, repaginateNow);
-      }
+      // Entree native partout ailleurs : la repagination immediate (via l'evenement
+      // input) deplace le texte avec ses marqueurs de selection, le caret suit.
       return;
     }
 
@@ -8375,7 +8407,7 @@
     commitEditorHistoryChange(note, note.content);
     saveState();
     syncPagedEditorMetrics(editor);
-    requestAnimationFrame(() => restorePagedViewport(snapshot, target, "target"));
+    requestAnimationFrame(() => restorePagedViewport(snapshot, target, "caret"));
     return true;
   }
 
