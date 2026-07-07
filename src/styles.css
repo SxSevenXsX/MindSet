@@ -1959,12 +1959,17 @@ body.is-graph-dragging {
 }
 
 /* Puces par niveau d'imbrication pour les listes simples (* + espace, Tab pour descendre) */
-.note-editor ul:not([class]) > li::marker { content: "•  "; }
-.note-editor :is(ul, ol) ul:not([class]) > li::marker { content: "○  "; }
-.note-editor :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "■  "; }
-.note-editor :is(ul, ol) :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "□  "; }
-.note-editor :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "▲  "; }
-.note-editor :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "△  "; }
+.note-editor ul:not([class]) > li::marker { content: "•  "; font-size: 1.3em; }
+.note-editor :is(ul, ol) ul:not([class]) > li::marker { content: "○  "; font-size: 1em; }
+.note-editor :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "■  "; font-size: 0.85em; }
+.note-editor :is(ul, ol) :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "□  "; font-size: 0.85em; }
+.note-editor :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "▲  "; font-size: 0.85em; }
+.note-editor :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "△  "; font-size: 0.85em; }
+
+/* Couleur des puces natives : suit la couleur du premier caractere de l'item (comme Word) */
+.note-editor :is(ul, ol) > li::marker {
+  color: var(--li-marker-color, currentColor);
+}
 
 .toolbar-menu {
   position: relative;
@@ -2146,14 +2151,24 @@ body.is-graph-dragging {
   width: 9px;
   height: 9px;
   margin-right: 11px;
-  border: 1.5px solid var(--accent);
-  background: var(--accent);
+  border: 1.5px solid var(--li-marker-color, var(--accent));
+  background: var(--li-marker-color, var(--accent));
   vertical-align: 1px;
 }
 
 /* Carre plein au premier niveau (-- + espace), carre vide une fois imbrique */
 .note-editor :is(ul, ol) .square-list li::before {
   background: transparent;
+}
+
+/* Couleur des marqueurs personnalises : suit le premier caractere colore de l'item */
+.note-editor .dash-list li::before,
+.note-editor .arrow-list li::before {
+  color: var(--li-marker-color, var(--accent));
+}
+
+.note-editor .triangle-list li::before {
+  color: var(--li-marker-color, #d58f27);
 }
 
 .folder-shell,

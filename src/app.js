@@ -42,6 +42,7 @@
     boxCrypto: new Map(),
     encryptTimer: 0,
     encryptRunning: false,
+    lastListAutoFormat: null,
   };
 
   const icons = {
@@ -3728,7 +3729,7 @@
           </div>
           <div class="toolbar-group">
             <div class="toolbar-menu" data-toolbar-menu>
-              <button class="format-button" type="button" data-menu-trigger data-tooltip="Types de listes (raccourcis : * - -- -> [] au debut d'une ligne)" aria-label="Types de listes">${icon("list")}</button>
+              <button class="format-button" type="button" data-menu-trigger data-tooltip="Types de listes (raccourcis : * - -- -> ^ [] au debut d'une ligne)" aria-label="Types de listes">${icon("list")}</button>
               <div class="toolbar-menu-panel list-panel">
                 <button class="format-button" data-list-type="bullet" title="Point (* + espace)">•</button>
                 <button class="format-button" data-list-type="dash" title="Tiret (- + espace)">-</button>
@@ -7312,6 +7313,7 @@
         if (enforceIndependentPageLimit(boundEditor, note, box)) return;
         if (ensureFirstContinuousPage(boundEditor, note, box)) return;
         if (removeCurrentEmptyContinuousPageIfNeeded(boundEditor, note, box)) return;
+        syncListMarkerColors(boundEditor);
         note.content = editorSnapshotContent(boundEditor);
         note.modifiedAt = now();
         touchBox(box);
@@ -7558,6 +7560,7 @@
 
   function prepareCollapsibleHeadings(editor, note, box) {
     syncCollapsedHeadings(editor);
+    syncListMarkerColors(editor);
     editor.querySelectorAll("h1, h2, h3").forEach((heading) => {
       heading.classList.add("collapsible-heading");
       heading.title = "Cliquer la flèche ou double-cliquer pour replier / deplier";
@@ -7774,6 +7777,16 @@
 
     if (event.key === "Backspace") {
       const li = currentListItem(editor);
+      if (
+        li
+        && window.getSelection()?.isCollapsed
+        && runtime.lastListAutoFormat?.li === li
+        && li.textContent === runtime.lastListAutoFormat.text
+        && isCaretAtStartOfListItem(li)
+      ) {
+        event.preventDefault();
+        if (revertListAutoFormat(editor, note, box)) return;
+      }
       if (li && window.getSelection()?.isCollapsed && listItemIsEmpty(li)) {
         event.preventDefault();
         exitListItem(editor, note, box, li);
@@ -7831,6 +7844,41 @@
   }
 
   const customListClasses = ["dash-list", "arrow-list", "circle-list", "check-list", "triangle-list", "square-list"];
+
+  function firstOwnTextColor(li) {
+    const walker = document.createTreeWalker(li, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node) {
+      if (node.textContent.trim() && node.parentElement?.closest("li") === li) {
+        let element = node.parentElement;
+        while (element && element !== li) {
+          if (element.style?.color || (element.tagName === "FONT" && element.getAttribute("color"))) {
+            return getComputedStyle(element).color;
+          }
+          element = element.parentElement;
+        }
+        return null;
+      }
+      node = walker.nextNode();
+    }
+    return null;
+  }
+
+  function syncListMarkerColors(editor) {
+    if (!editor) return;
+    editor.querySelectorAll("li").forEach((li) => {
+      if (li.closest(".check-list")) return;
+      const color = firstOwnTextColor(li);
+      if (color) {
+        if (li.style.getPropertyValue("--li-marker-color") !== color) {
+          li.style.setProperty("--li-marker-color", color);
+        }
+      } else if (li.style.getPropertyValue("--li-marker-color")) {
+        li.style.removeProperty("--li-marker-color");
+        if (!li.getAttribute("style")) li.removeAttribute("style");
+      }
+    });
+  }
 
   function fixNestedListClasses(editor) {
     editor.querySelectorAll("ul ul, ul ol, ol ul, ol ol").forEach((nested) => {
@@ -8138,9 +8186,15 @@
     const block = currentEditableBlock(editor);
     if (!block || block.tagName === "LI") return null;
     if (block.querySelector?.("img, video, audio, iframe")) return null;
-    const text = block.textContent.replace(/\u00a0/g, " ");
-    const trimmed = text.trim();
-    if (!trimmed || text.trimEnd() !== trimmed) return null;
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount || !selection.isCollapsed) return null;
+    const range = selection.getRangeAt(0);
+    if (!block.contains(range.startContainer)) return null;
+    const before = range.cloneRange();
+    before.selectNodeContents(block);
+    before.setEnd(range.startContainer, range.startOffset);
+    const typed = before.toString().replace(/\u00a0/g, " ");
+    if (!typed || typed !== typed.trim()) return null;
     const markers = {
       "*": { tag: "ul", className: "" },
       "-": { tag: "ul", className: "dash-list" },
@@ -8151,8 +8205,10 @@
       "[]": { tag: "ul", className: "check-list" },
       "[ ]": { tag: "ul", className: "check-list" },
       "->": { tag: "ul", className: "arrow-list" },
+      "^": { tag: "ul", className: "arrow-list" },
     };
-    return markers[trimmed] || null;
+    const config = markers[typed];
+    return config ? { ...config, markerText: typed } : null;
   }
 
   function convertCurrentBlockToList(editor, note, box, marker) {
@@ -8162,16 +8218,62 @@
     const list = document.createElement(marker.tag);
     if (marker.className) list.className = marker.className;
     const item = document.createElement("li");
-    item.appendChild(document.createElement("br"));
     list.appendChild(item);
     if (block === editor) {
       editor.innerHTML = "";
+      item.appendChild(document.createElement("br"));
       editor.appendChild(list);
     } else {
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount) {
+        const caret = selection.getRangeAt(0);
+        if (block.contains(caret.startContainer)) {
+          const markerRange = caret.cloneRange();
+          markerRange.selectNodeContents(block);
+          markerRange.setEnd(caret.startContainer, caret.startOffset);
+          markerRange.deleteContents();
+        }
+      }
+      while (block.firstChild) item.appendChild(block.firstChild);
+      if (!item.textContent.trim() && !item.querySelector("br, img")) {
+        item.appendChild(document.createElement("br"));
+      }
       block.replaceWith(list);
     }
     placeCaretInside(item);
+    runtime.lastListAutoFormat = {
+      li: item,
+      marker: marker.markerText || "*",
+      text: item.textContent,
+    };
+    syncListMarkerColors(editor);
     syncEditorContent(editor, note, box);
+  }
+
+  function revertListAutoFormat(editor, note, box) {
+    const memo = runtime.lastListAutoFormat;
+    runtime.lastListAutoFormat = null;
+    const li = memo?.li;
+    if (!li || !li.isConnected || !editor.contains(li)) return false;
+    if (li.textContent !== memo.text) return false;
+    const list = li.parentElement;
+    if (!list || list.children.length !== 1) return false;
+    rememberEditorSnapshot(note, editor);
+    const paragraph = document.createElement("p");
+    const restored = memo.text ? `${memo.marker} ${memo.text}` : `${memo.marker} `;
+    paragraph.textContent = restored;
+    list.replaceWith(paragraph);
+    const textNode = paragraph.firstChild;
+    const selection = window.getSelection();
+    const range = document.createRange();
+    const caretOffset = Math.min(memo.marker.length + 1, textNode.textContent.length);
+    range.setStart(textNode, caretOffset);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    saveEditorSelection(editor);
+    syncEditorContent(editor, note, box);
+    return true;
   }
 
   function listItemIsEmpty(li) {
@@ -8389,6 +8491,7 @@
 
   function syncEditorContent(editor, note, box) {
     if (enforceIndependentPageLimit(editor, note, box)) return;
+    syncListMarkerColors(editor);
     note.content = editorSnapshotContent(editor);
     note.modifiedAt = now();
     touchBox(box);
