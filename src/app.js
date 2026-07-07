@@ -3716,6 +3716,14 @@
             <datalist id="font-size-suggestions">
               ${[8, 9, 10, 11, 12, 14, 16, 17, 18, 20, 22, 24, 28, 32, 36, 48, 72].map((size) => `<option value="${size}"></option>`).join("")}
             </datalist>
+            <select class="toolbar-select line-spacing-select" data-line-spacing-select title="Interligne" aria-label="Interligne">
+              <option value="">Interligne</option>
+              <option value="1">1,0</option>
+              <option value="1.15">1,15</option>
+              <option value="1.5">1,5</option>
+              <option value="2">2,0</option>
+              <option value="3">3,0</option>
+            </select>
           </div>
           <div class="toolbar-group color-toolbar-group">
             ${renderColorTool("text", "Couleur du texte", state.settings?.lastTextColor || "#000000")}
@@ -6296,35 +6304,76 @@
   }
 
   function sheetContentGap(sheet) {
-    const style = getComputedStyle(sheet);
-    const rect = sheet.getBoundingClientRect();
-    const innerBottom = rect.bottom - (Number.parseFloat(style.paddingBottom) || 0);
+    const bounds = pagePrintableBounds(sheet);
     const children = [...sheet.children].filter((child) => child.dataset?.paginationProbe !== "true");
     const last = children[children.length - 1];
     if (!last) return Number.POSITIVE_INFINITY;
-    return innerBottom - last.getBoundingClientRect().bottom;
+    return bounds.bottom - last.getBoundingClientRect().bottom;
+  }
+
+  function pagePrintableBounds(sheet) {
+    const style = getComputedStyle(sheet);
+    const rect = sheet.getBoundingClientRect();
+    const borderTop = Number.parseFloat(style.borderTopWidth) || 0;
+    const borderRight = Number.parseFloat(style.borderRightWidth) || 0;
+    const borderBottom = Number.parseFloat(style.borderBottomWidth) || 0;
+    const borderLeft = Number.parseFloat(style.borderLeftWidth) || 0;
+    return {
+      top: rect.top + borderTop + (Number.parseFloat(style.paddingTop) || 0),
+      right: rect.right - borderRight - (Number.parseFloat(style.paddingRight) || 0),
+      bottom: rect.bottom - borderBottom - (Number.parseFloat(style.paddingBottom) || 0),
+      left: rect.left + borderLeft + (Number.parseFloat(style.paddingLeft) || 0),
+    };
+  }
+
+  function pageSheetContentChildren(sheet) {
+    return [...(sheet?.children || [])].filter((child) => child.dataset?.paginationProbe !== "true");
+  }
+
+  function isPaginationSplittableBlock(block) {
+    return splittableTextBlock(block) || ["UL", "OL"].includes(block?.tagName);
+  }
+
+  function canAcceptPageOverflow(sheet) {
+    if (!sheet) return false;
+    const children = pageSheetContentChildren(sheet);
+    if (children.length !== 1) return false;
+    const only = children[0];
+    if (!only || isPaginationSplittableBlock(only)) return false;
+    return sheetOverflows(sheet);
   }
 
   function needsPagedLayoutRefresh(editor) {
     const sheets = [...(editor?.querySelectorAll?.(".page-sheet") || [])];
     if (!sheets.length) return true;
     return sheets.some((sheet, index) => {
-      if (sheet.classList.contains("is-overflow-accepted")) return sheet.children.length > 1;
-      if (sheet.scrollHeight > sheet.clientHeight + 2) return true;
+      if (sheet.classList.contains("is-overflow-accepted")) return !canAcceptPageOverflow(sheet);
+      if (sheetOverflows(sheet)) return true;
       const next = sheets[index + 1];
       if (!next || !sheetHasUserStructure(next)) return false;
       const gap = sheetContentGap(sheet);
       if (gap < 34) return false;
-      const nextFirst = [...next.children].find((child) => child.dataset?.paginationProbe !== "true");
+      const nextFirst = pageSheetContentChildren(next)[0];
       if (!nextFirst) return false;
       const nextHeight = nextFirst.getBoundingClientRect().height;
-      const splittable = splittableTextBlock(nextFirst) || ["UL", "OL"].includes(nextFirst.tagName);
+      const splittable = isPaginationSplittableBlock(nextFirst);
       return nextHeight <= gap + 1 || splittable;
     }) || sheets.slice(1).some((sheet) => !sheetHasUserStructure(sheet));
   }
 
   function sheetOverflows(sheet) {
-    return !!sheet && sheet.scrollHeight > sheet.clientHeight + 2;
+    if (!sheet) return false;
+    const accepted = sheet.classList?.contains("is-overflow-accepted");
+    if (accepted) sheet.classList.remove("is-overflow-accepted");
+    const bounds = pagePrintableBounds(sheet);
+    const children = pageSheetContentChildren(sheet);
+    const overflow = children.some((child) => {
+      const rect = child.getBoundingClientRect();
+      if (rect.width <= 0 && rect.height <= 0 && !child.textContent.trim()) return false;
+      return rect.bottom > bounds.bottom + 2;
+    });
+    if (accepted) sheet.classList.add("is-overflow-accepted");
+    return overflow;
   }
 
   function inputCanGrowPage(event) {
@@ -6708,14 +6757,30 @@
     }
     if (remainder.children.length) {
       if (sheetOverflows(sheet) && list.children.length === 1) {
-        const tailSplit = splitTextBlockToFit(list.firstElementChild, sheet);
-        if (tailSplit) remainder.insertBefore(tailSplit, remainder.firstElementChild);
+        const lastItem = list.firstElementChild;
+        const tailSplit = splitTextBlockToFit(lastItem, sheet);
+        if (tailSplit) {
+          remainder.insertBefore(tailSplit, remainder.firstElementChild);
+        } else if (sheetOverflows(sheet)) {
+          // Meme la premiere ligne de l'item ne tient pas dans la zone :
+          // l'item entier passe sur la page suivante au lieu de rester dans la marge.
+          remainder.insertBefore(lastItem, remainder.firstElementChild);
+          if (!list.children.length) list.remove();
+        }
       }
       remainder.dataset.splitContinuation = "true";
       return remainder;
     }
 
     const onlyItem = list.firstElementChild;
+    const sheetContent = [...sheet.children].filter((child) => child.dataset?.paginationProbe !== "true");
+    if (onlyItem && sheetOverflows(sheet) && sheetContent.length > 1) {
+      list.removeChild(onlyItem);
+      if (!list.children.length) list.remove();
+      remainder.appendChild(onlyItem);
+      remainder.dataset.splitContinuation = "true";
+      return remainder;
+    }
     const splitItem = splitTextBlockToFit(onlyItem, sheet);
     if (!splitItem) return null;
     remainder.appendChild(splitItem);
@@ -6737,7 +6802,17 @@
       guard += 1;
       const block = currentSheet.lastElementChild;
       const remainder = splitBlockToFit(block, currentSheet);
-      if (!remainder) break;
+      if (!remainder) {
+        if (block && currentSheet.children.length > 1) {
+          currentSheet.removeChild(block);
+          const nextSheet = createPageSheet(editor, sheets.length);
+          sheets.push(nextSheet);
+          nextSheet.appendChild(block);
+          currentSheet = nextSheet;
+          continue;
+        }
+        break;
+      }
       currentSheet = createPageSheet(editor, sheets.length);
       sheets.push(currentSheet);
       currentSheet.appendChild(remainder);
@@ -6946,8 +7021,25 @@
       sheets[0].appendChild(paragraph);
     }
 
+    // Filet de securite "zone interdite" : si un chemin de coupure a laisse un bloc
+    // entier dans la marge basse, on le deplace sur la feuille suivante.
+    for (let index = 0; index < sheets.length; index += 1) {
+      const current = sheets[index];
+      if (canAcceptPageOverflow(current)) continue;
+      let guardNet = 0;
+      while (sheetOverflows(current) && current.children.length > 1 && guardNet < 200) {
+        guardNet += 1;
+        let target = sheets[index + 1];
+        if (!target) {
+          target = createPageSheet(editor, sheets.length);
+          sheets.push(target);
+        }
+        target.insertBefore(current.lastElementChild, target.firstChild);
+      }
+    }
+
     sheets.forEach((sheet) => {
-      sheet.classList.toggle("is-overflow-accepted", sheet.children.length === 1 && sheetOverflows(sheet));
+      sheet.classList.toggle("is-overflow-accepted", canAcceptPageOverflow(sheet));
     });
 
     updatePagedLayout(page);
@@ -7396,7 +7488,7 @@
         }
         fixNestedListClasses(boundEditor);
       });
-      boundEditor.addEventListener("input", () => {
+      boundEditor.addEventListener("input", (event) => {
         if (enforceIndependentPageLimit(boundEditor, note, box)) return;
         if (ensureFirstContinuousPage(boundEditor, note, box)) return;
         if (removeCurrentEmptyContinuousPageIfNeeded(boundEditor, note, box)) return;
@@ -7412,7 +7504,15 @@
         if (normalizeEditorViewMode(state.settings?.editorViewMode) === "pages") {
           if (isContinuousPageFlow()) {
             if (needsPagedLayoutRefresh(boundEditor)) {
-              schedulePageRepagination(boundEditor, { scroll: "target", delay: 140 });
+              const inputType = event?.inputType || "";
+              const immediatePagination = inputType.startsWith("insert")
+                || inputType === "deleteContentBackward"
+                || inputType === "deleteContentForward";
+              if (immediatePagination) {
+                repaginatePagesInPlace(boundEditor, { scroll: "target" });
+              } else {
+                schedulePageRepagination(boundEditor, { scroll: "target", delay: 140 });
+              }
             } else {
               syncPagedEditorMetrics(boundEditor);
             }
@@ -7611,6 +7711,26 @@
         if (current) applyLineSpacing(current, note, box, button.dataset.lineSpacing);
       });
     });
+
+    const lineSpacingSelect = app.querySelector("[data-line-spacing-select]");
+    if (lineSpacingSelect) {
+      lineSpacingSelect.addEventListener("mousedown", () => {
+        const current = activeEditor();
+        if (current) saveEditorSelection(current);
+      });
+      lineSpacingSelect.addEventListener("focus", () => {
+        const current = activeEditor();
+        const selection = window.getSelection();
+        if (current && selection && selection.rangeCount && !selection.isCollapsed) saveEditorSelection(current);
+        holdEditorSelectionHighlight();
+      });
+      lineSpacingSelect.addEventListener("blur", releaseEditorSelectionHighlight);
+      lineSpacingSelect.addEventListener("change", () => {
+        const current = activeEditor();
+        if (!current || !lineSpacingSelect.value) return;
+        applyLineSpacing(current, note, box, lineSpacingSelect.value);
+      });
+    }
 
     app.querySelectorAll("[data-paragraph-space]").forEach((button) => {
       button.addEventListener("mousedown", (event) => {
@@ -7876,9 +7996,9 @@
           }
         });
       }
-      if (!event.defaultPrevented && !event.shiftKey && !li && shouldPrepaginateEnter(editor, block)) {
+      if (!event.defaultPrevented && !event.shiftKey && collapsed && shouldPrepaginateEnter(editor, block)) {
         event.preventDefault();
-        insertPredictivePageBreak(editor, note, box, repaginateNow);
+        insertHardPageBreakAtCaret(editor, note, box, repaginateNow);
       }
       return;
     }
@@ -8143,6 +8263,59 @@
     saveState();
     syncPagedEditorMetrics(editor);
     requestAnimationFrame(() => restorePagedViewport(snapshot, paragraph, "target"));
+    return true;
+  }
+
+  function insertHardPageBreakAtCaret(editor, note, box, repaginateNow = null) {
+    if (normalizeEditorViewMode(state.settings?.editorViewMode) !== "pages" || !isContinuousPageFlow()) return false;
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
+    const range = selection.getRangeAt(0);
+    const currentSheet = currentPageSheet(editor);
+    if (!currentSheet || !selectionInsideEditor(currentSheet, range)) return false;
+
+    const block = currentEditableBlock(editor);
+    if (insertImmediatePageBreak(editor, note, box, block)) return true;
+
+    rememberEditorSnapshot(note, editor);
+    const snapshot = capturePagedViewport(editor);
+    const nextSheet = createPageSheetAfter(editor, currentSheet);
+    configurePageSheet(nextSheet, Number(nextSheet.dataset.pageSheet || 0), { editable: false });
+
+    const tailRange = range.cloneRange();
+    try {
+      if (currentSheet.lastChild) tailRange.setEndAfter(currentSheet.lastChild);
+    } catch (error) {
+      return false;
+    }
+    const tail = tailRange.extractContents();
+    const paragraph = blankParagraph();
+    nextSheet.appendChild(paragraph);
+    nextSheet.appendChild(tail);
+
+    if (!sheetHasUserStructure(currentSheet)) {
+      currentSheet.innerHTML = "";
+      currentSheet.appendChild(blankParagraph());
+    }
+
+    runtime.activePageIndex = Number(nextSheet.dataset.pageSheet || 0);
+    editor.focus({ preventScroll: true });
+    placeCaretInside(paragraph);
+    note.content = editorSnapshotContent(editor);
+    note.modifiedAt = now();
+    touchBox(box);
+    updateEditorStats(note);
+    saveEditorSelection(editor);
+    updateEditorToolbarState(editor);
+    commitEditorHistoryChange(note, note.content);
+    saveState();
+
+    if (typeof repaginateNow === "function") {
+      repaginateNow(editor, { scroll: "target" });
+    } else {
+      refreshPagedEditorIfNeeded(editor, note, "target", { force: true });
+      requestAnimationFrame(() => restorePagedViewport(snapshot, paragraph, "target"));
+    }
     return true;
   }
 
@@ -8640,12 +8813,17 @@
     if (!selectionInsideEditor(editor, range)) return null;
     const families = new Set();
     const sizes = new Set();
+    const lineHeights = new Set();
 
     const collectFrom = (element) => {
       if (!element || !editor.contains(element)) return;
       const style = getComputedStyle(element);
       families.add(style.fontFamily);
       sizes.add(style.fontSize);
+      const block = element.closest?.("p, h1, h2, h3, li, blockquote, div");
+      const blockStyle = block ? getComputedStyle(block) : style;
+      const lineHeight = normalizeLineHeightValue(blockStyle.lineHeight, blockStyle.fontSize);
+      if (lineHeight) lineHeights.add(lineHeight);
     };
 
     if (range.collapsed) {
@@ -8679,7 +8857,18 @@
     return {
       fontFamily: families.size === 1 ? [...families][0] : null,
       fontSize: sizes.size === 1 ? [...sizes][0] : null,
+      lineHeight: lineHeights.size === 1 ? [...lineHeights][0] : null,
     };
+  }
+
+  function normalizeLineHeightValue(lineHeight, fontSize = "") {
+    const raw = String(lineHeight || "").trim();
+    if (!raw || raw === "normal") return "";
+    if (/^\d+(\.\d+)?$/.test(raw)) return String(Math.round(Number(raw) * 100) / 100);
+    const linePx = Number.parseFloat(raw);
+    const fontPx = Number.parseFloat(fontSize);
+    if (!Number.isFinite(linePx) || !Number.isFinite(fontPx) || fontPx <= 0) return "";
+    return String(Math.round((linePx / fontPx) * 100) / 100);
   }
 
   function primaryFontName(stack) {
@@ -8720,15 +8909,33 @@
     input.value = computedSize && Number.isFinite(parsed) ? String(Math.round(parsed)) : "";
   }
 
+  function syncLineSpacingSelect(select, computedLineHeight) {
+    if (!select || document.activeElement === select) return;
+    removeDynamicSelectOption(select);
+    if (!computedLineHeight) {
+      select.value = "";
+      return;
+    }
+    const target = Number.parseFloat(computedLineHeight);
+    const option = [...select.options].find((item) => Math.abs(Number.parseFloat(item.value) - target) < 0.03);
+    if (option) {
+      select.value = option.value;
+      return;
+    }
+    setDynamicSelectValue(select, computedLineHeight, computedLineHeight.replace(".", ","));
+  }
+
   function updateEditorToolbarState(editorElement) {
     updateFormatBlockSelect(editorElement);
     const fontSelect = app.querySelector("[data-font-family]");
     const sizeSelect = app.querySelector("[data-font-size]");
-    if (!fontSelect && !sizeSelect) return;
+    const lineSpacingSelect = app.querySelector("[data-line-spacing-select]");
+    if (!fontSelect && !sizeSelect && !lineSpacingSelect) return;
     const computed = selectionComputedValues(editorElement);
     if (!computed) return;
     if (fontSelect) syncFontFamilySelect(fontSelect, computed.fontFamily);
     if (sizeSelect) syncFontSizeSelect(sizeSelect, computed.fontSize);
+    if (lineSpacingSelect) syncLineSpacingSelect(lineSpacingSelect, computed.lineHeight);
   }
 
   function updateFormatBlockSelect(editor) {
@@ -8850,6 +9057,15 @@
     return nodes;
   }
 
+  function styleSelectedBlocksInRange(editor, range, property, value) {
+    selectedEditorBlocks(editor).forEach((block) => {
+      if (!block || block === editor || !range.intersectsNode(block)) return;
+      if (fullyContainedInRange(range, block) || block.tagName === "LI") {
+        block.style.setProperty(property, value);
+      }
+    });
+  }
+
   function clearInlinePropertyInRange(editor, range, property) {
     const container = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
       ? range.commonAncestorContainer
@@ -8908,6 +9124,7 @@
     }
 
     clearInlinePropertyInRange(editor, workRange, property);
+    styleSelectedBlocksInRange(editor, workRange, property, value);
 
     const targets = textNodesFullyInRange(editor, workRange);
     targets.forEach((node) => {

@@ -1,6 +1,6 @@
 {
   "name": "mindset",
-  "version": "1.1.8",
+  "version": "1.1.16",
   "description": "Application locale de prise de notes personnalisee.",
   "main": "electron/main.js",
   "scripts": {
