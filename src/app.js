@@ -705,36 +705,75 @@
     return (Number(value) || 0) * 72 / 2.54;
   }
 
+  const pdfWinAnsiCodes = new Map([
+    [0x20AC, 0x80], [0x201A, 0x82], [0x0192, 0x83], [0x201E, 0x84], [0x2026, 0x85],
+    [0x2020, 0x86], [0x2021, 0x87], [0x02C6, 0x88], [0x2030, 0x89], [0x0160, 0x8A],
+    [0x2039, 0x8B], [0x0152, 0x8C], [0x017D, 0x8E], [0x2018, 0x91], [0x2019, 0x92],
+    [0x201C, 0x93], [0x201D, 0x94], [0x2022, 0x95], [0x2013, 0x96], [0x2014, 0x97],
+    [0x02DC, 0x98], [0x2122, 0x99], [0x0161, 0x9A], [0x203A, 0x9B], [0x0153, 0x9C],
+    [0x017E, 0x9E], [0x0178, 0x9F],
+  ]);
+
+  const pdfSymbolMap = {
+    "\u2192": "->", "\u21d2": "=>", "\u2190": "<-", "\u21d0": "<=", "\u2194": "<->",
+    "\u2713": "v", "\u2714": "v", "\u2717": "x", "\u2718": "x",
+    "\u2605": "*", "\u2606": "*", "\u25aa": "-", "\u25a0": "-", "\u25a1": "[]",
+    "\u25b8": ">", "\u25b6": ">", "\u25cb": "o", "\u25cf": "*",
+    "\u25b3": "^", "\u25b2": "^", "\u2212": "-", "\u00A0": " ",
+  };
+
+  const pdfCyrillicMap = {
+    "\u0430": "a", "\u0431": "b", "\u0432": "v", "\u0433": "g", "\u0434": "d", "\u0435": "e", "\u0451": "e",
+    "\u0436": "zh", "\u0437": "z", "\u0438": "i", "\u0439": "i", "\u043a": "k", "\u043b": "l", "\u043c": "m",
+    "\u043d": "n", "\u043e": "o", "\u043f": "p", "\u0440": "r", "\u0441": "s", "\u0442": "t", "\u0443": "u",
+    "\u0444": "f", "\u0445": "kh", "\u0446": "ts", "\u0447": "ch", "\u0448": "sh", "\u0449": "shch",
+    "\u044a": "", "\u044b": "y", "\u044c": "", "\u044d": "e", "\u044e": "yu", "\u044f": "ya",
+  };
+
+  const pdfGreekMap = {
+    "\u03b1": "a", "\u03b2": "b", "\u03b3": "g", "\u03b4": "d", "\u03b5": "e", "\u03b6": "z", "\u03b7": "e",
+    "\u03b8": "th", "\u03b9": "i", "\u03ba": "k", "\u03bb": "l", "\u03bc": "m", "\u03bd": "n", "\u03be": "x",
+    "\u03bf": "o", "\u03c0": "p", "\u03c1": "r", "\u03c3": "s", "\u03c2": "s", "\u03c4": "t", "\u03c5": "y",
+    "\u03c6": "ph", "\u03c7": "ch", "\u03c8": "ps", "\u03c9": "o",
+  };
+
+  function pdfTransliterateChar(char) {
+    const code = char.codePointAt(0);
+    if ((code >= 0x20 && code <= 0x7E) || (code >= 0xA0 && code <= 0xFF)) return char;
+    if (pdfWinAnsiCodes.has(code)) return char;
+    if (pdfSymbolMap[char] !== undefined) return pdfSymbolMap[char];
+    const lower = char.toLowerCase();
+    const romanized = pdfCyrillicMap[lower] ?? pdfGreekMap[lower];
+    if (romanized !== undefined) {
+      return char === lower ? romanized : romanized.charAt(0).toUpperCase() + romanized.slice(1);
+    }
+    const decomposed = char.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+    if (decomposed !== char && [...decomposed].every((part) => {
+      const partCode = part.codePointAt(0);
+      return (partCode >= 0x20 && partCode <= 0x7E) || (partCode >= 0xA0 && partCode <= 0xFF);
+    })) {
+      return decomposed;
+    }
+    if (/\p{Extended_Pictographic}/u.test(char)) return "";
+    return "?";
+  }
+
   function pdfPlainText(value) {
-    const replacements = {
-      "\u0153": "oe",
-      "\u0152": "OE",
-      "\u00e6": "ae",
-      "\u00c6": "AE",
-      "\u00df": "ss",
-      "\u2013": "-",
-      "\u2014": "-",
-      "\u2018": "'",
-      "\u2019": "'",
-      "\u201c": '"',
-      "\u201d": '"',
-      "\u2026": "...",
-      "\u00a0": " ",
-    };
-    return String(value || "")
-      .replace(/[\u0153\u0152\u00e6\u00c6\u00df\u2013\u2014\u2018\u2019\u201c\u201d\u2026\u00a0]/g, (char) => replacements[char] || " ")
+    return [...String(value || "")
       .replace(/\t/g, "    ")
-      .replace(/[\r\n]/g, " ")
-      .replace(/[^\x20-\x7E\u00A0-\u00FF]/g, (char) => (
-        char.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, "")
-      ));
+      .replace(/[\r\n]/g, " ")]
+      .map(pdfTransliterateChar)
+      .join("");
   }
 
   function pdfTextHex(value) {
     return `<${[...pdfPlainText(value)]
-      .map((char) => char.charCodeAt(0))
+      .map((char) => {
+        const code = char.charCodeAt(0);
+        if (code <= 0x7E || (code >= 0xA0 && code <= 0xFF)) return code;
+        return pdfWinAnsiCodes.get(code) ?? 0x3F;
+      })
       .filter((code) => code === 0x09 || code === 0x0a || code === 0x0d || code >= 0x20)
-      .map((code) => (code <= 0x7E || (code >= 0xA0 && code <= 0xFF) ? code : 0x3F))
       .map((code) => code.toString(16).padStart(2, "0").toUpperCase())
       .join("")}>`;
   }
@@ -761,47 +800,80 @@
     return clone.textContent || "";
   }
 
-  function printableTextLinesFromRoot(root) {
-    const blocks = [...root.querySelectorAll("h1, h2, h3, h4, h5, h6, p, li, blockquote, pre")];
-    if (!blocks.length) {
-      const text = nodeTextWithBreaks(root).replace(/\r/g, "");
-      const lines = text.split("\n").map((line) => line.replace(/\s+$/g, ""));
-      return lines.length ? lines : [""];
+  const printableBlockSelector = "p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, ul, ol, table, div";
+
+  function printableListItemPrefix(li) {
+    if (li.closest(".check-list")) return li.dataset.checked === "true" ? "[x] " : "[ ] ";
+    if (li.closest(".arrow-list")) return "-> ";
+    if (li.closest(".circle-list")) return "o ";
+    if (li.closest(".triangle-list")) return "^ ";
+    if (li.closest(".square-list")) return "[] ";
+    return "- ";
+  }
+
+  function pushPrintableBlockLines(block, lines, prefix = "") {
+    const text = nodeTextWithBreaks(block).replace(/\r/g, "");
+    const blockLines = text.split("\n");
+    if (!blockLines.some((line) => line.trim())) {
+      lines.push("");
+      return;
     }
-    const lines = [];
-    blocks.forEach((block) => {
-      let prefix = "";
-      if (block.matches("li")) {
-        if (block.closest(".check-list")) {
-          prefix = block.dataset.checked === "true" ? "[x] " : "[ ] ";
-        } else if (block.closest(".arrow-list")) {
-          prefix = "-> ";
-        } else if (block.closest(".circle-list")) {
-          prefix = "o ";
-        } else if (block.closest(".triangle-list")) {
-          prefix = "^ ";
-        } else if (block.closest(".square-list")) {
-          prefix = "[] ";
-        } else {
-          prefix = "- ";
-        }
-      }
-      const text = nodeTextWithBreaks(block).replace(/\r/g, "");
-      const blockLines = text.split("\n");
-      if (!blockLines.some((line) => line.trim())) {
+    blockLines.forEach((line, index) => {
+      const cleaned = line.replace(/\s+/g, " ").trim();
+      if (!cleaned && index > 0) {
         lines.push("");
         return;
       }
-      blockLines.forEach((line, index) => {
-        const cleaned = line.replace(/\s+/g, " ").trim();
-        if (!cleaned && index > 0) {
-          lines.push("");
-          return;
-        }
-        if (cleaned) lines.push(`${index === 0 ? prefix : ""}${cleaned}`);
-      });
-      if (block.matches("h1, h2, h3")) lines.push("");
+      if (cleaned) lines.push(`${index === 0 ? prefix : ""}${cleaned}`);
     });
+  }
+
+  function collectPrintableLines(node, lines) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent.replace(/\s+/g, " ").trim();
+      if (text) lines.push(text);
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const tag = node.tagName;
+
+    if (tag === "TABLE") {
+      node.querySelectorAll("tr").forEach((row) => {
+        const cells = [...row.querySelectorAll("td, th")]
+          .map((cell) => cell.textContent.replace(/\s+/g, " ").trim())
+          .filter(Boolean);
+        if (cells.length) lines.push(cells.join(" | "));
+      });
+      return;
+    }
+
+    if (tag === "UL" || tag === "OL") {
+      [...node.children].forEach((child) => collectPrintableLines(child, lines));
+      return;
+    }
+
+    if (tag === "LI") {
+      const clone = node.cloneNode(true);
+      clone.querySelectorAll("ul, ol, table").forEach((nested) => nested.remove());
+      pushPrintableBlockLines(clone, lines, printableListItemPrefix(node));
+      [...node.children]
+        .filter((child) => ["UL", "OL", "TABLE"].includes(child.tagName))
+        .forEach((child) => collectPrintableLines(child, lines));
+      return;
+    }
+
+    const containsBlocks = !!node.querySelector(printableBlockSelector);
+    if (!containsBlocks) {
+      pushPrintableBlockLines(node, lines);
+      if (/^H[1-3]$/.test(tag)) lines.push("");
+      return;
+    }
+    [...node.childNodes].forEach((child) => collectPrintableLines(child, lines));
+  }
+
+  function printableTextLinesFromRoot(root) {
+    const lines = [];
+    [...root.childNodes].forEach((child) => collectPrintableLines(child, lines));
     return lines.length ? lines : [""];
   }
 
@@ -6150,8 +6222,10 @@
   function needsPagedLayoutRefresh(editor) {
     const sheets = [...(editor?.querySelectorAll?.(".page-sheet") || [])];
     if (!sheets.length) return true;
-    return sheets.some((sheet) => sheet.scrollHeight > sheet.clientHeight + 2)
-      || sheets.slice(1).some((sheet) => !sheetHasUserStructure(sheet));
+    return sheets.some((sheet) => {
+      if (sheet.classList.contains("is-overflow-accepted")) return sheet.children.length > 1;
+      return sheet.scrollHeight > sheet.clientHeight + 2;
+    }) || sheets.slice(1).some((sheet) => !sheetHasUserStructure(sheet));
   }
 
   function sheetOverflows(sheet) {
@@ -6257,6 +6331,7 @@
       clone.removeAttribute("contenteditable");
       clone.removeAttribute("spellcheck");
       clone.removeAttribute("tabindex");
+      clone.classList.remove("is-overflow-accepted");
     }
     removeEditorSelectionMarkers(clone);
     return clone;
@@ -6763,6 +6838,10 @@
       paragraph.appendChild(document.createElement("br"));
       sheets[0].appendChild(paragraph);
     }
+
+    sheets.forEach((sheet) => {
+      sheet.classList.toggle("is-overflow-accepted", sheet.children.length === 1 && sheetOverflows(sheet));
+    });
 
     updatePagedLayout(page);
     if (options.restoreSelection !== false) restoreEditorSelectionOffsets(editor, selectionOffsets);

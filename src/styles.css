@@ -1760,6 +1760,18 @@ body.is-graph-dragging {
   outline: none;
 }
 
+.editor-page.is-page-mode .page-sheet img {
+  max-width: 100%;
+  max-height: calc(var(--page-height) - var(--page-margin-top) - var(--page-margin-bottom) - 6px);
+  height: auto;
+  object-fit: contain;
+}
+
+.page-sheet.is-overflow-accepted {
+  height: auto;
+  max-height: none;
+}
+
 .page-sheet:focus-within {
   box-shadow:
     0 0 0 1px var(--selection-border),
