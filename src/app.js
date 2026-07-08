@@ -116,17 +116,31 @@
     { id: "left", label: "Branches vers la gauche", icon: "arrowLeft" },
   ];
 
+  const inter = "Inter, ui-sans-serif, system-ui, sans-serif";
   const headingDefaults = {
-    normal: { name: "Normal", size: "17px", color: "#17201c", weight: "400", fontFamily: "Georgia, Times New Roman, serif", bold: false, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8" },
-    h1: { name: "Titre 1", size: "30px", color: "#17201c", weight: "820", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", bold: true, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8" },
-    h2: { name: "Titre 2", size: "24px", color: "#17201c", weight: "780", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", bold: true, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8" },
-    h3: { name: "Titre 3", size: "19px", color: "#17201c", weight: "740", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", bold: true, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8" },
-    h4: { name: "Titre 4", size: "18px", color: "#17201c", weight: "720", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", bold: true, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8" },
-    h5: { name: "Titre 5", size: "17px", color: "#17201c", weight: "700", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", bold: true, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8" },
-    h6: { name: "Titre 6", size: "16px", color: "#17201c", weight: "680", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", bold: true, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8" },
+    normal: { name: "Normal", size: "17px", color: "#17201c", weight: "400", fontFamily: "Georgia, Times New Roman, serif", bold: false, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8", foldable: false },
+    h1: { name: "Titre 1", size: "30px", color: "#17201c", weight: "820", fontFamily: inter, bold: true, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8", foldable: true },
+    h2: { name: "Titre 2", size: "24px", color: "#17201c", weight: "780", fontFamily: inter, bold: true, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8", foldable: true },
+    h3: { name: "Titre 3", size: "19px", color: "#17201c", weight: "740", fontFamily: inter, bold: true, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8", foldable: true },
+    h4: { name: "Titre 4", size: "18px", color: "#17201c", weight: "720", fontFamily: inter, bold: true, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8", foldable: true },
+    h5: { name: "Titre 5", size: "17px", color: "#17201c", weight: "700", fontFamily: inter, bold: true, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8", foldable: true },
+    h6: { name: "Titre 6", size: "16px", color: "#17201c", weight: "680", fontFamily: inter, bold: true, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8", foldable: true },
+    ps1: { name: "Style 7", size: "17px", color: "#17201c", weight: "600", fontFamily: inter, bold: false, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8", foldable: false },
+    ps2: { name: "Style 8", size: "17px", color: "#17201c", weight: "600", fontFamily: inter, bold: false, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8", foldable: false },
+    ps3: { name: "Style 9", size: "17px", color: "#17201c", weight: "600", fontFamily: inter, bold: false, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8", foldable: false },
+    ps4: { name: "Style 10", size: "17px", color: "#17201c", weight: "600", fontFamily: inter, bold: false, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8", foldable: false },
   };
 
   const headingLevels = ["h1", "h2", "h3", "h4", "h5", "h6"];
+  const presetLevels = ["ps1", "ps2", "ps3", "ps4"];
+  const allStyleLevels = [...headingLevels, ...presetLevels];
+
+  // Un style est repliable (comportement "titre") seulement si c'est un h1-h6 avec foldable != false.
+  function isFoldableStyle(level, settings = state.settings) {
+    if (!headingLevels.includes(level)) return false;
+    const preset = { ...headingDefaults[level], ...(settings?.headingPresets?.[level] || {}) };
+    return preset.foldable !== false;
+  }
 
   function headingStyleVars(key, preset) {
     return {
@@ -143,6 +157,19 @@
   function activeHeadingLevels() {
     const presets = state.settings?.headingPresets || {};
     return headingLevels.filter((level) => presets[level]);
+  }
+
+  function activeStyleLevels() {
+    const presets = state.settings?.headingPresets || {};
+    return allStyleLevels.filter((level) => presets[level]);
+  }
+
+  // Balise et classe DOM d'un style : h1-h6 replaibles gardent leur balise ;
+  // presets et titres non-replaibles deviennent un <p class="ms-style-X">.
+  function styleTagInfo(level) {
+    if (isFoldableStyle(level)) return { tag: level, className: "" };
+    if (level === "normal") return { tag: "p", className: "" };
+    return { tag: "p", className: `ms-style-${level}` };
   }
 
   const fontOptions = [
@@ -182,37 +209,31 @@
   const pageCustomMarginIds = ["custom1", "custom2"];
   const pageMarginOrder = ["compact", "normal", "wide", ...pageCustomMarginIds];
 
-  const baseColorPresets = [
-    { label: "Rouge", value: "#d94b4b" },
-    { label: "Orange", value: "#f08a24" },
-    { label: "Rose", value: "#d9578a" },
-    { label: "Bleu clair", value: "#55a7e5" },
-    { label: "Vert", value: "#4ca66a" },
+  // Palettes par defaut, editables dans les parametres. 12 couleurs chacune (2 rangees de 6).
+  const defaultTextPalette = [
+    "#000000", "#ffffff", "#d94b4b", "#f08a24", "#4ca66a", "#55a7e5",
+    "#c62828", "#1b5e20", "#d9a800", "#1a4f8b", "#6a3ab2", "#0e7c7b",
   ];
 
-  const textColorPresets = [
-    { label: "Blanc", value: "#ffffff" },
-    { label: "Noir", value: "#000000" },
-    ...baseColorPresets,
+  const defaultHighlightPalette = [
+    "#fff0a8", "#ffd6d6", "#ffe0b3", "#d6f5d6", "#d6e9ff", "#ffd6f0",
+    "#fdf6cf", "#ffe3e3", "#ffeed8", "#e0f5e8", "#def0ff", "#ffe2ef",
   ];
 
-  const paleHighlightPresets = [
-    { label: "Jaune pale", value: "#fdf6cf" },
-    { label: "Rouge pale", value: "#ffe3e3" },
-    { label: "Orange pale", value: "#ffeed8" },
-    { label: "Rose pale", value: "#ffe2ef" },
-    { label: "Bleu pale", value: "#def0ff" },
-    { label: "Vert pale", value: "#e0f5e8" },
-  ];
+  const recentColorSlotCount = 6;
 
-  const strongTextPresets = [
-    { label: "Rouge puissant", value: "#c62828" },
-    { label: "Vert fonce", value: "#1b5e20" },
-    { label: "Jaune visible", value: "#d9a800" },
-    { label: "Bleu marine", value: "#1a4f8b" },
-    { label: "Violet profond", value: "#6a3ab2" },
-    { label: "Turquoise fonce", value: "#0e7c7b" },
-  ];
+  function normalizeColorPalette(colors, fallback) {
+    const source = Array.isArray(colors) ? colors : [];
+    return fallback.map((def, index) => cleanColor(source[index], def));
+  }
+
+  function textColorPalette() {
+    return normalizeColorPalette(state.settings?.textColorPalette, defaultTextPalette);
+  }
+
+  function highlightColorPalette() {
+    return normalizeColorPalette(state.settings?.highlightColorPalette, defaultHighlightPalette);
+  }
 
   const emojiChoices = ["⭐", "📌", "💡", "✅", "🔥", "🧠", "📘", "🗂️"];
 
@@ -274,8 +295,9 @@
     return pageCustomMarginIds.reduce((acc, id) => {
       const preset = value?.[id] || {};
       const fallback = pageCustomMarginDefaults[id];
+      const rawLabel = String(preset.label || "").trim().slice(0, 24);
       acc[id] = {
-        label: fallback.label,
+        label: rawLabel || fallback.label,
         margins: cleanMarginSet(preset.margins, fallback.margins),
       };
       return acc;
@@ -616,7 +638,7 @@
 
   function printableHeadingCssVariables() {
     const headings = state.settings?.headingPresets || headingDefaults;
-    return ["normal", ...headingLevels].map((key) => {
+    return ["normal", ...allStyleLevels].map((key) => {
       const preset = { ...headingDefaults[key], ...(headings[key] || {}) };
       const color = cleanColor(preset.color, headingDefaults[key].color);
       const styleVars = headingStyleVars(key, preset);
@@ -718,6 +740,7 @@
     .note-editor h4{font-family:var(--h4-font);font-size:var(--h4-size);font-weight:var(--h4-weight);color:var(--h4-color);font-style:var(--h4-style,normal);text-decoration:var(--h4-decoration,none);background:var(--h4-highlight,transparent);}
     .note-editor h5{font-family:var(--h5-font);font-size:var(--h5-size);font-weight:var(--h5-weight);color:var(--h5-color);font-style:var(--h5-style,normal);text-decoration:var(--h5-decoration,none);background:var(--h5-highlight,transparent);}
     .note-editor h6{font-family:var(--h6-font);font-size:var(--h6-size);font-weight:var(--h6-weight);color:var(--h6-color);font-style:var(--h6-style,normal);text-decoration:var(--h6-decoration,none);background:var(--h6-highlight,transparent);}
+    ${["h1", "h2", "h3", "h4", "h5", "h6", "ps1", "ps2", "ps3", "ps4"].map((k) => `.note-editor .ms-style-${k}{font-family:var(--${k}-font);font-size:var(--${k}-size);font-weight:var(--${k}-weight);color:var(--${k}-color);font-style:var(--${k}-style,normal);text-decoration:var(--${k}-decoration,none);background:var(--${k}-highlight,transparent);}`).join("")}
     .note-editor p{margin:.55em 0;}
     .note-editor ul,.note-editor ol{margin:.65em 0;padding-left:1.6em;}
     .note-editor .dash-list,.note-editor .arrow-list,.note-editor .circle-list,.note-editor .check-list,.note-editor .triangle-list,.note-editor .square-list{list-style:none;padding-left:0;}
@@ -1293,7 +1316,7 @@
 
   function normalizeRecentColorSlots(colors) {
     const unique = normalizeRecentColors(colors);
-    return [0, 1, 2].map((index) => unique[index] || "");
+    return Array.from({ length: recentColorSlotCount }, (_, index) => unique[index] || "");
   }
 
   function defaultTreeGuideColor(theme) {
@@ -1336,8 +1359,10 @@
       lastHighlightColor: cleanColor(previousSettings.lastHighlightColor, "#fff0a8"),
       recentTextColors: normalizeRecentColorSlots(previousSettings.recentTextColors),
       recentHighlightColors: normalizeRecentColorSlots(previousSettings.recentHighlightColors),
-      recentTextColorSlot: Math.min(Math.max(Number(previousSettings.recentTextColorSlot) || 0, 0), 2),
-      recentHighlightColorSlot: Math.min(Math.max(Number(previousSettings.recentHighlightColorSlot) || 0, 0), 2),
+      recentTextColorSlot: Math.min(Math.max(Number(previousSettings.recentTextColorSlot) || 0, 0), recentColorSlotCount - 1),
+      recentHighlightColorSlot: Math.min(Math.max(Number(previousSettings.recentHighlightColorSlot) || 0, 0), recentColorSlotCount - 1),
+      textColorPalette: normalizeColorPalette(previousSettings.textColorPalette, defaultTextPalette),
+      highlightColorPalette: normalizeColorPalette(previousSettings.highlightColorPalette, defaultHighlightPalette),
       graphDirection: normalizeGraphDirection(previousSettings.graphDirection),
       graphZoom: clampGraphZoom(previousSettings.graphZoom || 1),
       graphPanX: clampGraphPan(previousSettings.graphPanX),
@@ -1352,7 +1377,7 @@
       localFonts: normalizeLocalFonts(previousSettings.localFonts),
       headingPresets: (() => {
         const presets = { normal: { ...headingDefaults.normal, ...(previousHeadings.normal || {}) } };
-        headingLevels.forEach((level) => {
+        allStyleLevels.forEach((level) => {
           if (["h1", "h2", "h3"].includes(level) || previousHeadings[level]) {
             presets[level] = { ...headingDefaults[level], ...(previousHeadings[level] || {}) };
           }
@@ -1393,7 +1418,7 @@
     document.documentElement.style.setProperty("--tree-guide-color", treeGuide);
     document.documentElement.style.setProperty("--todo-color", todoColor);
     document.documentElement.style.setProperty("--nav", `${Math.min(Math.max(Number(settings.navWidth) || 282, 218), 430)}px`);
-    ["normal", ...headingLevels].forEach((key) => {
+    ["normal", ...allStyleLevels].forEach((key) => {
       const preset = headings[key] ? { ...headingDefaults[key], ...(headings[key] || {}) } : headingDefaults[key];
       if (!preset) return;
       document.documentElement.style.setProperty(`--${key}-size`, preset.size);
@@ -3714,37 +3739,31 @@
 
   function renderColorTool(kind, label, value) {
     const recentKey = kind === "highlight" ? "recentHighlightColors" : "recentTextColors";
-    const mainPresets = kind === "highlight" ? baseColorPresets : textColorPresets;
-    const extraPresets = kind === "highlight" ? paleHighlightPresets : strongTextPresets;
+    const palette = kind === "highlight" ? highlightColorPalette() : textColorPalette();
     const current = cleanColor(value, kind === "highlight" ? "#fff0a8" : "#000000");
-    const presetValues = new Set([...mainPresets, ...extraPresets].map((color) => color.value));
-    const recents = normalizeRecentColorSlots(state.settings?.[recentKey]).map((color) => presetValues.has(color) ? "" : color);
+    const paletteValues = new Set(palette);
+    const recents = normalizeRecentColorSlots(state.settings?.[recentKey]).map((color) => paletteValues.has(color) ? "" : color);
     const renderSwatch = (color) => `
       <button
-        class="quick-color ${color.value === current ? "is-active" : ""} ${color.recent ? "is-recent" : ""} ${color.empty ? "is-empty" : ""} ${color.value === "#ffffff" || color.pale ? "is-light" : ""}"
+        class="quick-color ${color.value === current ? "is-active" : ""} ${color.recent ? "is-recent" : ""} ${color.empty ? "is-empty" : ""} ${isLightColor(color.value) ? "is-light" : ""}"
         style="--quick-color:${color.value}"
         data-color-swatch="${kind}"
         data-color-value="${color.value}"
         ${color.empty ? "disabled" : ""}
-        title="${escapeHtml(color.label)}"
-        aria-label="${escapeHtml(color.label)}"
+        title="${escapeHtml(color.value || "vide")}"
+        aria-label="${escapeHtml(color.value || "vide")}"
       ></button>
     `;
     const rows = [
-      mainPresets.map((color) => ({ ...color, recent: false })),
-      extraPresets.map((color) => ({ ...color, recent: false, pale: kind === "highlight" })),
-      recents.map((color, index) => ({
-        label: color ? `Memoire ${index + 1} ${color}` : `Memoire ${index + 1} vide`,
-        value: color,
-        recent: true,
-        empty: !color,
-      })),
+      palette.slice(0, 6).map((value) => ({ value, recent: false })),
+      palette.slice(6, 12).map((value) => ({ value, recent: false })),
+      recents.map((color) => ({ value: color, recent: true, empty: !color })),
     ];
 
     return `
       <div class="color-tool" data-color-tool="${kind}">
         <div class="color-tool-main">
-          <input class="toolbar-color" type="color" value="${escapeHtml(current)}" data-color-input="${kind}" title="${escapeHtml(label)}" />
+          <input class="toolbar-color" type="color" value="${escapeHtml(current)}" data-color-input="${kind}" data-color-context title="${escapeHtml(label)} - clic droit : memoriser la couleur affichee" />
           <button class="format-button color-apply" data-apply-color="${kind}" title="Appliquer ${escapeHtml(label)}" aria-label="Appliquer ${escapeHtml(label)}">${icon("check")}</button>
           ${kind === "highlight" ? `<button class="format-button color-clear" data-clear-highlight title="Enlever le surlignage" aria-label="Enlever le surlignage">${icon("eraser")}</button>` : ""}
         </div>
@@ -3753,6 +3772,16 @@
         </div>
       </div>
     `;
+  }
+
+  function isLightColor(hex) {
+    const clean = cleanColor(hex, "");
+    if (!clean) return false;
+    const n = Number.parseInt(clean.slice(1), 16);
+    const r = (n >> 16) & 255;
+    const g = (n >> 8) & 255;
+    const b = n & 255;
+    return (0.299 * r + 0.587 * g + 0.114 * b) > 186;
   }
 
   function renderMainContent(box) {
@@ -3768,6 +3797,8 @@
     const pageMode = viewMode === "pages";
     const splitMode = viewMode === "split";
     const pageZoom = clampPageZoom(state.settings?.pageZoom || 1);
+    const settings = state.settings;
+    const pageSetup = normalizePageSetup(settings?.pageSetup, settings?.pageMarginPreset, settings);
     const marginLabel = pageMarginLabel(state.settings);
     const pageFlowMode = normalizePageFlowMode(state.settings?.pageFlowMode);
     const pageFlowLabel = pageFlowMode === "continuous" ? "Pages continues" : "Pages independantes";
@@ -3783,12 +3814,12 @@
         <div class="editor-toolbar" aria-label="Barre de mise en forme">
           <div class="toolbar-row toolbar-main-row">
           <div class="toolbar-group">
-            <select class="toolbar-select" data-format-block title="Style de titre">
+            <select class="toolbar-select" data-format-block title="Style de titre / preset">
               <option value="p">${escapeHtml(headingName("normal"))}</option>
-              ${activeHeadingLevels().map((level) => `<option value="${level}">${escapeHtml(headingName(level))}</option>`).join("")}
+              ${activeStyleLevels().map((level) => `<option value="${level}">${escapeHtml(headingName(level))}${isFoldableStyle(level) ? "" : " ·"}</option>`).join("")}
             </select>
             <select class="toolbar-select font-select" data-font-family title="Police">
-              ${fonts.map((font, index) => `<option value="${escapeHtml(font.value)}" ${index === 0 ? "selected" : ""}>${escapeHtml(font.label)}</option>`).join("")}
+              ${fonts.map((font, index) => `<option value="${escapeHtml(font.value)}" style="font-family:${escapeHtml(font.value)}" ${index === 0 ? "selected" : ""}>${escapeHtml(font.label)}</option>`).join("")}
             </select>
             <div class="combo-field" data-combo="size">
               <input class="toolbar-select size-input" data-font-size type="number" min="8" max="120" step="1" value="17" title="Taille de police (8 a 120)" aria-label="Taille de police" />
@@ -3805,15 +3836,15 @@
               </div>
             </div>
           </div>
-          <div class="toolbar-group color-toolbar-group">
-            ${renderColorTool("text", "Couleur du texte", state.settings?.lastTextColor || "#000000")}
-            ${renderColorTool("highlight", "Surlignage", state.settings?.lastHighlightColor || "#fff0a8")}
-          </div>
           <div class="toolbar-group">
             <button class="format-button" data-editor-cmd="bold" title="Gras"><strong>B</strong></button>
             <button class="format-button" data-editor-cmd="italic" title="Italique"><em>I</em></button>
             <button class="format-button" data-editor-cmd="underline" title="Souligné"><u>U</u></button>
             <button class="format-button" data-editor-cmd="strikeThrough" title="Barré"><s>S</s></button>
+          </div>
+          <div class="toolbar-group color-toolbar-group">
+            ${renderColorTool("text", "Couleur du texte", state.settings?.lastTextColor || "#000000")}
+            ${renderColorTool("highlight", "Surlignage", state.settings?.lastHighlightColor || "#fff0a8")}
           </div>
           <div class="toolbar-group">
             <button class="format-button" data-editor-cmd="justifyLeft" title="Aligner à gauche">${icon("alignLeft")}</button>
@@ -3847,7 +3878,16 @@
           <div class="toolbar-row toolbar-secondary-row">
           <div class="toolbar-group">
             <button class="format-button ${pageMode ? "is-active" : ""}" data-action="toggle-editor-view" data-tooltip="${pageMode ? "Mode ecriture simple" : "Mode feuilles"}" aria-label="${pageMode ? "Mode ecriture simple" : "Mode feuilles"}">${icon("bookOpen")}</button>
-            ${pageMode ? `<button class="format-button" data-action="cycle-page-margins" data-page-layout-button data-tooltip="${escapeHtml(marginLabel)} - clic droit : personnaliser" aria-label="${escapeHtml(marginLabel)}">${icon("ruler")}</button>` : ""}
+            ${pageMode ? `
+              <div class="toolbar-menu" data-toolbar-menu>
+                <button class="format-button" type="button" data-menu-trigger data-page-layout-button data-tooltip="${escapeHtml(marginLabel)}" aria-label="Marges">${icon("ruler")}</button>
+                <div class="toolbar-menu-panel margin-panel">
+                  <span class="menu-panel-label">Marges</span>
+                  ${pageMarginOrder.map((id) => `<button class="menu-panel-item ${marginPresetForSetup(pageSetup, settings) === id ? "is-active" : ""}" type="button" data-page-margin-preset="${id}">${escapeHtml(pageMarginPresetLabel(id, settings))}</button>`).join("")}
+                  <span class="menu-panel-sep"></span>
+                  <button class="menu-panel-item" type="button" data-action="open-page-margins-settings">Personnaliser les marges…</button>
+                </div>
+              </div>` : ""}
             ${pageMode ? `<button class="format-button ${pageFlowMode === "continuous" ? "is-active" : ""}" data-action="toggle-page-flow-mode" data-tooltip="${escapeHtml(pageFlowLabel)}" aria-label="${escapeHtml(pageFlowLabel)}">${icon(pageFlowMode === "continuous" ? "linkedPages" : "splitPages")}</button>` : ""}
             ${pageMode && pageFlowMode === "independent" ? `<button class="format-button" data-action="add-independent-page" data-tooltip="Ajouter une page" aria-label="Ajouter une page">${icon("plus")}</button>` : ""}
             <button class="format-button ${splitMode ? "is-active" : ""}" data-action="toggle-editor-split-view" data-tooltip="${splitMode ? "Mode ecriture simple" : "Tableau coupe en 2"}" aria-label="${splitMode ? "Mode ecriture simple" : "Tableau coupe en 2"}">${icon("splitColumns")}</button>
@@ -4483,7 +4523,7 @@
       const fontChoices = availableFontOptions();
       const presetRows = [
         { level: "normal", min: 12, max: 32 },
-        ...activeHeadingLevels().map((level) => ({ level, min: 12, max: 64 })),
+        ...activeStyleLevels().map((level) => ({ level, min: 12, max: 64 })),
       ];
       const weightOptions = ["400", "500", "600", "650", "700", "740", "780", "820", "860"];
       const selectionColors = ["#0f6b58", "#7c5cff", "#d58f27", "#bf5b7a", "#3f7fbf", "#6f8f3a"];
@@ -4535,6 +4575,16 @@
                 <div class="color-swatches">
                   ${todoColors.map((color) => `<button class="color-swatch ${color === todoColor ? "is-active" : ""} ${color === "#ffffff" ? "is-light" : ""}" style="--swatch:${color}" data-todo-swatch="${color}" aria-label="Couleur ${color}"></button>`).join("")}
                 </div>
+                <h3>Palette du texte (12 couleurs par defaut)</h3>
+                <p class="settings-hint">Ces 12 couleurs apparaissent dans le sélecteur de couleur du texte du mini Word (2 rangées de 6). Clic pour modifier.</p>
+                <div class="palette-editor">
+                  ${textColorPalette().map((color, index) => `<input class="palette-color" type="color" value="${escapeHtml(color)}" data-palette="text" data-palette-index="${index}" aria-label="Couleur texte ${index + 1}" />`).join("")}
+                </div>
+                <h3>Palette de surlignage (12 couleurs par defaut)</h3>
+                <p class="settings-hint">Ces 12 couleurs apparaissent dans le sélecteur de surlignage (2 rangées de 6).</p>
+                <div class="palette-editor">
+                  ${highlightColorPalette().map((color, index) => `<input class="palette-color" type="color" value="${escapeHtml(color)}" data-palette="highlight" data-palette-index="${index}" aria-label="Couleur surlignage ${index + 1}" />`).join("")}
+                </div>
               </section>`;
       sectionsHtml["settings-page"] = `
               <section class="settings-section" id="settings-page" data-settings-section data-page-setup-section>
@@ -4556,6 +4606,13 @@
                 <div class="page-size-summary">Feuille active : ${escapeHtml(pageSizePreset(pageSetup.sizeId).label)} ${pageSetup.orientation === "landscape" ? "paysage" : "portrait"} - ${pageSizeSummary(pageSetup)}</div>
                 <div class="margin-preset-row">
                   ${pageMarginOrder.map((id) => `<button class="ghost-button tiny-button ${activeMarginPreset === id ? "is-active" : ""}" type="button" data-page-margin-preset="${id}">${escapeHtml(pageMarginPresetLabel(id, settings))}</button>`).join("")}
+                </div>
+                <div class="custom-margin-names">
+                  ${pageCustomMarginIds.map((id) => `
+                    <label class="modal-label compact">Nom ${escapeHtml(pageMarginPresetLabel(id, settings))}
+                      <input class="modal-field compact-field" type="text" maxlength="24" value="${escapeHtml(pageMarginPresetLabel(id, settings))}" data-margin-preset-name="${id}" aria-label="Renommer la marge personnalisee" />
+                    </label>
+                  `).join("")}
                 </div>
                 <div class="margin-input-grid">
                   ${[
@@ -4597,13 +4654,17 @@
                         <button type="button" class="heading-style-btn ${preset.underline ? "is-active" : ""}" data-heading-toggle="underline" data-heading-level="${level}" title="Souligne" aria-label="Souligne ${escapeHtml(rowName)}"><u>S</u></button>
                         <button type="button" class="heading-style-btn ${preset.highlight ? "is-active" : ""}" data-heading-toggle="highlight" data-heading-level="${level}" title="Surligne" aria-label="Surligne ${escapeHtml(rowName)}" style="--hl:${escapeHtml(cleanColor(preset.highlightColor, "#fff0a8"))}"><span class="hl-swatch">H</span></button>
                         <input class="heading-hl-color ${preset.highlight ? "" : "is-hidden"}" type="color" value="${escapeHtml(cleanColor(preset.highlightColor, "#fff0a8"))}" data-heading-highlight-color="${level}" title="Couleur de surlignage" aria-label="Couleur de surlignage ${escapeHtml(rowName)}" />
+                        ${level === "normal" ? "" : (headingLevels.includes(level)
+                          ? `<button type="button" class="heading-style-btn heading-fold-btn ${preset.foldable !== false ? "is-active" : ""}" data-heading-toggle="foldable" data-heading-level="${level}" data-tooltip="${preset.foldable !== false ? "Titre repliable (clic : preset simple)" : "Preset simple (clic : titre repliable)"}" aria-label="Repliable ${escapeHtml(rowName)}">${icon("collapse")}</button>`
+                          : `<span class="preset-badge" title="Preset simple : applique le style sans repli">preset</span>`)}
                       </div>
                     </div>
                   `;
                 }).join("")}
-                ${activeHeadingLevels().length < headingLevels.length
-                  ? `<button class="ghost-button" type="button" data-add-heading>${icon("plus")} Ajouter un titre (${activeHeadingLevels().length}/${headingLevels.length})</button>`
-                  : `<p class="settings-hint">Maximum de ${headingLevels.length} titres atteint (limite des niveaux de titres HTML).</p>`}
+                ${activeStyleLevels().length < allStyleLevels.length
+                  ? `<button class="ghost-button" type="button" data-add-heading>${icon("plus")} Ajouter un titre / preset (${activeStyleLevels().length}/${allStyleLevels.length})</button>`
+                  : `<p class="settings-hint">Maximum de ${allStyleLevels.length} styles atteint.</p>`}
+                <p class="settings-hint">L'icône de repli active le comportement « titre » (repliable). Sans elle, le style s'applique simplement au texte (preset). Les styles 7 à 10 sont toujours des presets.</p>
               </section>`;
       sectionsHtml["settings-stats"] = `
               <section class="settings-section" id="settings-stats" data-settings-section>
@@ -5122,6 +5183,19 @@
       });
     });
 
+    app.querySelectorAll("[data-palette]").forEach((input) => {
+      input.addEventListener("input", () => {
+        const kind = input.dataset.palette;
+        const index = Number(input.dataset.paletteIndex);
+        const key = kind === "highlight" ? "highlightColorPalette" : "textColorPalette";
+        const fallback = kind === "highlight" ? defaultHighlightPalette : defaultTextPalette;
+        const current = normalizeColorPalette(state.settings[key], fallback);
+        current[index] = cleanColor(input.value, current[index]);
+        state.settings[key] = current;
+        saveState();
+      });
+    });
+
     const pageSize = app.querySelector("[data-page-size]");
     if (pageSize) {
       pageSize.addEventListener("change", () => {
@@ -5143,6 +5217,15 @@
         render();
       });
     }
+
+    app.querySelectorAll("[data-margin-preset-name]").forEach((input) => {
+      input.addEventListener("input", () => {
+        const id = input.dataset.marginPresetName;
+        state.settings.customPageMarginPresets = normalizePageCustomMarginPresets(state.settings.customPageMarginPresets);
+        state.settings.customPageMarginPresets[id].label = input.value.trim().slice(0, 24) || pageCustomMarginDefaults[id].label;
+        saveState();
+      });
+    });
 
     app.querySelectorAll("[data-page-margin-preset]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -5190,7 +5273,7 @@
     const addHeadingButton = app.querySelector("[data-add-heading]");
     if (addHeadingButton) {
       addHeadingButton.addEventListener("click", () => {
-        const nextLevel = headingLevels.find((level) => !state.settings.headingPresets?.[level]);
+        const nextLevel = allStyleLevels.find((level) => !state.settings.headingPresets?.[level]);
         if (!nextLevel) return;
         state.settings.headingPresets[nextLevel] = { ...headingDefaults[nextLevel] };
         saveState();
@@ -5216,8 +5299,13 @@
         const level = button.dataset.headingLevel;
         const field = button.dataset.headingToggle;
         const current = { ...headingDefaults[level], ...(state.settings.headingPresets?.[level] || {}) };
-        const next = !current[field];
+        const next = field === "foldable" ? (current.foldable === false) : !current[field];
         updateHeadingPreset(level, field, next);
+        if (field === "foldable") {
+          // Le repli change le mapping DOM (h vs p) et l'ordre du selecteur : on re-rend.
+          render();
+          return;
+        }
         button.classList.toggle("is-active", next);
         if (field === "highlight") {
           button.closest(".heading-style-toggles")?.querySelector("[data-heading-highlight-color]")?.classList.toggle("is-hidden", !next);
@@ -5799,6 +5887,11 @@
       flushActiveEditorContent();
       state.settings.pageZoom = clampPageZoom((state.settings.pageZoom || 1) * 1.12);
       saveState();
+      render();
+    }
+    if (action === "open-page-margins-settings") {
+      flushActiveEditorContent();
+      setModal({ type: "settings", section: "settings-page" });
       render();
     }
     if (action === "cycle-page-margins") {
@@ -7841,8 +7934,23 @@
       input.addEventListener("input", () => {
         const clean = setLastEditorColor(input.dataset.colorInput, input.value);
         if (clean) input.value = clean;
+        input.dataset.selectionColor = clean || "";
+        input.closest(".color-tool")?.classList.remove("is-mixed-color");
         paintColorTool(input.dataset.colorInput, clean);
         saveState();
+      });
+      input.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        const kind = input.dataset.colorInput;
+        const shown = cleanColor(input.dataset.selectionColor || input.value, "");
+        if (!shown) {
+          setToast("Aucune couleur unique a memoriser.");
+          return;
+        }
+        registerRecentColor(kind, shown);
+        saveState();
+        paintColorTool(kind, shown);
+        setToast("Couleur memorisee.");
       });
     });
 
@@ -9122,8 +9230,16 @@
   function applyHeadingFormat(editor, note, box, value) {
     rememberEditorSnapshot(note, editor);
     restoreEditorSelection(editor);
-    const tag = headingLevels.includes(value) ? `<${value}>` : "<p>";
-    document.execCommand("formatBlock", false, tag);
+    const info = value === "p" ? { tag: "p", className: "" } : styleTagInfo(value);
+    document.execCommand("formatBlock", false, `<${info.tag}>`);
+    // Applique la classe de preset (ou la retire) sur les blocs de la selection.
+    const blocks = selectedEditorBlocks(editor);
+    (blocks.length ? blocks : [currentEditableBlock(editor)]).forEach((block) => {
+      if (!block || block === editor) return;
+      allStyleLevels.forEach((level) => block.classList?.remove(`ms-style-${level}`));
+      if (info.className) block.classList.add(info.className);
+      if (block.getAttribute?.("class") === "") block.removeAttribute("class");
+    });
     prepareCollapsibleHeadings(editor, note, box);
     updateEditorToolbarState(editor);
     syncEditorContent(editor, note, box);
@@ -9137,12 +9253,26 @@
     const families = new Set();
     const sizes = new Set();
     const lineHeights = new Set();
+    const colors = new Set();
+    const highlights = new Set();
+
+    const highlightAncestorColor = (element) => {
+      let node = element;
+      while (node && node !== editor) {
+        const bg = getComputedStyle(node).backgroundColor;
+        if (bg && bg !== "transparent" && bg !== "rgba(0, 0, 0, 0)") return rgbToHex(bg);
+        node = node.parentElement;
+      }
+      return "";
+    };
 
     const collectFrom = (element) => {
       if (!element || !editor.contains(element)) return;
       const style = getComputedStyle(element);
       families.add(style.fontFamily);
       sizes.add(style.fontSize);
+      colors.add(rgbToHex(style.color));
+      highlights.add(highlightAncestorColor(element));
       const block = element.closest?.("p, h1, h2, h3, h4, h5, h6, li, blockquote, div");
       const blockStyle = block ? getComputedStyle(block) : style;
       const lineHeight = normalizeLineHeightValue(blockStyle.lineHeight, blockStyle.fontSize);
@@ -9177,11 +9307,27 @@
     }
 
     if (!families.size) return null;
+    const soleValue = (set) => (set.size === 1 ? [...set][0] : null);
     return {
       fontFamily: families.size === 1 ? [...families][0] : null,
       fontSize: sizes.size === 1 ? [...sizes][0] : null,
       lineHeight: lineHeights.size === 1 ? [...lineHeights][0] : null,
+      color: soleValue(colors),
+      highlight: soleValue(highlights),
     };
+  }
+
+  function rgbToHex(value) {
+    const raw = String(value || "").trim();
+    if (raw.startsWith("#")) return cleanColor(raw, "");
+    const match = raw.match(/rgba?\(([^)]+)\)/i);
+    if (!match) return "";
+    const parts = match[1].split(",").map((p) => Number.parseFloat(p.trim()));
+    const [r, g, b, a] = parts;
+    if (![r, g, b].every((n) => Number.isFinite(n))) return "";
+    if (a !== undefined && a === 0) return "";
+    const hex = (n) => Math.min(Math.max(Math.round(n), 0), 255).toString(16).padStart(2, "0");
+    return `#${hex(r)}${hex(g)}${hex(b)}`;
   }
 
   function normalizeLineHeightValue(lineHeight, fontSize = "") {
@@ -9249,14 +9395,37 @@
     if (fontSelect) syncFontFamilySelect(fontSelect, computed.fontFamily);
     if (sizeSelect) syncFontSizeSelect(sizeSelect, computed.fontSize);
     if (lineSpacingSelect) syncLineSpacingSelect(lineSpacingSelect, computed.lineHeight);
+    syncColorInput("text", computed.color);
+    syncColorInput("highlight", computed.highlight);
+  }
+
+  function syncColorInput(kind, computedColor) {
+    const input = app.querySelector(`[data-color-input="${kind}"]`);
+    if (!input || document.activeElement === input) return;
+    const tool = input.closest(".color-tool");
+    // computedColor === null => plusieurs couleurs (mixte) ; "" => aucune (transparent)
+    const mixed = computedColor === null;
+    const clean = cleanColor(computedColor, "");
+    tool?.classList.toggle("is-mixed-color", mixed);
+    input.dataset.selectionColor = mixed ? "" : clean;
+    if (!mixed && clean) input.value = clean;
+    paintColorTool(kind, mixed ? "" : clean);
   }
 
   function updateFormatBlockSelect(editor) {
     const select = app.querySelector("[data-format-block]");
     if (!select || !editor) return;
     const block = currentEditableBlock(editor);
-    const value = isHeadingBlock(block) ? block.tagName.toLowerCase() : "p";
-    if (select.value !== value) select.value = value;
+    let value = "p";
+    if (isHeadingBlock(block)) {
+      value = block.tagName.toLowerCase();
+    } else if (block && block !== editor) {
+      const presetClass = presetLevels.find((level) => block.classList?.contains(`ms-style-${level}`));
+      if (presetClass) value = presetClass;
+    }
+    if ([...select.options].some((option) => option.value === value) && select.value !== value) {
+      select.value = value;
+    }
   }
 
   function setLastEditorColor(kind, color) {
@@ -9275,9 +9444,9 @@
     const existing = normalizeRecentColorSlots(state.settings[recentKey] || []);
     if (!existing.includes(clean)) {
       const emptyIndex = existing.findIndex((item) => !item);
-      const targetIndex = emptyIndex >= 0 ? emptyIndex : Math.min(Math.max(Number(state.settings[slotKey]) || 0, 0), 2);
+      const targetIndex = emptyIndex >= 0 ? emptyIndex : Math.min(Math.max(Number(state.settings[slotKey]) || 0, 0), recentColorSlotCount - 1);
       existing[targetIndex] = clean;
-      state.settings[slotKey] = (targetIndex + 1) % 3;
+      state.settings[slotKey] = (targetIndex + 1) % recentColorSlotCount;
     }
     state.settings[recentKey] = existing;
     return clean;
@@ -9287,12 +9456,9 @@
     const tool = app.querySelector(`[data-color-tool="${kind}"]`);
     if (!tool) return;
     const recentKey = kind === "highlight" ? "recentHighlightColors" : "recentTextColors";
-    const presets = kind === "highlight"
-      ? [...baseColorPresets, ...paleHighlightPresets]
-      : [...textColorPresets, ...strongTextPresets];
-    const presetValues = new Set(presets.map((color) => color.value));
+    const paletteValues = new Set(kind === "highlight" ? highlightColorPalette() : textColorPalette());
     const current = cleanColor(currentColor, "");
-    const recents = normalizeRecentColorSlots(state.settings?.[recentKey]).map((color) => presetValues.has(color) ? "" : color);
+    const recents = normalizeRecentColorSlots(state.settings?.[recentKey]).map((color) => paletteValues.has(color) ? "" : color);
 
     tool.querySelectorAll("[data-color-swatch]").forEach((button) => {
       button.classList.toggle("is-active", !!current && button.dataset.colorValue === current);
@@ -9304,9 +9470,9 @@
       button.disabled = !color;
       button.style.setProperty("--quick-color", color);
       button.classList.toggle("is-empty", !color);
-      button.classList.toggle("is-light", color === "#ffffff");
+      button.classList.toggle("is-light", isLightColor(color));
       button.classList.toggle("is-active", !!current && color === current);
-      button.title = color ? `Memoire ${index + 1} ${color}` : `Memoire ${index + 1} vide`;
+      button.title = color || "Memoire vide";
       button.setAttribute("aria-label", button.title);
     });
   }
