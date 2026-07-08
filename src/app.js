@@ -6363,9 +6363,31 @@
     return merged;
   }
 
+  function dropStrayContinuationMarkers(root) {
+    // Un marqueur de continuation n'est legitime que sur le PREMIER bloc de contenu
+    // d'une feuille (le vrai reste d'une coupure). Tout autre bloc marque est un
+    // clone parasite (ex : Chromium propage l'attribut quand on appuie sur Entree
+    // dans une continuation) : on le nettoie pour ne pas refusionner a tort (bug 2).
+    root.querySelectorAll?.(".page-sheet").forEach((sheet) => {
+      const children = [...sheet.children].filter((child) => child.dataset?.paginationProbe !== "true");
+      children.forEach((child, index) => {
+        if (index === 0) return;
+        if (child.dataset?.splitContinuation === "true") {
+          delete child.dataset.splitContinuation;
+          child.classList?.remove("is-split-continuation");
+        }
+        child.querySelectorAll?.("[data-split-continuation]").forEach((inner) => {
+          delete inner.dataset.splitContinuation;
+          inner.classList?.remove("is-split-continuation");
+        });
+      });
+    });
+  }
+
   function editableBlocksFromHtml(html) {
     const source = document.createElement("div");
     source.innerHTML = html || "<p><br></p>";
+    dropStrayContinuationMarkers(source);
     const pageSheets = [...source.querySelectorAll(".page-sheet")];
     const sourceNodes = pageSheets.length
       ? pageSheets.flatMap((sheet) => [...sheet.childNodes])
@@ -8506,7 +8528,13 @@
     saveEditorSelection(editor);
     commitEditorHistoryChange(note, note.content);
     saveState();
-    syncPagedEditorMetrics(editor);
+    // Si la feuille deborde, on repagine pour creer/remplir la page suivante
+    // (sinon le paragraphe reste coince sous la marge : racine du bug 1).
+    if (sheetOverflows(sheet)) {
+      refreshPagedEditorIfNeeded(editor, note, "caret", { force: true });
+    } else {
+      syncPagedEditorMetrics(editor);
+    }
     return true;
   }
 
