@@ -1485,6 +1485,83 @@ body.is-graph-dragging {
   text-align: left;
 }
 
+.combo-field {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.combo-field .size-input {
+  width: 56px;
+  padding-right: 16px;
+}
+
+.combo-field .line-spacing-input {
+  width: 60px;
+}
+
+.combo-caret {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.combo-caret .icon {
+  width: 12px;
+  height: 12px;
+}
+
+.combo-field .size-input::-webkit-outer-spin-button,
+.combo-field .size-input::-webkit-inner-spin-button {
+  opacity: 1;
+  height: 24px;
+}
+
+.combo-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 46;
+  display: none;
+  flex-direction: column;
+  min-width: 100%;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.combo-field.is-combo-open .combo-menu {
+  display: flex;
+}
+
+.combo-option {
+  padding: 5px 10px;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+
+.combo-option:hover {
+  background: var(--selection-soft);
+  color: var(--selection-color);
+}
+
 .line-spacing-select {
   max-width: 94px;
 }

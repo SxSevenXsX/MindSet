@@ -3790,14 +3790,20 @@
             <select class="toolbar-select font-select" data-font-family title="Police">
               ${fonts.map((font, index) => `<option value="${escapeHtml(font.value)}" ${index === 0 ? "selected" : ""}>${escapeHtml(font.label)}</option>`).join("")}
             </select>
-            <input class="toolbar-select size-input" data-font-size type="number" min="8" max="120" step="1" value="17" list="font-size-suggestions" title="Taille de police (8 a 120)" aria-label="Taille de police" />
-            <datalist id="font-size-suggestions">
-              ${[8, 9, 10, 11, 12, 14, 16, 17, 18, 20, 22, 24, 28, 32, 36, 48, 72].map((size) => `<option value="${size}"></option>`).join("")}
-            </datalist>
-            <input class="toolbar-select size-input line-spacing-input" data-line-spacing-select type="number" min="0.8" max="4" step="0.05" list="line-spacing-suggestions" title="Interligne (saisie libre, ex : 1,75)" aria-label="Interligne" />
-            <datalist id="line-spacing-suggestions">
-              ${["1", "1.15", "1.5", "1.75", "2", "2.5", "3"].map((value) => `<option value="${value}"></option>`).join("")}
-            </datalist>
+            <div class="combo-field" data-combo="size">
+              <input class="toolbar-select size-input" data-font-size type="number" min="8" max="120" step="1" value="17" title="Taille de police (8 a 120)" aria-label="Taille de police" />
+              <button class="combo-caret" type="button" data-combo-toggle="size" tabindex="-1" aria-label="Suggestions de taille">${icon("chevronDown")}</button>
+              <div class="combo-menu" data-combo-menu="size">
+                ${[8, 9, 10, 11, 12, 14, 16, 17, 18, 20, 22, 24, 28, 32, 36, 48, 72].map((size) => `<button type="button" class="combo-option" data-combo-value="${size}">${size}</button>`).join("")}
+              </div>
+            </div>
+            <div class="combo-field combo-field-spacing" data-combo="spacing">
+              <input class="toolbar-select size-input line-spacing-input" data-line-spacing-select type="number" min="0.8" max="4" step="0.05" title="Interligne (saisie libre, ex : 1,75)" aria-label="Interligne" />
+              <button class="combo-caret" type="button" data-combo-toggle="spacing" tabindex="-1" aria-label="Suggestions d'interligne">${icon("chevronDown")}</button>
+              <div class="combo-menu" data-combo-menu="spacing">
+                ${["1", "1.15", "1.5", "1.75", "2", "2.5", "3"].map((value) => `<button type="button" class="combo-option" data-combo-value="${value}">${value.replace(".", ",")}</button>`).join("")}
+              </div>
+            </div>
           </div>
           <div class="toolbar-group color-toolbar-group">
             ${renderColorTool("text", "Couleur du texte", state.settings?.lastTextColor || "#000000")}
@@ -6816,18 +6822,27 @@
     return (block.textContent || "").length > 1;
   }
 
-  function fragmentForTextRange(source, startOffset, endOffset) {
-    const start = textPointFromOffset(source, startOffset);
-    const end = textPointFromOffset(source, endOffset);
-    const range = document.createRange();
-    range.setStart(start.node, start.offset);
-    range.setEnd(end.node, end.offset);
-    return range.cloneContents();
-  }
-
   function setBlockFragment(block, source, startOffset, endOffset) {
-    const fragment = fragmentForTextRange(source, startOffset, endOffset);
-    block.replaceChildren(fragment);
+    // On clone le bloc source ENTIER puis on rogne le texte avant/apres la plage.
+    // deleteContents preserve les elements partiellement selectionnes (spans de
+    // police/taille/couleur), contrairement a cloneContents sur un seul noeud texte.
+    const clone = source.cloneNode(true);
+    const total = (clone.textContent || "").length;
+    if (endOffset < total) {
+      const endPoint = textPointFromOffset(clone, endOffset);
+      const tailRange = document.createRange();
+      tailRange.setStart(endPoint.node, endPoint.offset);
+      tailRange.setEnd(clone, clone.childNodes.length);
+      tailRange.deleteContents();
+    }
+    if (startOffset > 0) {
+      const startPoint = textPointFromOffset(clone, startOffset);
+      const headRange = document.createRange();
+      headRange.setStart(clone, 0);
+      headRange.setEnd(startPoint.node, startPoint.offset);
+      headRange.deleteContents();
+    }
+    block.replaceChildren(...clone.childNodes);
     if (!block.childNodes.length) block.appendChild(document.createElement("br"));
   }
 
@@ -7753,6 +7768,7 @@
     }
 
     const size = app.querySelector("[data-font-size]");
+    let applyFontSizeRef = null;
     if (size) {
       size.addEventListener("mousedown", saveToolbarSelection);
       size.addEventListener("focus", () => {
@@ -7770,6 +7786,7 @@
         restoreEditorSelection(current);
         applyInlineStyleToSelection(current, note, box, "font-size", `${clamped}px`);
       };
+      applyFontSizeRef = applyFontSize;
       size.addEventListener("change", applyFontSize);
       size.addEventListener("keydown", (event) => {
         if (event.key !== "Enter") return;
@@ -7879,6 +7896,7 @@
     });
 
     const lineSpacingSelect = app.querySelector("[data-line-spacing-select]");
+    let applyLineSpacingRef = null;
     if (lineSpacingSelect) {
       lineSpacingSelect.addEventListener("mousedown", saveToolbarSelection);
       lineSpacingSelect.addEventListener("focus", () => {
@@ -7889,12 +7907,13 @@
       const applyLineSpacingValue = () => {
         const current = activeEditor();
         if (!current) return;
-        const parsed = Number.parseFloat(lineSpacingSelect.value);
+        const parsed = Number.parseFloat(String(lineSpacingSelect.value).replace(",", "."));
         if (!Number.isFinite(parsed)) return;
         const clamped = Math.min(Math.max(Math.round(parsed * 100) / 100, 0.8), 4);
         lineSpacingSelect.value = String(clamped);
         applyLineSpacing(current, note, box, String(clamped));
       };
+      applyLineSpacingRef = applyLineSpacingValue;
       lineSpacingSelect.addEventListener("change", applyLineSpacingValue);
       lineSpacingSelect.addEventListener("keydown", (event) => {
         if (event.key !== "Enter") return;
@@ -7902,6 +7921,38 @@
         applyLineSpacingValue();
       });
     }
+
+    // Menus deroulants (combobox) des champs taille et interligne
+    app.querySelectorAll("[data-combo-toggle]").forEach((toggle) => {
+      toggle.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        saveToolbarSelection();
+      });
+      toggle.addEventListener("click", () => {
+        const field = toggle.closest(".combo-field");
+        const wasOpen = field.classList.contains("is-combo-open");
+        app.querySelectorAll(".combo-field.is-combo-open").forEach((f) => f.classList.remove("is-combo-open"));
+        field.classList.toggle("is-combo-open", !wasOpen);
+      });
+    });
+
+    app.querySelectorAll("[data-combo-value]").forEach((option) => {
+      option.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        saveToolbarSelection();
+      });
+      option.addEventListener("click", () => {
+        const combo = option.closest(".combo-field")?.dataset.combo;
+        option.closest(".combo-field")?.classList.remove("is-combo-open");
+        if (combo === "size" && size) {
+          size.value = option.dataset.comboValue;
+          applyFontSizeRef?.();
+        } else if (combo === "spacing" && lineSpacingSelect) {
+          lineSpacingSelect.value = option.dataset.comboValue;
+          applyLineSpacingRef?.();
+        }
+      });
+    });
 
     app.querySelectorAll("[data-paragraph-space]").forEach((button) => {
       button.addEventListener("mousedown", (event) => {
@@ -9466,6 +9517,9 @@
   document.addEventListener("click", (event) => {
     if (!event.target.closest?.("[data-toolbar-menu]")) {
       app.querySelectorAll(".toolbar-menu.is-open").forEach((menu) => menu.classList.remove("is-open"));
+    }
+    if (!event.target.closest?.(".combo-field")) {
+      app.querySelectorAll(".combo-field.is-combo-open").forEach((field) => field.classList.remove("is-combo-open"));
     }
     if (!document.querySelector("[data-image-toolbar]")) return;
     if (event.target.closest?.("[data-image-toolbar]")) return;
