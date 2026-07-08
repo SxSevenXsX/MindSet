@@ -1513,7 +1513,13 @@ body.is-graph-dragging {
   border-left: 1px solid var(--border);
 }
 
-.color-tool-main,
+.color-tool-main {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 3px;
+}
+
 .quick-colors {
   display: flex;
   flex-direction: column;
@@ -1931,6 +1937,13 @@ body.is-graph-dragging {
   color: var(--text);
   line-height: 1.18;
 }
+
+.note-editor h1 { font-style: var(--h1-style, normal); text-decoration: var(--h1-decoration, none); background: var(--h1-highlight, transparent); }
+.note-editor h2 { font-style: var(--h2-style, normal); text-decoration: var(--h2-decoration, none); background: var(--h2-highlight, transparent); }
+.note-editor h3 { font-style: var(--h3-style, normal); text-decoration: var(--h3-decoration, none); background: var(--h3-highlight, transparent); }
+.note-editor h4 { font-style: var(--h4-style, normal); text-decoration: var(--h4-decoration, none); background: var(--h4-highlight, transparent); }
+.note-editor h5 { font-style: var(--h5-style, normal); text-decoration: var(--h5-decoration, none); background: var(--h5-highlight, transparent); }
+.note-editor h6 { font-style: var(--h6-style, normal); text-decoration: var(--h6-decoration, none); background: var(--h6-highlight, transparent); }
 
 .note-editor h1 {
   color: var(--h1-color);
@@ -3495,9 +3508,60 @@ button:disabled {
 
 .heading-preset-row {
   display: grid;
-  grid-template-columns: minmax(62px, 0.7fr) 66px 38px minmax(86px, 1fr) 76px;
+  grid-template-columns: minmax(62px, 0.7fr) 60px 38px minmax(74px, 1fr) auto;
   align-items: center;
   gap: 8px;
+}
+
+.heading-style-toggles {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.heading-style-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.heading-style-btn:hover {
+  border-color: var(--border-strong);
+}
+
+.heading-style-btn.is-active {
+  background: var(--selection-soft);
+  border-color: var(--selection-color);
+  color: var(--selection-color);
+}
+
+.heading-style-btn .hl-swatch {
+  padding: 0 2px;
+  border-radius: 2px;
+  background: var(--hl, #fff0a8);
+  color: #17201c;
+  font-weight: 800;
+}
+
+.heading-hl-color {
+  width: 26px;
+  height: 26px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.heading-hl-color.is-hidden {
+  display: none;
 }
 
 .heading-preset-row span {

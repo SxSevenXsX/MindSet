@@ -45,6 +45,7 @@
     encryptTimer: 0,
     encryptRunning: false,
     lastListAutoFormat: null,
+    suppressSelectionSave: false,
   };
 
   const icons = {
@@ -116,16 +117,24 @@
   ];
 
   const headingDefaults = {
-    normal: { name: "Normal", size: "17px", color: "#17201c", weight: "400", fontFamily: "Georgia, Times New Roman, serif" },
-    h1: { name: "Titre 1", size: "30px", color: "#17201c", weight: "820", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" },
-    h2: { name: "Titre 2", size: "24px", color: "#17201c", weight: "780", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" },
-    h3: { name: "Titre 3", size: "19px", color: "#17201c", weight: "740", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" },
-    h4: { name: "Titre 4", size: "18px", color: "#17201c", weight: "720", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" },
-    h5: { name: "Titre 5", size: "17px", color: "#17201c", weight: "700", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" },
-    h6: { name: "Titre 6", size: "16px", color: "#17201c", weight: "680", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" },
+    normal: { name: "Normal", size: "17px", color: "#17201c", weight: "400", fontFamily: "Georgia, Times New Roman, serif", bold: false, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8" },
+    h1: { name: "Titre 1", size: "30px", color: "#17201c", weight: "820", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", bold: true, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8" },
+    h2: { name: "Titre 2", size: "24px", color: "#17201c", weight: "780", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", bold: true, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8" },
+    h3: { name: "Titre 3", size: "19px", color: "#17201c", weight: "740", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", bold: true, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8" },
+    h4: { name: "Titre 4", size: "18px", color: "#17201c", weight: "720", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", bold: true, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8" },
+    h5: { name: "Titre 5", size: "17px", color: "#17201c", weight: "700", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", bold: true, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8" },
+    h6: { name: "Titre 6", size: "16px", color: "#17201c", weight: "680", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", bold: true, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8" },
   };
 
   const headingLevels = ["h1", "h2", "h3", "h4", "h5", "h6"];
+
+  function headingStyleVars(key, preset) {
+    return {
+      style: preset.italic ? "italic" : "normal",
+      decoration: preset.underline ? "underline" : "none",
+      highlight: preset.highlight ? cleanColor(preset.highlightColor, "#fff0a8") : "transparent",
+    };
+  }
 
   function headingName(level) {
     return String(state.settings?.headingPresets?.[level]?.name || headingDefaults[level]?.name || level).slice(0, 30);
@@ -607,14 +616,18 @@
 
   function printableHeadingCssVariables() {
     const headings = state.settings?.headingPresets || headingDefaults;
-    return ["normal", "h1", "h2", "h3"].map((key) => {
+    return ["normal", ...headingLevels].map((key) => {
       const preset = { ...headingDefaults[key], ...(headings[key] || {}) };
       const color = cleanColor(preset.color, headingDefaults[key].color);
+      const styleVars = headingStyleVars(key, preset);
       return [
         `--${key}-size:${safePrintCssValue(preset.size, headingDefaults[key].size)}`,
         `--${key}-color:${color}`,
-        `--${key}-weight:${safePrintCssValue(preset.weight, headingDefaults[key].weight)}`,
+        `--${key}-weight:${preset.bold === false ? "400" : safePrintCssValue(preset.weight, headingDefaults[key].weight)}`,
         `--${key}-font:${safePrintCssValue(preset.fontFamily, headingDefaults[key].fontFamily)}`,
+        `--${key}-style:${styleVars.style}`,
+        `--${key}-decoration:${styleVars.decoration}`,
+        `--${key}-highlight:${styleVars.highlight}`,
       ].join(";");
     }).join(";");
   }
@@ -698,10 +711,13 @@
     .print-note-header h1{margin:0;color:#17201c;font:820 22px Inter,ui-sans-serif,system-ui,sans-serif;line-height:1.2;}
     .print-note-meta{display:flex;flex-wrap:wrap;gap:8px 14px;color:#657169;font-size:11px;font-weight:760;}
     .note-editor{font-family:var(--normal-font);font-size:var(--normal-size);font-weight:var(--normal-weight);color:var(--normal-color);line-height:1.65;}
-    .note-editor h1,.note-editor h2,.note-editor h3{margin:1.2em 0 .45em;line-height:1.18;}
-    .note-editor h1{font-family:var(--h1-font);font-size:var(--h1-size);font-weight:var(--h1-weight);color:var(--h1-color);}
-    .note-editor h2{font-family:var(--h2-font);font-size:var(--h2-size);font-weight:var(--h2-weight);color:var(--h2-color);}
-    .note-editor h3{font-family:var(--h3-font);font-size:var(--h3-size);font-weight:var(--h3-weight);color:var(--h3-color);}
+    .note-editor h1,.note-editor h2,.note-editor h3,.note-editor h4,.note-editor h5,.note-editor h6{margin:1.2em 0 .45em;line-height:1.18;}
+    .note-editor h1{font-family:var(--h1-font);font-size:var(--h1-size);font-weight:var(--h1-weight);color:var(--h1-color);font-style:var(--h1-style,normal);text-decoration:var(--h1-decoration,none);background:var(--h1-highlight,transparent);}
+    .note-editor h2{font-family:var(--h2-font);font-size:var(--h2-size);font-weight:var(--h2-weight);color:var(--h2-color);font-style:var(--h2-style,normal);text-decoration:var(--h2-decoration,none);background:var(--h2-highlight,transparent);}
+    .note-editor h3{font-family:var(--h3-font);font-size:var(--h3-size);font-weight:var(--h3-weight);color:var(--h3-color);font-style:var(--h3-style,normal);text-decoration:var(--h3-decoration,none);background:var(--h3-highlight,transparent);}
+    .note-editor h4{font-family:var(--h4-font);font-size:var(--h4-size);font-weight:var(--h4-weight);color:var(--h4-color);font-style:var(--h4-style,normal);text-decoration:var(--h4-decoration,none);background:var(--h4-highlight,transparent);}
+    .note-editor h5{font-family:var(--h5-font);font-size:var(--h5-size);font-weight:var(--h5-weight);color:var(--h5-color);font-style:var(--h5-style,normal);text-decoration:var(--h5-decoration,none);background:var(--h5-highlight,transparent);}
+    .note-editor h6{font-family:var(--h6-font);font-size:var(--h6-size);font-weight:var(--h6-weight);color:var(--h6-color);font-style:var(--h6-style,normal);text-decoration:var(--h6-decoration,none);background:var(--h6-highlight,transparent);}
     .note-editor p{margin:.55em 0;}
     .note-editor ul,.note-editor ol{margin:.65em 0;padding-left:1.6em;}
     .note-editor .dash-list,.note-editor .arrow-list,.note-editor .circle-list,.note-editor .check-list,.note-editor .triangle-list,.note-editor .square-list{list-style:none;padding-left:0;}
@@ -1383,8 +1399,13 @@
       document.documentElement.style.setProperty(`--${key}-size`, preset.size);
       const color = settings.theme === "dark" && preset.color === headingDefaults[key].color ? "#d8d8d8" : preset.color;
       document.documentElement.style.setProperty(`--${key}-color`, color);
-      document.documentElement.style.setProperty(`--${key}-weight`, preset.weight);
+      const effectiveWeight = preset.bold === false ? "400" : (preset.bold === true ? preset.weight : preset.weight);
+      document.documentElement.style.setProperty(`--${key}-weight`, effectiveWeight);
       document.documentElement.style.setProperty(`--${key}-font`, preset.fontFamily || headingDefaults[key].fontFamily);
+      const styleVars = headingStyleVars(key, preset);
+      document.documentElement.style.setProperty(`--${key}-style`, styleVars.style);
+      document.documentElement.style.setProperty(`--${key}-decoration`, styleVars.decoration);
+      document.documentElement.style.setProperty(`--${key}-highlight`, styleVars.highlight);
     });
     applyLocalFonts();
   }
@@ -4564,9 +4585,13 @@
                       <select class="modal-field compact-field heading-font-select" data-heading-font="${level}" aria-label="Police ${escapeHtml(rowName)}">
                         ${fontChoices.map((font) => `<option value="${escapeHtml(font.value)}" ${preset.fontFamily === font.value ? "selected" : ""}>${escapeHtml(font.label)}</option>`).join("")}
                       </select>
-                      <select class="modal-field compact-field" data-heading-weight="${level}" aria-label="Graisse ${escapeHtml(rowName)}">
-                        ${weightOptions.map((weight) => `<option value="${weight}" ${preset.weight === weight ? "selected" : ""}>${weight}</option>`).join("")}
-                      </select>
+                      <div class="heading-style-toggles">
+                        <button type="button" class="heading-style-btn ${preset.bold ? "is-active" : ""}" data-heading-toggle="bold" data-heading-level="${level}" title="Gras" aria-label="Gras ${escapeHtml(rowName)}"><strong>G</strong></button>
+                        <button type="button" class="heading-style-btn ${preset.italic ? "is-active" : ""}" data-heading-toggle="italic" data-heading-level="${level}" title="Italique" aria-label="Italique ${escapeHtml(rowName)}"><em>I</em></button>
+                        <button type="button" class="heading-style-btn ${preset.underline ? "is-active" : ""}" data-heading-toggle="underline" data-heading-level="${level}" title="Souligne" aria-label="Souligne ${escapeHtml(rowName)}"><u>S</u></button>
+                        <button type="button" class="heading-style-btn ${preset.highlight ? "is-active" : ""}" data-heading-toggle="highlight" data-heading-level="${level}" title="Surligne" aria-label="Surligne ${escapeHtml(rowName)}" style="--hl:${escapeHtml(cleanColor(preset.highlightColor, "#fff0a8"))}"><span class="hl-swatch">H</span></button>
+                        <input class="heading-hl-color ${preset.highlight ? "" : "is-hidden"}" type="color" value="${escapeHtml(cleanColor(preset.highlightColor, "#fff0a8"))}" data-heading-highlight-color="${level}" title="Couleur de surlignage" aria-label="Couleur de surlignage ${escapeHtml(rowName)}" />
+                      </div>
                     </div>
                   `;
                 }).join("")}
@@ -5180,8 +5205,26 @@
       select.addEventListener("change", () => updateHeadingPreset(select.dataset.headingFont, "fontFamily", select.value));
     });
 
-    app.querySelectorAll("[data-heading-weight]").forEach((select) => {
-      select.addEventListener("change", () => updateHeadingPreset(select.dataset.headingWeight, "weight", select.value));
+    app.querySelectorAll("[data-heading-toggle]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const level = button.dataset.headingLevel;
+        const field = button.dataset.headingToggle;
+        const current = { ...headingDefaults[level], ...(state.settings.headingPresets?.[level] || {}) };
+        const next = !current[field];
+        updateHeadingPreset(level, field, next);
+        button.classList.toggle("is-active", next);
+        if (field === "highlight") {
+          button.closest(".heading-style-toggles")?.querySelector("[data-heading-highlight-color]")?.classList.toggle("is-hidden", !next);
+        }
+      });
+    });
+
+    app.querySelectorAll("[data-heading-highlight-color]").forEach((input) => {
+      input.addEventListener("input", () => {
+        updateHeadingPreset(input.dataset.headingHighlightColor, "highlightColor", input.value);
+        const btn = input.closest(".heading-style-toggles")?.querySelector('[data-heading-toggle="highlight"]');
+        if (btn) btn.style.setProperty("--hl", input.value);
+      });
     });
 
     const fontImport = app.querySelector("[data-font-import]");
@@ -7643,11 +7686,15 @@
         saveState();
         if (normalizeEditorViewMode(state.settings?.editorViewMode) === "pages") {
           if (isContinuousPageFlow()) {
-            if (needsPagedLayoutRefresh(boundEditor)) {
-              const inputType = event?.inputType || "";
-              const immediatePagination = inputType.startsWith("insert")
-                || inputType === "deleteContentBackward"
-                || inputType === "deleteContentForward";
+            const inputType = event?.inputType || "";
+            const isDeletion = inputType.startsWith("delete");
+            const multiPage = boundEditor.querySelectorAll(".page-sheet").length > 1;
+            // Une suppression ne peut que reduire le contenu : sur un document multi-pages
+            // on repagine toujours pour laisser le texte remonter (reflow vers le haut).
+            if (isDeletion && multiPage) {
+              repaginatePagesInPlace(boundEditor, { scroll: "caret" });
+            } else if (needsPagedLayoutRefresh(boundEditor)) {
+              const immediatePagination = inputType.startsWith("insert") || isDeletion;
               if (immediatePagination) {
                 repaginatePagesInPlace(boundEditor, { scroll: "caret" });
               } else {
@@ -8811,6 +8858,9 @@
   }
 
   function saveEditorSelection(editor) {
+    // Pendant une restauration, focus() redeclenche les handlers de l'editeur :
+    // on refuse tout enregistrement pour ne pas ecraser la bonne selection.
+    if (runtime.suppressSelectionSave) return;
     const selection = window.getSelection();
     if (!editor || !selection || !selection.rangeCount) return;
     const range = selection.getRangeAt(0);
@@ -8842,24 +8892,24 @@
   function restoreEditorSelection(editor) {
     if (!editor) return;
     releaseEditorSelectionHighlight();
+    // On capture la bonne selection AVANT de donner le focus : focus() redeclenche
+    // les handlers de l'editeur, et le drapeau les empeche d'ecraser ces valeurs.
+    const savedRange = runtime.editorRange ? runtime.editorRange.cloneRange() : null;
+    const snapshot = runtime.editorSelectionSnapshot;
     const focusTarget = isIndependentPageMode() ? (currentPageSheet(editor) || editor) : editor;
+    runtime.suppressSelectionSave = true;
     focusTarget.focus({ preventScroll: true });
     const selection = window.getSelection();
     let restoredRange = false;
-    if (selection && runtime.editorRange) {
+    if (selection && savedRange && selectionInsideEditor(editor, savedRange)) {
       try {
-        if (selectionInsideEditor(editor, runtime.editorRange)) {
-          selection.removeAllRanges();
-          selection.addRange(runtime.editorRange.cloneRange());
-          restoredRange = true;
-        } else {
-          runtime.editorRange = null;
-        }
+        selection.removeAllRanges();
+        selection.addRange(savedRange.cloneRange());
+        restoredRange = true;
       } catch (error) {
-        runtime.editorRange = null;
+        restoredRange = false;
       }
     }
-    const snapshot = runtime.editorSelectionSnapshot;
     const restoredSelection = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
     const restoredCollapsed = !restoredSelection || restoredSelection.collapsed;
     const snapshotCollapsed = !snapshot || snapshot.offsets.start === snapshot.offsets.end;
@@ -8867,8 +8917,10 @@
       && snapshot
       && (!snapshot.noteId || snapshot.noteId === (editor.dataset.editorNoteId || ""))) {
       restoreEditorSelectionOffsets(editor, snapshot.offsets);
-      saveEditorSelection(editor);
     }
+    runtime.suppressSelectionSave = false;
+    // La selection courante (rendue) devient la reference sauvegardee.
+    saveEditorSelection(editor);
   }
 
   function editorSnapshotContent(editor) {
