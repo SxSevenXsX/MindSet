@@ -17,6 +17,7 @@
     focusedItemId: null,
     dragIds: [],
     editorRange: null,
+    editorSelectionSnapshot: null,
     boxMenuOpen: false,
     loadedFontIds: new Set(),
     pagePaginationTimer: 0,
@@ -38,6 +39,7 @@
     navigationReady: false,
     autofocusKey: "",
     pointerIsDown: false,
+    uiFocusZone: "",
     dragBoxId: null,
     boxCrypto: new Map(),
     encryptTimer: 0,
@@ -114,11 +116,25 @@
   ];
 
   const headingDefaults = {
-    normal: { size: "17px", color: "#17201c", weight: "400", fontFamily: "Georgia, Times New Roman, serif" },
-    h1: { size: "30px", color: "#17201c", weight: "820", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" },
-    h2: { size: "24px", color: "#17201c", weight: "780", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" },
-    h3: { size: "19px", color: "#17201c", weight: "740", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" },
+    normal: { name: "Normal", size: "17px", color: "#17201c", weight: "400", fontFamily: "Georgia, Times New Roman, serif" },
+    h1: { name: "Titre 1", size: "30px", color: "#17201c", weight: "820", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" },
+    h2: { name: "Titre 2", size: "24px", color: "#17201c", weight: "780", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" },
+    h3: { name: "Titre 3", size: "19px", color: "#17201c", weight: "740", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" },
+    h4: { name: "Titre 4", size: "18px", color: "#17201c", weight: "720", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" },
+    h5: { name: "Titre 5", size: "17px", color: "#17201c", weight: "700", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" },
+    h6: { name: "Titre 6", size: "16px", color: "#17201c", weight: "680", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" },
   };
+
+  const headingLevels = ["h1", "h2", "h3", "h4", "h5", "h6"];
+
+  function headingName(level) {
+    return String(state.settings?.headingPresets?.[level]?.name || headingDefaults[level]?.name || level).slice(0, 30);
+  }
+
+  function activeHeadingLevels() {
+    const presets = state.settings?.headingPresets || {};
+    return headingLevels.filter((level) => presets[level]);
+  }
 
   const fontOptions = [
     { label: "Serif", value: "Georgia, Times New Roman, serif" },
@@ -169,6 +185,24 @@
     { label: "Blanc", value: "#ffffff" },
     { label: "Noir", value: "#000000" },
     ...baseColorPresets,
+  ];
+
+  const paleHighlightPresets = [
+    { label: "Jaune pale", value: "#fdf6cf" },
+    { label: "Rouge pale", value: "#ffe3e3" },
+    { label: "Orange pale", value: "#ffeed8" },
+    { label: "Rose pale", value: "#ffe2ef" },
+    { label: "Bleu pale", value: "#def0ff" },
+    { label: "Vert pale", value: "#e0f5e8" },
+  ];
+
+  const strongTextPresets = [
+    { label: "Rouge puissant", value: "#c62828" },
+    { label: "Vert fonce", value: "#1b5e20" },
+    { label: "Jaune visible", value: "#d9a800" },
+    { label: "Bleu marine", value: "#1a4f8b" },
+    { label: "Violet profond", value: "#6a3ab2" },
+    { label: "Turquoise fonce", value: "#0e7c7b" },
   ];
 
   const emojiChoices = ["⭐", "📌", "💡", "✅", "🔥", "🧠", "📘", "🗂️"];
@@ -672,7 +706,7 @@
     .note-editor ul,.note-editor ol{margin:.65em 0;padding-left:1.6em;}
     .note-editor .dash-list,.note-editor .arrow-list,.note-editor .circle-list,.note-editor .check-list,.note-editor .triangle-list,.note-editor .square-list{list-style:none;padding-left:0;}
     .note-editor .dash-list li::before{content:"- ";font-weight:700;}
-    .note-editor .arrow-list li::before{content:"-> ";font-weight:700;}
+    .note-editor .arrow-list li::before{content:"→ ";font-weight:700;}
     .note-editor .circle-list li::before{content:"○ ";font-weight:700;}
     .note-editor .triangle-list li::before{content:"△ ";font-weight:700;color:#d58f27;}
     .note-editor .square-list li::before{content:"□ ";font-weight:700;}
@@ -1300,12 +1334,15 @@
       pageSetup: normalizePageSetup(previousSettings.pageSetup, previousMarginPreset, { customPageMarginPresets: previousCustomMargins }),
       statsPrefs: normalizeStatsPrefs(previousSettings.statsPrefs),
       localFonts: normalizeLocalFonts(previousSettings.localFonts),
-      headingPresets: {
-        normal: { ...headingDefaults.normal, ...(previousHeadings.normal || {}) },
-        h1: { ...headingDefaults.h1, ...(previousHeadings.h1 || {}) },
-        h2: { ...headingDefaults.h2, ...(previousHeadings.h2 || {}) },
-        h3: { ...headingDefaults.h3, ...(previousHeadings.h3 || {}) },
-      },
+      headingPresets: (() => {
+        const presets = { normal: { ...headingDefaults.normal, ...(previousHeadings.normal || {}) } };
+        headingLevels.forEach((level) => {
+          if (["h1", "h2", "h3"].includes(level) || previousHeadings[level]) {
+            presets[level] = { ...headingDefaults[level], ...(previousHeadings[level] || {}) };
+          }
+        });
+        return presets;
+      })(),
     };
     value.settings.pageMarginPreset = marginPresetForSetup(value.settings.pageSetup, value.settings);
     value.boxes.forEach((box) => {
@@ -1340,8 +1377,9 @@
     document.documentElement.style.setProperty("--tree-guide-color", treeGuide);
     document.documentElement.style.setProperty("--todo-color", todoColor);
     document.documentElement.style.setProperty("--nav", `${Math.min(Math.max(Number(settings.navWidth) || 282, 218), 430)}px`);
-    ["normal", "h1", "h2", "h3"].forEach((key) => {
-      const preset = { ...headingDefaults[key], ...(headings[key] || {}) };
+    ["normal", ...headingLevels].forEach((key) => {
+      const preset = headings[key] ? { ...headingDefaults[key], ...(headings[key] || {}) } : headingDefaults[key];
+      if (!preset) return;
       document.documentElement.style.setProperty(`--${key}-size`, preset.size);
       const color = settings.theme === "dark" && preset.color === headingDefaults[key].color ? "#d8d8d8" : preset.color;
       document.documentElement.style.setProperty(`--${key}-color`, color);
@@ -2850,7 +2888,7 @@
   }
 
   function updateHeadingPreset(level, field, value) {
-    if (!["normal", "h1", "h2", "h3"].includes(level)) return;
+    if (!["normal", ...headingLevels].includes(level)) return;
     state.settings.headingPresets = state.settings.headingPresets || {};
     state.settings.headingPresets[level] = {
       ...headingDefaults[level],
@@ -3198,7 +3236,25 @@
   }
 
   function expandAll(box, expand) {
-    if (expand) {
+    const selectedFolders = (box.selectedIds || [])
+      .map((id) => findItem(box, id))
+      .filter((item) => item?.type === "folder");
+    if (selectedFolders.length) {
+      // Portee limitee a la selection : seuls les dossiers choisis (et leur contenu) bougent
+      const ids = new Set(box.expandedIds || []);
+      selectedFolders.forEach((folder) => {
+        walk(folder, (node) => {
+          if (node.type !== "folder") return;
+          if (expand) {
+            ids.add(node.id);
+          } else {
+            ids.delete(node.id);
+          }
+        });
+      });
+      ids.add(box.root.id);
+      box.expandedIds = [...ids];
+    } else if (expand) {
       box.expandedIds = allItems(box, true)
         .filter(({ node }) => node.type === "folder")
         .map(({ node }) => node.id);
@@ -3637,13 +3693,26 @@
 
   function renderColorTool(kind, label, value) {
     const recentKey = kind === "highlight" ? "recentHighlightColors" : "recentTextColors";
-    const presets = kind === "highlight" ? baseColorPresets : textColorPresets;
+    const mainPresets = kind === "highlight" ? baseColorPresets : textColorPresets;
+    const extraPresets = kind === "highlight" ? paleHighlightPresets : strongTextPresets;
     const current = cleanColor(value, kind === "highlight" ? "#fff0a8" : "#000000");
-    const presetValues = new Set(presets.map((color) => color.value));
+    const presetValues = new Set([...mainPresets, ...extraPresets].map((color) => color.value));
     const recents = normalizeRecentColorSlots(state.settings?.[recentKey]).map((color) => presetValues.has(color) ? "" : color);
-    const swatches = [
-      ...presets.map((color) => ({ ...color, recent: false })),
-      ...recents.map((color, index) => ({
+    const renderSwatch = (color) => `
+      <button
+        class="quick-color ${color.value === current ? "is-active" : ""} ${color.recent ? "is-recent" : ""} ${color.empty ? "is-empty" : ""} ${color.value === "#ffffff" || color.pale ? "is-light" : ""}"
+        style="--quick-color:${color.value}"
+        data-color-swatch="${kind}"
+        data-color-value="${color.value}"
+        ${color.empty ? "disabled" : ""}
+        title="${escapeHtml(color.label)}"
+        aria-label="${escapeHtml(color.label)}"
+      ></button>
+    `;
+    const rows = [
+      mainPresets.map((color) => ({ ...color, recent: false })),
+      extraPresets.map((color) => ({ ...color, recent: false, pale: kind === "highlight" })),
+      recents.map((color, index) => ({
         label: color ? `Memoire ${index + 1} ${color}` : `Memoire ${index + 1} vide`,
         value: color,
         recent: true,
@@ -3659,17 +3728,7 @@
           ${kind === "highlight" ? `<button class="format-button color-clear" data-clear-highlight title="Enlever le surlignage" aria-label="Enlever le surlignage">${icon("eraser")}</button>` : ""}
         </div>
         <div class="quick-colors" aria-label="${escapeHtml(label)}">
-          ${swatches.map((color) => `
-            <button
-              class="quick-color ${color.value === current ? "is-active" : ""} ${color.recent ? "is-recent" : ""} ${color.empty ? "is-empty" : ""} ${color.value === "#ffffff" ? "is-light" : ""}"
-              style="--quick-color:${color.value}"
-              data-color-swatch="${kind}"
-              data-color-value="${color.value}"
-              ${color.empty ? "disabled" : ""}
-              title="${escapeHtml(color.label)}"
-              aria-label="${escapeHtml(color.label)}"
-            ></button>
-          `).join("")}
+          ${rows.map((row) => `<div class="quick-color-row">${row.map(renderSwatch).join("")}</div>`).join("")}
         </div>
       </div>
     `;
@@ -3704,10 +3763,8 @@
           <div class="toolbar-row toolbar-main-row">
           <div class="toolbar-group">
             <select class="toolbar-select" data-format-block title="Style de titre">
-              <option value="p">Normal</option>
-              <option value="h1">Titre 1</option>
-              <option value="h2">Titre 2</option>
-              <option value="h3">Titre 3</option>
+              <option value="p">${escapeHtml(headingName("normal"))}</option>
+              ${activeHeadingLevels().map((level) => `<option value="${level}">${escapeHtml(headingName(level))}</option>`).join("")}
             </select>
             <select class="toolbar-select font-select" data-font-family title="Police">
               ${fonts.map((font, index) => `<option value="${escapeHtml(font.value)}" ${index === 0 ? "selected" : ""}>${escapeHtml(font.label)}</option>`).join("")}
@@ -3716,14 +3773,10 @@
             <datalist id="font-size-suggestions">
               ${[8, 9, 10, 11, 12, 14, 16, 17, 18, 20, 22, 24, 28, 32, 36, 48, 72].map((size) => `<option value="${size}"></option>`).join("")}
             </datalist>
-            <select class="toolbar-select line-spacing-select" data-line-spacing-select title="Interligne" aria-label="Interligne">
-              <option value="">Interligne</option>
-              <option value="1">1,0</option>
-              <option value="1.15">1,15</option>
-              <option value="1.5">1,5</option>
-              <option value="2">2,0</option>
-              <option value="3">3,0</option>
-            </select>
+            <input class="toolbar-select size-input line-spacing-input" data-line-spacing-select type="number" min="0.8" max="4" step="0.05" list="line-spacing-suggestions" title="Interligne (saisie libre, ex : 1,75)" aria-label="Interligne" />
+            <datalist id="line-spacing-suggestions">
+              ${["1", "1.15", "1.5", "1.75", "2", "2.5", "3"].map((value) => `<option value="${value}"></option>`).join("")}
+            </datalist>
           </div>
           <div class="toolbar-group color-toolbar-group">
             ${renderColorTool("text", "Couleur du texte", state.settings?.lastTextColor || "#000000")}
@@ -3755,13 +3808,9 @@
               </div>
             </div>
             <div class="toolbar-menu" data-toolbar-menu>
-              <button class="format-button" type="button" data-menu-trigger data-tooltip="Interligne et espacement" aria-label="Interligne et espacement">${icon("lineSpacing")}</button>
+              <button class="format-button" type="button" data-menu-trigger data-tooltip="Espacement des paragraphes (distance entre les lignes / points)" aria-label="Espacement des paragraphes">${icon("lineSpacing")}</button>
               <div class="toolbar-menu-panel spacing-panel">
-                <span class="menu-panel-label">Interligne</span>
-                <div class="spacing-values">
-                  ${["1", "1.15", "1.5", "2", "3"].map((value) => `<button class="format-button" data-line-spacing="${value}" title="Interligne ${value.replace(".", ",")}">${value.replace(".", ",")}</button>`).join("")}
-                </div>
-                <span class="menu-panel-sep"></span>
+                <span class="menu-panel-label">Espacement des paragraphes</span>
                 <button class="menu-panel-item" type="button" data-paragraph-space="before">Espace avant le paragraphe</button>
                 <button class="menu-panel-item" type="button" data-paragraph-space="after">Espace apres le paragraphe</button>
               </div>
@@ -3872,7 +3921,7 @@
   function extractHeadings(html) {
     const div = document.createElement("div");
     div.innerHTML = html || "";
-    return [...div.querySelectorAll("h1, h2, h3")].map((heading) => ({
+    return [...div.querySelectorAll("h1, h2, h3, h4, h5, h6")].map((heading) => ({
       text: heading.textContent.trim() || "Titre",
       level: Number(heading.tagName.slice(1)),
     }));
@@ -4406,10 +4455,8 @@
       const localFonts = normalizeLocalFonts(settings.localFonts);
       const fontChoices = availableFontOptions();
       const presetRows = [
-        { level: "normal", label: "Normal", min: 12, max: 32 },
-        { level: "h1", label: "Titre 1", min: 14, max: 48 },
-        { level: "h2", label: "Titre 2", min: 14, max: 48 },
-        { level: "h3", label: "Titre 3", min: 14, max: 48 },
+        { level: "normal", min: 12, max: 32 },
+        ...activeHeadingLevels().map((level) => ({ level, min: 12, max: 64 })),
       ];
       const weightOptions = ["400", "500", "600", "650", "700", "740", "780", "820", "860"];
       const selectionColors = ["#0f6b58", "#7c5cff", "#d58f27", "#bf5b7a", "#3f7fbf", "#6f8f3a"];
@@ -4506,20 +4553,26 @@
                 ${presetRows.map((row) => {
                   const level = row.level;
                   const preset = { ...headingDefaults[level], ...(headings[level] || {}) };
+                  const rowName = level === "normal" ? "Normal" : headingName(level);
                   return `
                     <div class="heading-preset-row">
-                      <span>${escapeHtml(row.label)}</span>
-                      <input class="modal-field compact-field" type="number" min="${row.min}" max="${row.max}" value="${Number.parseInt(preset.size, 10)}" data-heading-size="${level}" aria-label="Taille ${escapeHtml(row.label)}" />
-                      <input class="modal-field color-field compact-color" type="color" value="${escapeHtml(preset.color)}" data-heading-color="${level}" aria-label="Couleur ${escapeHtml(row.label)}" />
-                      <select class="modal-field compact-field heading-font-select" data-heading-font="${level}" aria-label="Police ${escapeHtml(row.label)}">
+                      ${level === "normal"
+                        ? `<span>Normal</span>`
+                        : `<input class="modal-field compact-field heading-name-field" type="text" maxlength="30" value="${escapeHtml(rowName)}" data-heading-name="${level}" aria-label="Nom du titre ${level}" />`}
+                      <input class="modal-field compact-field" type="number" min="${row.min}" max="${row.max}" value="${Number.parseInt(preset.size, 10)}" data-heading-size="${level}" aria-label="Taille ${escapeHtml(rowName)}" />
+                      <input class="modal-field color-field compact-color" type="color" value="${escapeHtml(preset.color)}" data-heading-color="${level}" aria-label="Couleur ${escapeHtml(rowName)}" />
+                      <select class="modal-field compact-field heading-font-select" data-heading-font="${level}" aria-label="Police ${escapeHtml(rowName)}">
                         ${fontChoices.map((font) => `<option value="${escapeHtml(font.value)}" ${preset.fontFamily === font.value ? "selected" : ""}>${escapeHtml(font.label)}</option>`).join("")}
                       </select>
-                      <select class="modal-field compact-field" data-heading-weight="${level}" aria-label="Graisse ${escapeHtml(row.label)}">
+                      <select class="modal-field compact-field" data-heading-weight="${level}" aria-label="Graisse ${escapeHtml(rowName)}">
                         ${weightOptions.map((weight) => `<option value="${weight}" ${preset.weight === weight ? "selected" : ""}>${weight}</option>`).join("")}
                       </select>
                     </div>
                   `;
                 }).join("")}
+                ${activeHeadingLevels().length < headingLevels.length
+                  ? `<button class="ghost-button" type="button" data-add-heading>${icon("plus")} Ajouter un titre (${activeHeadingLevels().length}/${headingLevels.length})</button>`
+                  : `<p class="settings-hint">Maximum de ${headingLevels.length} titres atteint (limite des niveaux de titres HTML).</p>`}
               </section>`;
       sectionsHtml["settings-stats"] = `
               <section class="settings-section" id="settings-stats" data-settings-section>
@@ -5091,6 +5144,29 @@
       input.addEventListener("input", () => update(false));
       input.addEventListener("change", () => update(true));
     });
+
+    app.querySelectorAll("[data-heading-name]").forEach((input) => {
+      input.addEventListener("input", () => {
+        const level = input.dataset.headingName;
+        const name = input.value.trim().slice(0, 30) || headingDefaults[level]?.name || level;
+        updateHeadingPreset(level, "name", name);
+        app.querySelectorAll(`[data-format-block] option[value="${level}"]`).forEach((option) => {
+          option.textContent = name;
+        });
+      });
+    });
+
+    const addHeadingButton = app.querySelector("[data-add-heading]");
+    if (addHeadingButton) {
+      addHeadingButton.addEventListener("click", () => {
+        const nextLevel = headingLevels.find((level) => !state.settings.headingPresets?.[level]);
+        if (!nextLevel) return;
+        state.settings.headingPresets[nextLevel] = { ...headingDefaults[nextLevel] };
+        saveState();
+        applyAppearance();
+        render();
+      });
+    }
 
     app.querySelectorAll("[data-heading-size]").forEach((input) => {
       input.addEventListener("input", () => updateHeadingPreset(input.dataset.headingSize, "size", `${input.value || 18}px`));
@@ -6165,7 +6241,7 @@
     return nextSheet;
   }
 
-  const paginationBlockSelector = "p, div, blockquote, h1, h2, h3, ul, ol";
+  const paginationBlockSelector = "p, div, blockquote, h1, h2, h3, h4, h5, h6, ul, ol";
 
   function appendEditableNodeAsBlocks(node, blocks) {
     if (node.nodeType === Node.TEXT_NODE && !node.textContent.trim()) return;
@@ -6266,13 +6342,13 @@
     const source = document.createElement("div");
     source.innerHTML = html || "";
     if (source.textContent.replace(/\u00a0/g, " ").trim()) return true;
-    return !!source.querySelector("h1, h2, h3, li, img, video, audio, iframe, table, hr");
+    return !!source.querySelector("h1, h2, h3, h4, h5, h6, li, img, video, audio, iframe, table, hr");
   }
 
   function hasIntentionalBlankStructure(html) {
     const source = document.createElement("div");
     source.innerHTML = html || "";
-    const blocks = source.querySelectorAll("p, div, blockquote, li, h1, h2, h3").length;
+    const blocks = source.querySelectorAll("p, div, blockquote, li, h1, h2, h3, h4, h5, h6").length;
     const breaks = source.querySelectorAll("br").length;
     return blocks > 0 || breaks > 1;
   }
@@ -6687,7 +6763,7 @@
     let node = selection?.focusNode || selection?.anchorNode || null;
     if (!node || !editor?.contains?.(node)) return currentPageSheet(editor);
     if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
-    return node?.closest?.("p, h1, h2, h3, li, blockquote, div, .page-sheet") || currentPageSheet(editor);
+    return node?.closest?.("p, h1, h2, h3, h4, h5, h6, li, blockquote, div, .page-sheet") || currentPageSheet(editor);
   }
 
   function splittableTextBlock(block) {
@@ -6734,6 +6810,18 @@
       }
     }
 
+    if (best <= 0) {
+      setBlockFragment(block, source, 0, textLength);
+      return null;
+    }
+
+    // Jamais couper un mot en deux : on recule jusqu'au dernier espace.
+    if (best < textLength) {
+      const plain = source.textContent;
+      let cut = best;
+      while (cut > 0 && !/\s/.test(plain.charAt(cut - 1))) cut -= 1;
+      if (cut > 0 && best - cut <= 60) best = cut;
+    }
     if (best <= 0) {
       setBlockFragment(block, source, 0, textLength);
       return null;
@@ -7404,10 +7492,28 @@
     const activeEditor = () => {
       const active = document.activeElement?.closest?.("[data-note-editor]");
       if (active && app.contains(active)) return active;
+      if (runtime.editorRange) {
+        const liveEditors = [...app.querySelectorAll("[data-note-editor]")];
+        const selectedEditor = liveEditors.find((item) => selectionInsideEditor(item, runtime.editorRange));
+        if (selectedEditor) return selectedEditor;
+      }
       const liveEditors = [...app.querySelectorAll("[data-note-editor]")];
       return liveEditors.find((item) => Number(item.dataset.pageIndex || 0) === runtime.activePageIndex) || liveEditors[0] || null;
     };
     editor = activeEditor();
+
+    const saveToolbarSelection = () => {
+      const current = activeEditor();
+      const selection = window.getSelection();
+      if (!current || !selection || !selection.rangeCount) return;
+      const active = document.activeElement;
+      const focusInField = active && active !== current && !current.contains(active)
+        && ["INPUT", "SELECT", "TEXTAREA"].includes(active.tagName);
+      // Quand le focus est deja dans un champ de la barre, la selection du document
+      // est un artefact effondre : ne jamais ecraser la vraie selection sauvegardee.
+      if (selection.isCollapsed && focusInField) return;
+      saveEditorSelection(current);
+    };
 
     function repaginatePagesInPlace(sourceEditor, options = {}) {
       if (normalizeEditorViewMode(state.settings?.editorViewMode) !== "pages") return;
@@ -7458,7 +7564,7 @@
       });
       boundEditor.addEventListener("pointerup", (event) => {
         markEditorPointerIntent();
-        const fallbackTarget = event.target?.closest?.("p, h1, h2, h3, li, blockquote, div:not(.page-sheet)") || currentPageSheet(boundEditor) || boundEditor;
+        const fallbackTarget = event.target?.closest?.("p, h1, h2, h3, h4, h5, h6, li, blockquote, div:not(.page-sheet)") || currentPageSheet(boundEditor) || boundEditor;
         window.requestAnimationFrame(() => {
           if (!document.body.contains(boundEditor)) return;
           const active = activeEditableTarget();
@@ -7591,15 +7697,8 @@
 
     const formatBlock = app.querySelector("[data-format-block]");
     if (formatBlock) {
-      formatBlock.addEventListener("mousedown", () => {
-        const current = activeEditor();
-        if (current) saveEditorSelection(current);
-      });
-      formatBlock.addEventListener("focus", () => {
-        const current = activeEditor();
-        const selection = window.getSelection();
-        if (current && selection && selection.rangeCount && !selection.isCollapsed) saveEditorSelection(current);
-      });
+      formatBlock.addEventListener("mousedown", saveToolbarSelection);
+      formatBlock.addEventListener("focus", saveToolbarSelection);
       formatBlock.addEventListener("change", () => {
         const current = activeEditor();
         if (current) applyHeadingFormat(current, note, box, formatBlock.value);
@@ -7608,14 +7707,9 @@
 
     const size = app.querySelector("[data-font-size]");
     if (size) {
-      size.addEventListener("mousedown", () => {
-        const current = activeEditor();
-        if (current) saveEditorSelection(current);
-      });
+      size.addEventListener("mousedown", saveToolbarSelection);
       size.addEventListener("focus", () => {
-        const current = activeEditor();
-        const selection = window.getSelection();
-        if (current && selection && selection.rangeCount && !selection.isCollapsed) saveEditorSelection(current);
+        saveToolbarSelection();
         holdEditorSelectionHighlight();
       });
       size.addEventListener("blur", releaseEditorSelectionHighlight);
@@ -7626,6 +7720,7 @@
         if (!Number.isFinite(parsed)) return;
         const clamped = Math.min(Math.max(Math.round(parsed), 8), 120);
         size.value = String(clamped);
+        restoreEditorSelection(current);
         applyInlineStyleToSelection(current, note, box, "font-size", `${clamped}px`);
       };
       size.addEventListener("change", applyFontSize);
@@ -7638,14 +7733,9 @@
 
     const fontFamily = app.querySelector("[data-font-family]");
     if (fontFamily) {
-      fontFamily.addEventListener("mousedown", () => {
-        const current = activeEditor();
-        if (current) saveEditorSelection(current);
-      });
+      fontFamily.addEventListener("mousedown", saveToolbarSelection);
       fontFamily.addEventListener("focus", () => {
-        const current = activeEditor();
-        const selection = window.getSelection();
-        if (current && selection && selection.rangeCount && !selection.isCollapsed) saveEditorSelection(current);
+        saveToolbarSelection();
         holdEditorSelectionHighlight();
       });
       fontFamily.addEventListener("blur", releaseEditorSelectionHighlight);
@@ -7656,14 +7746,9 @@
     }
 
     app.querySelectorAll("[data-color-input]").forEach((input) => {
-      input.addEventListener("mousedown", () => {
-        const current = activeEditor();
-        if (current) saveEditorSelection(current);
-      });
+      input.addEventListener("mousedown", saveToolbarSelection);
       input.addEventListener("focus", () => {
-        const current = activeEditor();
-        const selection = window.getSelection();
-        if (current && selection && selection.rangeCount && !selection.isCollapsed) saveEditorSelection(current);
+        saveToolbarSelection();
         holdEditorSelectionHighlight();
       });
       input.addEventListener("blur", releaseEditorSelectionHighlight);
@@ -7748,21 +7833,26 @@
 
     const lineSpacingSelect = app.querySelector("[data-line-spacing-select]");
     if (lineSpacingSelect) {
-      lineSpacingSelect.addEventListener("mousedown", () => {
-        const current = activeEditor();
-        if (current) saveEditorSelection(current);
-      });
+      lineSpacingSelect.addEventListener("mousedown", saveToolbarSelection);
       lineSpacingSelect.addEventListener("focus", () => {
-        const current = activeEditor();
-        const selection = window.getSelection();
-        if (current && selection && selection.rangeCount && !selection.isCollapsed) saveEditorSelection(current);
+        saveToolbarSelection();
         holdEditorSelectionHighlight();
       });
       lineSpacingSelect.addEventListener("blur", releaseEditorSelectionHighlight);
-      lineSpacingSelect.addEventListener("change", () => {
+      const applyLineSpacingValue = () => {
         const current = activeEditor();
-        if (!current || !lineSpacingSelect.value) return;
-        applyLineSpacing(current, note, box, lineSpacingSelect.value);
+        if (!current) return;
+        const parsed = Number.parseFloat(lineSpacingSelect.value);
+        if (!Number.isFinite(parsed)) return;
+        const clamped = Math.min(Math.max(Math.round(parsed * 100) / 100, 0.8), 4);
+        lineSpacingSelect.value = String(clamped);
+        applyLineSpacing(current, note, box, String(clamped));
+      };
+      lineSpacingSelect.addEventListener("change", applyLineSpacingValue);
+      lineSpacingSelect.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        applyLineSpacingValue();
       });
     }
 
@@ -7814,7 +7904,7 @@
       button.addEventListener("click", () => {
         const current = activeEditor();
         if (!current) return;
-        const headings = [...current.querySelectorAll("h1, h2, h3")];
+        const headings = [...current.querySelectorAll("h1, h2, h3, h4, h5, h6")];
         headings[Number(button.dataset.headingIndex)]?.scrollIntoView({ behavior: "smooth", block: "center" });
       });
     });
@@ -7823,7 +7913,7 @@
   function prepareCollapsibleHeadings(editor, note, box) {
     syncCollapsedHeadings(editor);
     syncListMarkerColors(editor);
-    editor.querySelectorAll("h1, h2, h3").forEach((heading) => {
+    editor.querySelectorAll("h1, h2, h3, h4, h5, h6").forEach((heading) => {
       heading.classList.add("collapsible-heading");
       heading.title = "Cliquer la flèche ou double-cliquer pour replier / deplier";
     });
@@ -7838,14 +7928,14 @@
         return;
       }
 
-      const heading = event.target.closest("h1, h2, h3");
+      const heading = event.target.closest("h1, h2, h3, h4, h5, h6");
       if (!heading || !editor.contains(heading) || !isHeadingToggleHit(event, heading)) return;
       event.preventDefault();
       event.stopPropagation();
       toggleHeadingSection(editor, note, box, heading);
     });
     editor.addEventListener("dblclick", (event) => {
-      const heading = event.target.closest("h1, h2, h3");
+      const heading = event.target.closest("h1, h2, h3, h4, h5, h6");
       if (!heading || !editor.contains(heading)) return;
       event.preventDefault();
       toggleHeadingSection(editor, note, box, heading);
@@ -7871,7 +7961,7 @@
   }
 
   function syncCollapsedHeadings(editor) {
-    editor.querySelectorAll("h1[data-collapsed='true'], h2[data-collapsed='true'], h3[data-collapsed='true']").forEach((heading) => {
+    editor.querySelectorAll("h1[data-collapsed='true'], h2[data-collapsed='true'], h3[data-collapsed='true'], h4[data-collapsed='true'], h5[data-collapsed='true'], h6[data-collapsed='true']").forEach((heading) => {
       setHeadingSectionVisibility(heading, true);
     });
   }
@@ -7881,7 +7971,7 @@
     const selection = window.getSelection();
     let element = selection?.anchorNode || null;
     if (element?.nodeType === Node.TEXT_NODE) element = element.parentElement;
-    const heading = element?.closest?.("h1, h2, h3");
+    const heading = element?.closest?.("h1, h2, h3, h4, h5, h6");
     if (!heading || !editor.contains(heading)) {
       setToast("Place le curseur dans un titre.");
       return;
@@ -7890,7 +7980,7 @@
   }
 
   function toggleAllHeadingSections(editor, note, box) {
-    const headings = [...editor.querySelectorAll("h1, h2, h3")];
+    const headings = [...editor.querySelectorAll("h1, h2, h3, h4, h5, h6")];
     if (!headings.length) {
       setToast("Aucun titre dans cette note.");
       return;
@@ -7958,7 +8048,7 @@
     const section = [];
     for (let index = start + 1; index < blocks.length; index += 1) {
       const block = blocks[index];
-      if (/^H[1-3]$/.test(block.tagName) && Number(block.tagName.slice(1)) <= level) break;
+      if (/^H[1-6]$/.test(block.tagName) && Number(block.tagName.slice(1)) <= level) break;
       section.push(block);
     }
     return section;
@@ -8065,6 +8155,27 @@
             setToast("Section depliee pour proteger son contenu.");
             return;
           }
+          // Haut d'une page : le caret redescend en fin de page precedente
+          if (normalizeEditorViewMode(state.settings?.editorViewMode) === "pages" && isContinuousPageFlow()) {
+            const sheet = block.closest?.(".page-sheet");
+            const sheetIndex = sheet ? Number(sheet.dataset.pageSheet || 0) : 0;
+            const directChild = sheet ? directSheetChildForBlock(block, sheet) : null;
+            const firstOfSheet = sheet ? [...sheet.children].find((child) => child.dataset?.paginationProbe !== "true") : null;
+            if (sheetIndex > 0 && directChild && directChild === firstOfSheet) {
+              const previousSheet = editor.querySelector(`[data-page-sheet="${sheetIndex - 1}"]`);
+              const previousBlocks = previousSheet ? [...previousSheet.children].filter((child) => child.dataset?.paginationProbe !== "true") : [];
+              const landing = previousBlocks[previousBlocks.length - 1];
+              if (landing) {
+                event.preventDefault();
+                const caretHost = ["UL", "OL"].includes(landing.tagName) && landing.lastElementChild ? landing.lastElementChild : landing;
+                runtime.activePageIndex = sheetIndex - 1;
+                placeCaretAtEnd(caretHost);
+                saveEditorSelection(editor);
+                window.requestAnimationFrame(() => restorePagedViewport(null, null, "caret"));
+                return;
+              }
+            }
+          }
         }
       }
       return;
@@ -8124,11 +8235,40 @@
     return null;
   }
 
+  function lastExplicitTextColor(root) {
+    if (!root || root.nodeType !== Node.ELEMENT_NODE) return null;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let lastNode = null;
+    let node = walker.nextNode();
+    while (node) {
+      if (node.textContent.trim()) lastNode = node;
+      node = walker.nextNode();
+    }
+    if (!lastNode) return null;
+    let element = lastNode.parentElement;
+    while (element && element !== root) {
+      if (element.style?.color || (element.tagName === "FONT" && element.getAttribute("color"))) {
+        return getComputedStyle(element).color;
+      }
+      element = element.parentElement;
+    }
+    return null;
+  }
+
+  function listMarkerColor(li) {
+    // La puce prend la couleur du texte juste AVANT elle : fin de l'item precedent,
+    // ou fin du bloc au-dessus de la liste pour le premier item.
+    const previous = li.previousElementSibling || li.parentElement?.previousElementSibling;
+    const beforeColor = lastExplicitTextColor(previous);
+    if (beforeColor) return beforeColor;
+    return firstOwnTextColor(li);
+  }
+
   function syncListMarkerColors(editor) {
     if (!editor) return;
     editor.querySelectorAll("li").forEach((li) => {
       if (li.closest(".check-list")) return;
-      const color = firstOwnTextColor(li);
+      const color = listMarkerColor(li);
       if (color) {
         if (li.style.getPropertyValue("--li-marker-color") !== color) {
           li.style.setProperty("--li-marker-color", color);
@@ -8203,7 +8343,7 @@
     let node = selection?.anchorNode;
     if (!node || !editor.contains(node)) return null;
     if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
-    return node?.closest?.("p, div:not(.page-sheet), h1, h2, h3, li") || editor;
+    return node?.closest?.("p, div:not(.page-sheet), h1, h2, h3, h4, h5, h6, li") || editor;
   }
 
   function blankParagraph() {
@@ -8451,7 +8591,7 @@
   }
 
   function isHeadingBlock(block) {
-    return !!block && ["H1", "H2", "H3"].includes(block.tagName);
+    return !!block && /^H[1-6]$/.test(block.tagName);
   }
 
   function exitHeadingBlock(editor, note, box, heading) {
@@ -8676,6 +8816,13 @@
     const range = selection.getRangeAt(0);
     if (selectionInsideEditor(editor, range)) {
       runtime.editorRange = range.cloneRange();
+      const offsets = getEditorSelectionOffsets(editor);
+      if (offsets) {
+        runtime.editorSelectionSnapshot = {
+          noteId: editor.dataset.editorNoteId || "",
+          offsets,
+        };
+      }
     }
   }
 
@@ -8698,16 +8845,29 @@
     const focusTarget = isIndependentPageMode() ? (currentPageSheet(editor) || editor) : editor;
     focusTarget.focus({ preventScroll: true });
     const selection = window.getSelection();
-    if (!selection || !runtime.editorRange) return;
-    try {
-      if (!selectionInsideEditor(editor, runtime.editorRange)) {
+    let restoredRange = false;
+    if (selection && runtime.editorRange) {
+      try {
+        if (selectionInsideEditor(editor, runtime.editorRange)) {
+          selection.removeAllRanges();
+          selection.addRange(runtime.editorRange.cloneRange());
+          restoredRange = true;
+        } else {
+          runtime.editorRange = null;
+        }
+      } catch (error) {
         runtime.editorRange = null;
-        return;
       }
-      selection.removeAllRanges();
-      selection.addRange(runtime.editorRange.cloneRange());
-    } catch (error) {
-      runtime.editorRange = null;
+    }
+    const snapshot = runtime.editorSelectionSnapshot;
+    const restoredSelection = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
+    const restoredCollapsed = !restoredSelection || restoredSelection.collapsed;
+    const snapshotCollapsed = !snapshot || snapshot.offsets.start === snapshot.offsets.end;
+    if ((!restoredRange || (restoredCollapsed && !snapshotCollapsed))
+      && snapshot
+      && (!snapshot.noteId || snapshot.noteId === (editor.dataset.editorNoteId || ""))) {
+      restoreEditorSelectionOffsets(editor, snapshot.offsets);
+      saveEditorSelection(editor);
     }
   }
 
@@ -8831,7 +8991,7 @@
   function applyHeadingFormat(editor, note, box, value) {
     rememberEditorSnapshot(note, editor);
     restoreEditorSelection(editor);
-    const tag = ["h1", "h2", "h3"].includes(value) ? `<${value}>` : "<p>";
+    const tag = headingLevels.includes(value) ? `<${value}>` : "<p>";
     document.execCommand("formatBlock", false, tag);
     prepareCollapsibleHeadings(editor, note, box);
     updateEditorToolbarState(editor);
@@ -8852,7 +9012,7 @@
       const style = getComputedStyle(element);
       families.add(style.fontFamily);
       sizes.add(style.fontSize);
-      const block = element.closest?.("p, h1, h2, h3, li, blockquote, div");
+      const block = element.closest?.("p, h1, h2, h3, h4, h5, h6, li, blockquote, div");
       const blockStyle = block ? getComputedStyle(block) : style;
       const lineHeight = normalizeLineHeightValue(blockStyle.lineHeight, blockStyle.fontSize);
       if (lineHeight) lineHeights.add(lineHeight);
@@ -8941,20 +9101,10 @@
     input.value = computedSize && Number.isFinite(parsed) ? String(Math.round(parsed)) : "";
   }
 
-  function syncLineSpacingSelect(select, computedLineHeight) {
-    if (!select || document.activeElement === select) return;
-    removeDynamicSelectOption(select);
-    if (!computedLineHeight) {
-      select.value = "";
-      return;
-    }
-    const target = Number.parseFloat(computedLineHeight);
-    const option = [...select.options].find((item) => Math.abs(Number.parseFloat(item.value) - target) < 0.03);
-    if (option) {
-      select.value = option.value;
-      return;
-    }
-    setDynamicSelectValue(select, computedLineHeight, computedLineHeight.replace(".", ","));
+  function syncLineSpacingSelect(input, computedLineHeight) {
+    if (!input || document.activeElement === input) return;
+    const parsed = Number.parseFloat(computedLineHeight);
+    input.value = computedLineHeight && Number.isFinite(parsed) ? String(Math.round(parsed * 100) / 100) : "";
   }
 
   function updateEditorToolbarState(editorElement) {
@@ -9006,7 +9156,9 @@
     const tool = app.querySelector(`[data-color-tool="${kind}"]`);
     if (!tool) return;
     const recentKey = kind === "highlight" ? "recentHighlightColors" : "recentTextColors";
-    const presets = kind === "highlight" ? baseColorPresets : textColorPresets;
+    const presets = kind === "highlight"
+      ? [...baseColorPresets, ...paleHighlightPresets]
+      : [...textColorPresets, ...strongTextPresets];
     const presetValues = new Set(presets.map((color) => color.value));
     const current = cleanColor(currentColor, "");
     const recents = normalizeRecentColorSlots(state.settings?.[recentKey]).map((color) => presetValues.has(color) ? "" : color);
@@ -9274,8 +9426,15 @@
     if (img) positionImageToolbar(img);
   }, true);
 
-  document.addEventListener("pointerdown", () => {
+  document.addEventListener("pointerdown", (event) => {
     runtime.pointerIsDown = true;
+    if (event.target.closest?.(".navigator")) {
+      runtime.uiFocusZone = "navigator";
+    } else if (event.target.closest?.(".editor-shell, .workspace")) {
+      runtime.uiFocusZone = "editor";
+    } else if (event.target.closest?.(".inspector, .rail, .app-tabs-bar")) {
+      runtime.uiFocusZone = "autre";
+    }
   }, true);
   ["pointerup", "pointercancel"].forEach((eventName) => {
     document.addEventListener(eventName, () => {
@@ -9309,6 +9468,18 @@
     }
     if ((event.ctrlKey || event.metaKey) && !editingTarget && !modalBlocksGlobalShortcuts()) {
       const key = event.key.toLowerCase();
+      if (key === "a" && runtime.uiFocusZone === "navigator") {
+        const box = activeBox();
+        if (box) {
+          event.preventDefault();
+          const ids = visibleItemIds().filter((id) => id !== box.root.id && findItem(box, id));
+          box.selectedIds = ids;
+          runtime.selectionAnchorId = ids[0] || null;
+          saveState();
+          render();
+        }
+        return;
+      }
       if (key === "c" || key === "x" || key === "v") {
         const box = activeBox();
         if (box) {
