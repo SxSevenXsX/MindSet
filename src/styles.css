@@ -2095,6 +2095,18 @@ body.is-graph-dragging {
 .note-editor .ms-style-ps3 { font-family: var(--ps3-font); font-size: var(--ps3-size); font-weight: var(--ps3-weight); color: var(--ps3-color); font-style: var(--ps3-style, normal); text-decoration: var(--ps3-decoration, none); background: var(--ps3-highlight, transparent); }
 .note-editor .ms-style-ps4 { font-family: var(--ps4-font); font-size: var(--ps4-size); font-weight: var(--ps4-weight); color: var(--ps4-color); font-style: var(--ps4-style, normal); text-decoration: var(--ps4-decoration, none); background: var(--ps4-highlight, transparent); }
 
+/* Presets appliques en style de caractere (inline) sur une selection quelconque : meme rendu que le bloc, mais limite au texte selectionne. */
+.note-editor .ms-inline-h1 { font-family: var(--h1-font); font-size: var(--h1-size); font-weight: var(--h1-weight); color: var(--h1-color); font-style: var(--h1-style, normal); text-decoration: var(--h1-decoration, none); background: var(--h1-highlight, transparent); }
+.note-editor .ms-inline-h2 { font-family: var(--h2-font); font-size: var(--h2-size); font-weight: var(--h2-weight); color: var(--h2-color); font-style: var(--h2-style, normal); text-decoration: var(--h2-decoration, none); background: var(--h2-highlight, transparent); }
+.note-editor .ms-inline-h3 { font-family: var(--h3-font); font-size: var(--h3-size); font-weight: var(--h3-weight); color: var(--h3-color); font-style: var(--h3-style, normal); text-decoration: var(--h3-decoration, none); background: var(--h3-highlight, transparent); }
+.note-editor .ms-inline-h4 { font-family: var(--h4-font); font-size: var(--h4-size); font-weight: var(--h4-weight); color: var(--h4-color); font-style: var(--h4-style, normal); text-decoration: var(--h4-decoration, none); background: var(--h4-highlight, transparent); }
+.note-editor .ms-inline-h5 { font-family: var(--h5-font); font-size: var(--h5-size); font-weight: var(--h5-weight); color: var(--h5-color); font-style: var(--h5-style, normal); text-decoration: var(--h5-decoration, none); background: var(--h5-highlight, transparent); }
+.note-editor .ms-inline-h6 { font-family: var(--h6-font); font-size: var(--h6-size); font-weight: var(--h6-weight); color: var(--h6-color); font-style: var(--h6-style, normal); text-decoration: var(--h6-decoration, none); background: var(--h6-highlight, transparent); }
+.note-editor .ms-inline-ps1 { font-family: var(--ps1-font); font-size: var(--ps1-size); font-weight: var(--ps1-weight); color: var(--ps1-color); font-style: var(--ps1-style, normal); text-decoration: var(--ps1-decoration, none); background: var(--ps1-highlight, transparent); }
+.note-editor .ms-inline-ps2 { font-family: var(--ps2-font); font-size: var(--ps2-size); font-weight: var(--ps2-weight); color: var(--ps2-color); font-style: var(--ps2-style, normal); text-decoration: var(--ps2-decoration, none); background: var(--ps2-highlight, transparent); }
+.note-editor .ms-inline-ps3 { font-family: var(--ps3-font); font-size: var(--ps3-size); font-weight: var(--ps3-weight); color: var(--ps3-color); font-style: var(--ps3-style, normal); text-decoration: var(--ps3-decoration, none); background: var(--ps3-highlight, transparent); }
+.note-editor .ms-inline-ps4 { font-family: var(--ps4-font); font-size: var(--ps4-size); font-weight: var(--ps4-weight); color: var(--ps4-color); font-style: var(--ps4-style, normal); text-decoration: var(--ps4-decoration, none); background: var(--ps4-highlight, transparent); }
+
 .note-editor h1 {
   color: var(--h1-color);
   font-family: var(--h1-font);

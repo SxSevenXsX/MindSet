@@ -740,7 +740,7 @@
     .note-editor h4{font-family:var(--h4-font);font-size:var(--h4-size);font-weight:var(--h4-weight);color:var(--h4-color);font-style:var(--h4-style,normal);text-decoration:var(--h4-decoration,none);background:var(--h4-highlight,transparent);}
     .note-editor h5{font-family:var(--h5-font);font-size:var(--h5-size);font-weight:var(--h5-weight);color:var(--h5-color);font-style:var(--h5-style,normal);text-decoration:var(--h5-decoration,none);background:var(--h5-highlight,transparent);}
     .note-editor h6{font-family:var(--h6-font);font-size:var(--h6-size);font-weight:var(--h6-weight);color:var(--h6-color);font-style:var(--h6-style,normal);text-decoration:var(--h6-decoration,none);background:var(--h6-highlight,transparent);}
-    ${["h1", "h2", "h3", "h4", "h5", "h6", "ps1", "ps2", "ps3", "ps4"].map((k) => `.note-editor .ms-style-${k}{font-family:var(--${k}-font);font-size:var(--${k}-size);font-weight:var(--${k}-weight);color:var(--${k}-color);font-style:var(--${k}-style,normal);text-decoration:var(--${k}-decoration,none);background:var(--${k}-highlight,transparent);}`).join("")}
+    ${["h1", "h2", "h3", "h4", "h5", "h6", "ps1", "ps2", "ps3", "ps4"].map((k) => `.note-editor .ms-style-${k},.note-editor .ms-inline-${k}{font-family:var(--${k}-font);font-size:var(--${k}-size);font-weight:var(--${k}-weight);color:var(--${k}-color);font-style:var(--${k}-style,normal);text-decoration:var(--${k}-decoration,none);background:var(--${k}-highlight,transparent);}`).join("")}
     .note-editor p{margin:.55em 0;}
     .note-editor ul,.note-editor ol{margin:.65em 0;padding-left:1.6em;}
     .note-editor .dash-list,.note-editor .arrow-list,.note-editor .circle-list,.note-editor .check-list,.note-editor .triangle-list,.note-editor .square-list{list-style:none;padding-left:0;}
@@ -9230,8 +9230,16 @@
   function applyHeadingFormat(editor, note, box, value) {
     rememberEditorSnapshot(note, editor);
     restoreEditorSelection(editor);
+    // Style non repliable (preset ps1-4 ou titre dont l'option repliable est desactivee) :
+    // on l'applique comme un style de CARACTERE (inline) sur la seule selection, pas sur le bloc.
+    if (value !== "p" && allStyleLevels.includes(value) && !isFoldableStyle(value)) {
+      applyPresetClassToSelection(editor, note, box, value);
+      return;
+    }
     const info = value === "p" ? { tag: "p", className: "" } : styleTagInfo(value);
     document.execCommand("formatBlock", false, `<${info.tag}>`);
+    // Choisir "Normal" retire aussi les presets inline presents dans la selection.
+    if (value === "p") removeInlinePresetsInSelection(editor);
     // Applique la classe de preset (ou la retire) sur les blocs de la selection.
     const blocks = selectedEditorBlocks(editor);
     (blocks.length ? blocks : [currentEditableBlock(editor)]).forEach((block) => {
@@ -9638,6 +9646,145 @@
     }
     syncEditorContent(editor, note, box);
     updateEditorToolbarState(editor);
+  }
+
+  // Proprietes ecrasees par un preset inline pour un rendu homogene sur la selection.
+  const presetInlineClearProps = ["color", "background", "background-color", "font-size", "font-family", "font-weight", "font-style", "text-decoration"];
+
+  // Retire les classes ms-inline-* des spans entierement contenus dans la plage.
+  function stripInlinePresetClassesInRange(editor, range) {
+    const container = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentElement;
+    if (!container) return;
+    const scope = container.tagName === "SPAN" ? [container, ...container.querySelectorAll("span")] : [...container.querySelectorAll("span")];
+    scope.forEach((element) => {
+      if (!editor.contains(element) || element === editor || !fullyContainedInRange(range, element)) return;
+      allStyleLevels.forEach((level) => element.classList.remove(`ms-inline-${level}`));
+      if (element.getAttribute("class") === "") element.removeAttribute("class");
+    });
+  }
+
+  // Applique un preset (couleur/police/taille/surlignage/gras...) en style de caractere
+  // sur la selection courante, comme les autres mises en forme inline de l'editeur.
+  function applyPresetClassToSelection(editor, note, box, level) {
+    const className = `ms-inline-${level}`;
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount) return;
+    const initialRange = selection.getRangeAt(0);
+    if (!selectionInsideEditor(editor, initialRange)) return;
+
+    if (initialRange.collapsed) {
+      const span = document.createElement("span");
+      span.className = className;
+      span.appendChild(document.createTextNode("​"));
+      initialRange.insertNode(span);
+      const caret = document.createRange();
+      caret.setStart(span.firstChild, span.firstChild.textContent.length);
+      caret.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(caret);
+      saveEditorSelection(editor);
+      syncEditorContent(editor, note, box);
+      updateEditorToolbarState(editor);
+      return;
+    }
+
+    let startNode = initialRange.startContainer;
+    let startOffset = initialRange.startOffset;
+    let endNode = initialRange.endContainer;
+    let endOffset = initialRange.endOffset;
+    if (endNode.nodeType === Node.TEXT_NODE && endOffset > 0 && endOffset < endNode.textContent.length) {
+      endNode.splitText(endOffset);
+      endOffset = endNode.textContent.length;
+    }
+    if (startNode.nodeType === Node.TEXT_NODE && startOffset > 0 && startOffset < startNode.textContent.length) {
+      const tail = startNode.splitText(startOffset);
+      if (endNode === startNode) {
+        endNode = tail;
+        endOffset = tail.textContent.length;
+      }
+      startNode = tail;
+      startOffset = 0;
+    }
+
+    const workRange = document.createRange();
+    try {
+      workRange.setStart(startNode, startNode.nodeType === Node.TEXT_NODE ? 0 : startOffset);
+      workRange.setEnd(endNode, endNode.nodeType === Node.TEXT_NODE ? endNode.textContent.length : endOffset);
+    } catch (error) {
+      return;
+    }
+
+    // Le preset prime : on efface la mise en forme inline concurrente dans la plage.
+    presetInlineClearProps.forEach((prop) => clearInlinePropertyInRange(editor, workRange, prop));
+    stripInlinePresetClassesInRange(editor, workRange);
+
+    const targets = textNodesFullyInRange(editor, workRange);
+    targets.forEach((node) => {
+      const parent = node.parentElement;
+      if (parent && parent !== editor && parent.tagName === "SPAN" && parent.childNodes.length === 1 && !parent.classList.contains("page-sheet")) {
+        allStyleLevels.forEach((lvl) => parent.classList.remove(`ms-inline-${lvl}`));
+        parent.classList.add(className);
+        return;
+      }
+      const span = document.createElement("span");
+      span.className = className;
+      node.before(span);
+      span.appendChild(node);
+    });
+
+    if (targets.length) {
+      const restore = document.createRange();
+      restore.setStart(targets[0], 0);
+      restore.setEnd(targets[targets.length - 1], targets[targets.length - 1].textContent.length);
+      selection.removeAllRanges();
+      selection.addRange(restore);
+      saveEditorSelection(editor);
+    }
+    syncEditorContent(editor, note, box);
+    updateEditorToolbarState(editor);
+  }
+
+  // Retire les presets inline (deroulant "Normal") des spans entierement selectionnes ;
+  // deballe le span quand il ne porte plus ni classe ni style propre.
+  function removeInlinePresetsInSelection(editor) {
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount) return false;
+    const range = selection.getRangeAt(0);
+    if (!selectionInsideEditor(editor, range) || range.collapsed) return false;
+    const container = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentElement;
+    if (!container) return false;
+    const scope = container.tagName === "SPAN" ? [container, ...container.querySelectorAll("span")] : [...container.querySelectorAll("span")];
+    // La selection couvre-t-elle tout le TEXTE du span ? On ancre la comparaison sur
+    // les noeuds texte (comme la selection) et non sur les bornes de l'element.
+    const rangeCoversContents = (element) => {
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      const firstText = walker.nextNode();
+      if (!firstText) return false;
+      let lastText = firstText;
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) lastText = n;
+      const contents = document.createRange();
+      contents.setStart(firstText, 0);
+      contents.setEnd(lastText, lastText.textContent.length);
+      return range.compareBoundaryPoints(Range.START_TO_START, contents) <= 0
+        && range.compareBoundaryPoints(Range.END_TO_END, contents) >= 0;
+    };
+    let changed = false;
+    scope.forEach((element) => {
+      if (!editor.contains(element) || element === editor || !rangeCoversContents(element)) return;
+      if (!allStyleLevels.some((level) => element.classList.contains(`ms-inline-${level}`))) return;
+      allStyleLevels.forEach((level) => element.classList.remove(`ms-inline-${level}`));
+      changed = true;
+      if (element.getAttribute("class") === "") element.removeAttribute("class");
+      if (!element.getAttribute("class") && !element.getAttribute("style")) {
+        while (element.firstChild) element.parentNode.insertBefore(element.firstChild, element);
+        element.remove();
+      }
+    });
+    return changed;
   }
 
   function insertList(editor, note, box, type) {
