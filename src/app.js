@@ -7957,7 +7957,10 @@
     app.querySelectorAll("[data-apply-color]").forEach((button) => {
       button.addEventListener("mousedown", (event) => {
         const current = activeEditor();
-        if (current) saveEditorSelection(current);
+        const selection = window.getSelection();
+        // Ne pas ecraser la selection valide deja sauvegardee par un caret effondre :
+        // apres le selecteur de couleur natif, la selection du document est perdue.
+        if (current && selection && !selection.isCollapsed) saveEditorSelection(current);
         event.preventDefault();
       });
       button.addEventListener("click", () => {
@@ -7972,7 +7975,8 @@
     app.querySelectorAll("[data-clear-highlight]").forEach((button) => {
       button.addEventListener("mousedown", (event) => {
         const current = activeEditor();
-        if (current) saveEditorSelection(current);
+        const selection = window.getSelection();
+        if (current && selection && !selection.isCollapsed) saveEditorSelection(current);
         event.preventDefault();
       });
       button.addEventListener("click", () => {
@@ -7984,7 +7988,8 @@
     app.querySelectorAll("[data-color-swatch]").forEach((button) => {
       button.addEventListener("mousedown", (event) => {
         const current = activeEditor();
-        if (current) saveEditorSelection(current);
+        const selection = window.getSelection();
+        if (current && selection && !selection.isCollapsed) saveEditorSelection(current);
         event.preventDefault();
       });
       button.addEventListener("click", () => {
