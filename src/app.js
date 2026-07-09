@@ -46,10 +46,19 @@
     encryptRunning: false,
     lastListAutoFormat: null,
     suppressSelectionSave: false,
+    audioDbPromise: null,
+    audioObjectUrls: [],
+    audioRecording: null,
   };
 
   const icons = {
     box: '<path d="M3 7.5 12 3l9 4.5-9 4.5L3 7.5Z"/><path d="M3 7.5v9L12 21l9-4.5v-9"/><path d="M12 12v9"/>',
+    audio: '<path d="M9 18V5l10-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/>',
+    audioPlus: '<path d="M9 15V5l7-1.4"/><circle cx="6" cy="15" r="3"/><path d="M16 4v6"/><path d="M13 7h6"/>',
+    mic: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/><path d="M8 21h8"/>',
+    stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+    play: '<path d="M8 5v14l11-7z"/>',
+    importAudio: '<path d="M12 3v10"/><path d="m8 9 4 4 4-4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>',
     folder: '<path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H10l2 2h6.5A2.5 2.5 0 0 1 21 8.5v8A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5v-10Z"/>',
     note: '<path d="M7 3h7l4 4v14H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M14 3v5h5"/><path d="M8 13h8"/><path d="M8 17h6"/>',
     notePlus: '<path d="M7 3h7l4 4v14H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M14 3v5h5"/><path d="M12 12v6"/><path d="M9 15h6"/>',
@@ -490,7 +499,8 @@
     if (node.iconKind === "emoji") {
       return `<span class="item-icon emoji" aria-hidden="true">${escapeHtml(node.emoji || emojiChoices[0])}</span>`;
     }
-    return `<span class="item-icon ${node.type}">${icon(node.type === "folder" ? "folder" : "note")}</span>`;
+    const glyph = node.type === "folder" ? "folder" : node.type === "audio" ? "audio" : "note";
+    return `<span class="item-icon ${node.type}">${icon(glyph)}</span>`;
   }
 
   function uid(prefix) {
@@ -1467,6 +1477,10 @@
       if (!Array.isArray(node.children)) node.children = [];
       node.children.forEach((child) => normalizeItemShape(child));
     }
+    if (node.type === "audio") {
+      if (!Array.isArray(node.clips)) node.clips = [];
+      node.clips = node.clips.filter((clip) => clip && clip.id);
+    }
   }
 
   function hexToRgba(hex, alpha) {
@@ -2182,6 +2196,177 @@
     return { key, payloadJson: new TextDecoder().decode(data) };
   }
 
+  // ------------------------------------------------------------------
+  // Stockage des clips audio : les octets vivent dans IndexedDB (grande
+  // capacite) et NON dans l'etat localStorage (qui casserait). L'etat ne
+  // garde qu'une fiche legere par clip. Les boites a code chiffrent les
+  // octets avec la meme cle AES-GCM que la boite (index `boxId` pour
+  // migrer/purger sans dependre de l'arbre en memoire).
+  // ------------------------------------------------------------------
+  const AUDIO_DB_NAME = "mindset-audio";
+  const AUDIO_STORE = "clips";
+
+  function openAudioDb() {
+    if (runtime.audioDbPromise) return runtime.audioDbPromise;
+    runtime.audioDbPromise = new Promise((resolve, reject) => {
+      if (!window.indexedDB) {
+        reject(new Error("IndexedDB indisponible"));
+        return;
+      }
+      const request = window.indexedDB.open(AUDIO_DB_NAME, 1);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(AUDIO_STORE)) {
+          const store = db.createObjectStore(AUDIO_STORE, { keyPath: "id" });
+          store.createIndex("boxId", "boxId", { unique: false });
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error("Ouverture IndexedDB echouee"));
+    }).catch((error) => {
+      runtime.audioDbPromise = null;
+      throw error;
+    });
+    return runtime.audioDbPromise;
+  }
+
+  function audioRequest(store, method, arg) {
+    return new Promise((resolve, reject) => {
+      const request = arg === undefined ? store[method]() : store[method](arg);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function audioPutClip(record) {
+    const db = await openAudioDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(AUDIO_STORE, "readwrite");
+      tx.objectStore(AUDIO_STORE).put(record);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  }
+
+  async function audioGetClip(id) {
+    if (!id) return null;
+    const db = await openAudioDb();
+    const tx = db.transaction(AUDIO_STORE, "readonly");
+    return audioRequest(tx.objectStore(AUDIO_STORE), "get", id);
+  }
+
+  async function audioDeleteClips(ids) {
+    const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
+    if (!list.length) return;
+    const db = await openAudioDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(AUDIO_STORE, "readwrite");
+      const store = tx.objectStore(AUDIO_STORE);
+      list.forEach((id) => store.delete(id));
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  }
+
+  async function audioClipsForBox(boxId) {
+    const db = await openAudioDb();
+    const tx = db.transaction(AUDIO_STORE, "readonly");
+    const index = tx.objectStore(AUDIO_STORE).index("boxId");
+    return audioRequest(index, "getAll", boxId);
+  }
+
+  // Cle AES-GCM d'une boite deverrouillee (null si boite sans code ou verrouillee).
+  async function boxAudioKey(boxId) {
+    const entry = runtime.boxCrypto.get(boxId);
+    if (!entry) return null;
+    return ensureBoxCryptoKey(entry);
+  }
+
+  async function encryptAudioBytes(key, buffer) {
+    const subtle = cryptoSubtle();
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const data = await subtle.encrypt({ name: "AES-GCM", iv }, key, buffer);
+    return { iv: bytesToBase64(iv), data };
+  }
+
+  async function decryptAudioBytes(key, ivB64, buffer) {
+    const subtle = cryptoSubtle();
+    return subtle.decrypt({ name: "AES-GCM", iv: base64ToBytes(ivB64) }, key, buffer);
+  }
+
+  // Ecrit les octets d'un clip : chiffres si la boite a un code (et est
+  // deverrouillee, ce qui est toujours le cas quand on enregistre/importe).
+  async function storeAudioClipBytes(box, clipId, mime, buffer) {
+    let enc = false;
+    let iv = null;
+    let data = buffer;
+    if (box?.passwordHash) {
+      const key = await boxAudioKey(box.id);
+      if (key) {
+        const result = await encryptAudioBytes(key, buffer);
+        enc = true;
+        iv = result.iv;
+        data = result.data;
+      }
+    }
+    await audioPutClip({ id: clipId, boxId: box.id, mime: mime || "audio/webm", enc, iv, data });
+  }
+
+  // Lit un clip et renvoie une URL objet jouable (dechiffre au besoin).
+  async function loadAudioClipUrl(box, clipId) {
+    const record = await audioGetClip(clipId);
+    if (!record) return null;
+    let bytes = record.data;
+    if (record.enc) {
+      const key = await boxAudioKey(box.id);
+      if (!key) return null;
+      bytes = await decryptAudioBytes(key, record.iv, record.data);
+    }
+    const blob = new Blob([bytes], { type: record.mime || "audio/webm" });
+    const url = URL.createObjectURL(blob);
+    runtime.audioObjectUrls.push(url);
+    return url;
+  }
+
+  // Re-chiffre/dechiffre tous les clips d'une boite lors d'un changement de
+  // code (par index boxId : marche meme si l'arbre n'est pas en memoire).
+  async function migrateBoxAudio(boxId, fromKey, toKey) {
+    let records = [];
+    try {
+      records = await audioClipsForBox(boxId);
+    } catch (error) {
+      return;
+    }
+    for (const record of records) {
+      try {
+        let bytes = record.data;
+        if (record.enc) {
+          if (!fromKey) continue;
+          bytes = await decryptAudioBytes(fromKey, record.iv, record.data);
+        }
+        if (toKey) {
+          const result = await encryptAudioBytes(toKey, bytes);
+          await audioPutClip({ ...record, enc: true, iv: result.iv, data: result.data });
+        } else {
+          await audioPutClip({ ...record, enc: false, iv: null, data: bytes });
+        }
+      } catch (error) {
+        /* clip illisible (mauvaise cle) : on le laisse tel quel */
+      }
+    }
+  }
+
+  function collectAudioClipIds(node, sink) {
+    if (!node) return;
+    if (node.type === "audio") {
+      (node.clips || []).forEach((clip) => sink.push(clip.id));
+    } else if (node.type === "folder") {
+      (node.children || []).forEach((child) => collectAudioClipIds(child, sink));
+    }
+  }
+
   function protectedBoxPayload(box) {
     return {
       root: box.root,
@@ -2487,6 +2672,9 @@
 
   function setActiveItem(box, id, event) {
     cancelDeferredEditorWork({ suppressIdleMs: 350 });
+    // Quitter un fichier audio en cours d'enregistrement stoppe l'enregistrement
+    // (sinon le micro resterait actif sans bouton pour l'arreter).
+    if (runtime.audioRecording && runtime.audioRecording.itemId !== id) stopAudioRecording();
     box.activeItemId = id;
     runtime.focusedItemId = id;
     if (!Array.isArray(box.openTabIds)) box.openTabIds = [];
@@ -2769,6 +2957,31 @@
     requestAnimationFrame(() => document.querySelector("[data-note-editor]")?.focus());
   }
 
+  function createAudioItem(box, folder = creationFolder(box)) {
+    const createdAt = now();
+    rememberState("Creation de fichier audio");
+    const item = {
+      id: uid("audio"),
+      type: "audio",
+      title: "Nouveau fichier audio",
+      iconKind: "none",
+      createdAt,
+      modifiedAt: createdAt,
+      clips: [],
+    };
+    folder.children.push(item);
+    folder.modifiedAt = createdAt;
+    box.activeItemId = item.id;
+    box.selectedIds = [item.id];
+    if (!Array.isArray(box.openTabIds)) box.openTabIds = [];
+    if (!box.openTabIds.includes(item.id)) box.openTabIds.push(item.id);
+    if (!box.expandedIds.includes(folder.id)) box.expandedIds.push(folder.id);
+    touchBox(box);
+    pushNavigationPoint();
+    saveState();
+    render();
+  }
+
   function createFolder(box) {
     const folder = creationFolder(box);
     const createdAt = now();
@@ -3023,10 +3236,46 @@
     };
     if (item.type === "folder") {
       clone.children = (item.children || []).map((child) => cloneItemTree(child, { timestamp }));
+    } else if (item.type === "audio") {
+      // Nouveaux ids de clips + marqueur pour copier les octets (voir copyClonedAudioBytes).
+      clone.clips = (item.clips || []).map((clip) => ({ ...clip, id: uid("clip"), sourceClipId: clip.id }));
     } else {
       clone.content = item.content || "<p><br></p>";
     }
     return clone;
+  }
+
+  // Copie les octets audio des clips clones (duplication / collage) sous leurs
+  // nouveaux ids : lit la source (dechiffree si besoin) et re-stocke pour la
+  // boite cible (re-chiffree si la cible a un code).
+  async function copyClonedAudioBytes(targetBox, clones, sourceBox) {
+    const pending = [];
+    const collect = (node) => {
+      if (!node) return;
+      if (node.type === "audio") (node.clips || []).forEach((clip) => { if (clip.sourceClipId) pending.push(clip); });
+      else if (node.type === "folder") (node.children || []).forEach(collect);
+    };
+    clones.forEach(collect);
+    if (!pending.length) return;
+    for (const clip of pending) {
+      try {
+        const record = await audioGetClip(clip.sourceClipId);
+        if (record) {
+          let bytes = record.data;
+          if (record.enc) {
+            const key = await boxAudioKey(sourceBox.id);
+            if (!key) { delete clip.sourceClipId; continue; }
+            bytes = await decryptAudioBytes(key, record.iv, record.data);
+          }
+          await storeAudioClipBytes(targetBox, clip.id, clip.mime, bytes);
+        }
+      } catch (error) {
+        /* clip source illisible : on abandonne cette copie */
+      }
+      delete clip.sourceClipId;
+    }
+    saveState();
+    if (app.querySelector("[data-audio-item]")) hydrateAudioView();
   }
 
   function selectItemsAfterInsert(box, items, parent) {
@@ -3062,6 +3311,7 @@
     touchBox(box);
     saveState();
     render();
+    copyClonedAudioBytes(box, clones, box);
     return true;
   }
 
@@ -3133,6 +3383,7 @@
     touchBox(box);
     saveState();
     render();
+    copyClonedAudioBytes(box, clones, sourceBox);
     return true;
   }
 
@@ -3325,6 +3576,7 @@
     bindEvents();
     bindGraphCanvas();
     bindTabMarquees();
+    hydrateAudioView();
     if (!restoreNoteEditorFocus(previousEditorFocus) && !restoreModalFieldFocus(previousModalFocus)) focusAutofocusTarget();
     if (previousModalType === "settings" && runtime.modal?.type === "settings") {
       requestAnimationFrame(() => {
@@ -3548,6 +3800,7 @@
         ${runtime.explorerToolsOpen ? `
           <button class="tool-button" data-action="new-note" data-tooltip="Nouvelle note" aria-label="Nouvelle note">${icon("notePlus")}</button>
           <button class="tool-button" data-action="new-folder" data-tooltip="Nouveau dossier" aria-label="Nouveau dossier">${icon("folderPlus")}</button>
+          <button class="tool-button" data-action="new-audio" data-tooltip="Nouveau fichier audio" aria-label="Nouveau fichier audio">${icon("audioPlus")}</button>
           <label class="tool-button icon-select" data-tooltip="Trier" aria-label="Trier">
             ${icon("sort")}
             <select data-sort-mode aria-label="Trier">
@@ -3787,7 +4040,375 @@
   function renderMainContent(box) {
     const active = findItem(box, box.activeItemId) || box.root;
     if (active.type === "note") return renderEditor(box, active);
+    if (active.type === "audio") return renderAudioView(box, active);
     return renderFolderView(box, active);
+  }
+
+  // ----------------------------- Fichiers audio -----------------------------
+
+  function formatClipDuration(seconds) {
+    const total = Math.max(0, Math.round(Number(seconds) || 0));
+    const minutes = Math.floor(total / 60);
+    const rest = total % 60;
+    return `${minutes}:${String(rest).padStart(2, "0")}`;
+  }
+
+  function renderAudioClip(clip, index) {
+    const durationText = clip.duration ? formatClipDuration(clip.duration) : "";
+    const sourceLabel = clip.source === "import" ? "Importé" : "Enregistré";
+    const meta = [sourceLabel, durationText, formatShortDate(clip.createdAt)].filter(Boolean).join(" · ");
+    return `
+      <div class="audio-clip" data-clip-id="${clip.id}">
+        <div class="audio-clip-top">
+          <span class="audio-clip-index">${index + 1}</span>
+          <input class="audio-clip-name" data-clip-name data-clip-id="${clip.id}" value="${escapeHtml(clip.name || "")}" placeholder="Nom du clip" maxlength="120" />
+          <button class="audio-icon-btn danger" data-clip-delete data-clip-id="${clip.id}" title="Supprimer ce clip" aria-label="Supprimer ce clip">${icon("trash")}</button>
+        </div>
+        <audio class="audio-player" data-clip-audio data-clip-id="${clip.id}" controls preload="none"></audio>
+        <div class="audio-clip-meta">${escapeHtml(meta)}</div>
+      </div>
+    `;
+  }
+
+  function renderAudioView(box, item) {
+    const clips = item.clips || [];
+    const recording = !!(runtime.audioRecording && runtime.audioRecording.itemId === item.id);
+    const lockNote = box.passwordHash
+      ? `<span class="audio-lock" title="Ces audios sont chiffrés avec le code de la boîte">${icon("lock")}<span>chiffré</span></span>`
+      : "";
+    const clipMarkup = clips.length
+      ? clips.map((clip, index) => renderAudioClip(clip, index)).join("")
+      : `<div class="audio-empty">${icon("audio")}<p>Aucun clip pour l'instant.</p><span>Enregistre au micro ou importe un fichier audio.</span></div>`;
+    return `
+      <article class="audio-shell" data-audio-item="${item.id}">
+        <header class="audio-header">
+          <div class="audio-title-row">
+            <span class="audio-file-icon">${icon("audio")}</span>
+            <input class="audio-title" data-audio-title data-item-id="${item.id}" value="${escapeHtml(item.title)}" placeholder="Titre du fichier audio" maxlength="120" />
+            ${lockNote}
+          </div>
+          <div class="audio-controls">
+            <button class="audio-btn audio-record ${recording ? "is-recording" : ""}" data-audio-record data-item-id="${item.id}" type="button">
+              ${icon(recording ? "stop" : "mic")}<span>${recording ? "Stopper" : "Enregistrer"}</span>
+            </button>
+            <button class="audio-btn ghost" data-audio-import data-item-id="${item.id}" type="button">${icon("importAudio")}<span>Importer</span></button>
+            <span class="audio-status" data-audio-status></span>
+            <input type="file" accept="audio/*" multiple data-audio-file hidden />
+          </div>
+        </header>
+        <div class="audio-clips" data-audio-clips>
+          ${clipMarkup}
+        </div>
+      </article>
+    `;
+  }
+
+  function revokeAudioObjectUrls() {
+    runtime.audioObjectUrls.forEach((url) => {
+      try { URL.revokeObjectURL(url); } catch (error) { /* deja libere */ }
+    });
+    runtime.audioObjectUrls = [];
+  }
+
+  // Apres chaque render : recharge les URLs jouables des clips (dechiffrees au
+  // besoin) et remet l'UI d'enregistrement si une session est en cours.
+  function hydrateAudioView() {
+    revokeAudioObjectUrls();
+    const shell = app.querySelector("[data-audio-item]");
+    if (!shell) return;
+    const box = activeBox();
+    const item = box ? findItem(box, shell.dataset.audioItem) : null;
+    if (!box || !item) return;
+    shell.querySelectorAll("[data-clip-audio]").forEach((element) => {
+      loadAudioClipUrl(box, element.dataset.clipId).then((url) => {
+        if (!element.isConnected) return;
+        if (url) element.src = url;
+        else element.closest(".audio-clip")?.classList.add("is-unreadable");
+      }).catch(() => {});
+    });
+    if (runtime.audioRecording && runtime.audioRecording.itemId === item.id) startAudioTimerUi();
+  }
+
+  function updateAudioRecordButton(recording) {
+    const button = app.querySelector("[data-audio-record]");
+    if (!button) return;
+    button.classList.toggle("is-recording", recording);
+    button.innerHTML = `${icon(recording ? "stop" : "mic")}<span>${recording ? "Stopper" : "Enregistrer"}</span>`;
+    if (!recording) {
+      const status = app.querySelector("[data-audio-status]");
+      if (status) status.textContent = "";
+    }
+  }
+
+  function startAudioTimerUi() {
+    updateAudioRecordButton(true);
+    const session = runtime.audioRecording;
+    if (!session) return;
+    if (session.timer) window.clearInterval(session.timer); // evite un doublon apres un render
+    const tick = () => {
+      if (!runtime.audioRecording) return;
+      const status = app.querySelector("[data-audio-status]");
+      if (status) status.textContent = "● " + formatClipDuration((Date.now() - runtime.audioRecording.startedAt) / 1000);
+    };
+    tick();
+    session.timer = window.setInterval(tick, 500);
+  }
+
+  async function startAudioRecording(box, item) {
+    if (runtime.audioRecording) return;
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      setToast("Enregistrement audio non supporté ici.");
+      return;
+    }
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (error) {
+      setToast("Micro indisponible ou accès refusé.");
+      return;
+    }
+    const preferred = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
+    let mimeType = "";
+    for (const candidate of preferred) {
+      if (MediaRecorder.isTypeSupported?.(candidate)) { mimeType = candidate; break; }
+    }
+    let recorder;
+    try {
+      recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    } catch (error) {
+      stream.getTracks().forEach((track) => track.stop());
+      setToast("Enregistrement impossible.");
+      return;
+    }
+    const chunks = [];
+    recorder.addEventListener("dataavailable", (event) => {
+      if (event.data && event.data.size) chunks.push(event.data);
+    });
+    recorder.addEventListener("stop", () => {
+      const session = runtime.audioRecording;
+      const elapsed = session ? Math.round((Date.now() - session.startedAt) / 1000) : 0;
+      if (session?.timer) window.clearInterval(session.timer);
+      runtime.audioRecording = null;
+      stream.getTracks().forEach((track) => track.stop());
+      const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || "audio/webm" });
+      if (!blob.size) { render(); return; }
+      addAudioClip(box, item, { blob, duration: elapsed, source: "record" });
+    });
+    runtime.audioRecording = { itemId: item.id, boxId: box.id, recorder, stream, startedAt: Date.now(), timer: 0 };
+    try {
+      recorder.start();
+    } catch (error) {
+      runtime.audioRecording = null;
+      stream.getTracks().forEach((track) => track.stop());
+      setToast("Enregistrement impossible.");
+      return;
+    }
+    startAudioTimerUi();
+  }
+
+  function stopAudioRecording() {
+    const session = runtime.audioRecording;
+    if (!session) return;
+    try { session.recorder.stop(); } catch (error) { /* le handler stop nettoie */ }
+  }
+
+  function toggleAudioRecording(box, item) {
+    if (runtime.audioRecording && runtime.audioRecording.itemId === item.id) stopAudioRecording();
+    else if (!runtime.audioRecording) startAudioRecording(box, item);
+    else setToast("Un enregistrement est déjà en cours.");
+  }
+
+  function probeAudioDuration(blob) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const url = URL.createObjectURL(blob);
+      const audio = document.createElement("audio");
+      audio.preload = "metadata";
+      const done = (value) => {
+        if (settled) return;
+        settled = true;
+        try { URL.revokeObjectURL(url); } catch (error) { /* ignore */ }
+        resolve(Number.isFinite(value) && value > 0 ? Math.round(value) : 0);
+      };
+      audio.addEventListener("loadedmetadata", () => done(audio.duration));
+      audio.addEventListener("error", () => done(0));
+      audio.src = url;
+      window.setTimeout(() => done(audio.duration), 4000);
+    });
+  }
+
+  async function addAudioClip(box, item, clip, options = {}) {
+    const clipId = uid("clip");
+    let buffer;
+    try {
+      buffer = await clip.blob.arrayBuffer();
+    } catch (error) {
+      setToast("Fichier audio illisible.");
+      return false;
+    }
+    try {
+      await storeAudioClipBytes(box, clipId, clip.blob.type, buffer);
+    } catch (error) {
+      console.warn("MindSet audio store failed", error);
+      setToast("Échec du stockage audio.");
+      return false;
+    }
+    item.clips = item.clips || [];
+    const fallbackName = `Clip ${item.clips.length + 1}`;
+    const name = clip.name && String(clip.name).trim() ? String(clip.name).trim().slice(0, 120) : fallbackName;
+    item.clips.push({
+      id: clipId,
+      name,
+      mime: clip.blob.type || "audio/webm",
+      duration: clip.duration || 0,
+      size: buffer.byteLength,
+      source: clip.source || "record",
+      createdAt: now(),
+    });
+    item.modifiedAt = now();
+    touchBox(box);
+    saveState();
+    if (!options.skipRender) render();
+    return true;
+  }
+
+  async function importAudioFiles(box, item, fileList) {
+    const files = [...(fileList || [])].filter((file) => file
+      && (String(file.type || "").startsWith("audio/") || /\.(mp3|wav|m4a|aac|ogg|oga|webm|flac|opus)$/i.test(file.name || "")));
+    if (!files.length) {
+      setToast("Aucun fichier audio valide.");
+      return;
+    }
+    let added = 0;
+    for (const file of files) {
+      const duration = await probeAudioDuration(file).catch(() => 0);
+      const done = await addAudioClip(box, item, {
+        blob: file,
+        duration,
+        name: String(file.name || "").replace(/\.[^.]+$/, ""),
+        source: "import",
+      }, { skipRender: true });
+      if (done) added += 1;
+    }
+    render();
+    if (added) setToast(added > 1 ? `${added} audios importés.` : "Audio importé.");
+  }
+
+  function deleteAudioClip(box, item, clipId) {
+    if (!item?.clips) return;
+    const before = item.clips.length;
+    item.clips = item.clips.filter((clip) => clip.id !== clipId);
+    if (item.clips.length === before) return;
+    item.modifiedAt = now();
+    touchBox(box);
+    saveState();
+    render();
+    audioDeleteClips([clipId]).catch(() => {});
+  }
+
+  function renameAudioClip(box, item, clipId, name) {
+    const clip = (item.clips || []).find((entry) => entry.id === clipId);
+    if (!clip) return;
+    clip.name = String(name || "").slice(0, 120);
+    item.modifiedAt = now();
+    touchBox(box);
+    saveState();
+  }
+
+  function renameAudioItem(box, item, title) {
+    item.title = String(title || "").slice(0, 120) || "Fichier audio";
+    item.modifiedAt = now();
+    touchBox(box);
+    saveState();
+  }
+
+  // Cles (id de clip) d'une boite sans charger les octets (openKeyCursor).
+  async function audioClipKeysForBox(boxId) {
+    const db = await openAudioDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(AUDIO_STORE, "readonly");
+      const index = tx.objectStore(AUDIO_STORE).index("boxId");
+      const keys = [];
+      const request = index.openKeyCursor(IDBKeyRange.only(boxId));
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (cursor) { keys.push(cursor.primaryKey); cursor.continue(); }
+        else resolve(keys);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  // Purge les octets orphelins (clip supprimé, item supprimé) des seules boites
+  // inspectables (deverrouillees) — on ne touche jamais aux clips d'une boite
+  // verrouillee dont on ne connait pas l'arbre.
+  async function garbageCollectAudio() {
+    if (!window.indexedDB) return;
+    try {
+      for (const box of state.boxes) {
+        if (!box.root) continue;
+        const referenced = [];
+        collectAudioClipIds(box.root, referenced);
+        const referencedSet = new Set(referenced);
+        const keys = await audioClipKeysForBox(box.id);
+        const orphans = keys.filter((id) => !referencedSet.has(id));
+        if (orphans.length) await audioDeleteClips(orphans);
+      }
+    } catch (error) {
+      /* nettoyage best-effort */
+    }
+  }
+
+  function currentAudioItem() {
+    const box = activeBox();
+    const shell = app.querySelector("[data-audio-item]");
+    if (!box || !shell) return { box: null, item: null };
+    return { box, item: findItem(box, shell.dataset.audioItem) };
+  }
+
+  function bindAudioViewEvents() {
+    app.querySelectorAll("[data-audio-record]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const box = activeBox();
+        const item = box ? findItem(box, button.dataset.itemId) : null;
+        if (box && item) toggleAudioRecording(box, item);
+      });
+    });
+
+    const fileInput = app.querySelector("[data-audio-file]");
+    app.querySelectorAll("[data-audio-import]").forEach((button) => {
+      button.addEventListener("click", () => fileInput?.click());
+    });
+    if (fileInput) {
+      fileInput.addEventListener("change", () => {
+        const { box, item } = currentAudioItem();
+        if (box && item && fileInput.files?.length) importAudioFiles(box, item, fileInput.files);
+        fileInput.value = "";
+      });
+    }
+
+    app.querySelectorAll("[data-clip-delete]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const { box, item } = currentAudioItem();
+        if (box && item) deleteAudioClip(box, item, button.dataset.clipId);
+      });
+    });
+
+    app.querySelectorAll("[data-clip-name]").forEach((input) => {
+      input.addEventListener("input", () => {
+        const { box, item } = currentAudioItem();
+        if (box && item) renameAudioClip(box, item, input.dataset.clipId, input.value);
+      });
+    });
+
+    app.querySelectorAll("[data-audio-title]").forEach((input) => {
+      input.addEventListener("input", () => {
+        const box = activeBox();
+        const item = box ? findItem(box, input.dataset.itemId) : null;
+        if (box && item) renameAudioItem(box, item, input.value);
+      });
+      input.addEventListener("change", () => render());
+    });
   }
 
   function renderEditor(box, note) {
@@ -3937,6 +4558,7 @@
             <p>${children.length} élément${children.length > 1 ? "s" : ""} · ${folder.id === box.root.id ? "Boîte" : "Dossier"}</p>
           </div>
           <button class="tool-button raised" data-action="new-note" data-tooltip="Nouvelle note" aria-label="Nouvelle note">${icon("notePlus")}</button>
+          <button class="tool-button raised" data-action="new-audio" data-tooltip="Nouveau fichier audio" aria-label="Nouveau fichier audio">${icon("audioPlus")}</button>
         </div>
         ${children.length ? `
           <div class="folder-content">
@@ -4771,6 +5393,8 @@
     app.querySelectorAll("[data-action]").forEach((button) => {
       button.addEventListener("click", handleAction);
     });
+
+    bindAudioViewEvents();
 
     app.querySelectorAll("[data-page-layout-button]").forEach((button) => {
       button.addEventListener("contextmenu", (event) => {
@@ -5907,6 +6531,7 @@
     }
     if (action === "new-note") createNote(box);
     if (action === "new-folder") createFolder(box);
+    if (action === "new-audio") createAudioItem(box);
     if (action === "collapse-all") expandAll(box, false);
     if (action === "expand-all") expandAll(box, true);
     if (action === "delete-selected") requestDeleteSelected(box);
@@ -6228,6 +6853,8 @@
             box.encrypted = blob;
             box.passwordHash = await sha256(newPassword);
             box.modifiedAt = now();
+            // Re-chiffre les clips audio avec la nouvelle cle (boite verrouillee).
+            await migrateBoxAudio(box.id, opened.key, key);
             setModal(null);
             saveState();
             render();
@@ -6238,8 +6865,13 @@
           box.passwordHash = await sha256(newPassword);
           box.modifiedAt = now();
           if (box.root) {
+            // Migre les clips audio : ajout de code = clair -> chiffre ;
+            // changement de code = ancienne cle -> nouvelle cle.
+            const previousAudioKey = mode === "change" ? await boxAudioKey(box.id) : null;
             runtime.unlockedBoxIds.add(box.id);
             setupBoxEncryption(box.id, newPassword);
+            const nextAudioKey = await boxAudioKey(box.id);
+            if (nextAudioKey) await migrateBoxAudio(box.id, previousAudioKey, nextAudioKey);
           }
           setModal(null);
           saveState();
@@ -10011,4 +10643,5 @@
   render();
   replaceNavigationPoint();
   syncDesktopFontFolder({ silent: true, rerender: false });
+  window.setTimeout(() => { garbageCollectAudio(); }, 2500);
 })();
