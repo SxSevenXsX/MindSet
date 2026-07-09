@@ -65,6 +65,7 @@
     stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
     play: '<path d="M8 5v14l11-7z"/>',
     importAudio: '<path d="M12 3v10"/><path d="m8 9 4 4 4-4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>',
+    grip: '<path d="M8 6h.01"/><path d="M8 12h.01"/><path d="M8 18h.01"/><path d="M14 6h.01"/><path d="M14 12h.01"/><path d="M14 18h.01"/>',
     folder: '<path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H10l2 2h6.5A2.5 2.5 0 0 1 21 8.5v8A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5v-10Z"/>',
     note: '<path d="M7 3h7l4 4v14H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M14 3v5h5"/><path d="M8 13h8"/><path d="M8 17h6"/>',
     notePlus: '<path d="M7 3h7l4 4v14H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M14 3v5h5"/><path d="M12 12v6"/><path d="M9 15h6"/>',
@@ -1399,6 +1400,7 @@
       statsPrefs: normalizeStatsPrefs(previousSettings.statsPrefs),
       localFonts: normalizeLocalFonts(previousSettings.localFonts),
       audioInputDeviceId: typeof previousSettings.audioInputDeviceId === "string" ? previousSettings.audioInputDeviceId : "",
+      audioIconColor: cleanColor(previousSettings.audioIconColor, "#4b8bd4"),
       headingPresets: (() => {
         const presets = { normal: { ...headingDefaults.normal, ...(previousHeadings.normal || {}) } };
         allStyleLevels.forEach((level) => {
@@ -1441,6 +1443,7 @@
     document.documentElement.style.setProperty("--selection-border", hexToRgba(selection, 0.42));
     document.documentElement.style.setProperty("--tree-guide-color", treeGuide);
     document.documentElement.style.setProperty("--todo-color", todoColor);
+    document.documentElement.style.setProperty("--audio-icon-color", cleanColor(settings.audioIconColor, "#4b8bd4"));
     document.documentElement.style.setProperty("--nav", `${Math.min(Math.max(Number(settings.navWidth) || 282, 218), 430)}px`);
     ["normal", ...allStyleLevels].forEach((key) => {
       const preset = headings[key] ? { ...headingDefaults[key], ...(headings[key] || {}) } : headingDefaults[key];
@@ -1771,6 +1774,7 @@
         pageSetup: normalizePageSetup({ sizeId: "a4", orientation: "portrait", margins: pageMarginPresets.normal.margins }, "normal"),
         localFonts: [],
         audioInputDeviceId: "",
+        audioIconColor: "#4b8bd4",
       },
       boxes: [
         {
@@ -4058,6 +4062,20 @@
     return (0.299 * r + 0.587 * g + 0.114 * b) > 186;
   }
 
+  // Éclaircit (ratio > 0) ou assombrit (ratio < 0) une couleur hex.
+  function shadeColor(hex, ratio) {
+    const clean = cleanColor(hex, "");
+    if (!clean) return hex;
+    const n = Number.parseInt(clean.slice(1), 16);
+    const target = ratio < 0 ? 0 : 255;
+    const amount = Math.min(Math.abs(ratio), 1);
+    const mix = (channel) => Math.round((target - channel) * amount) + channel;
+    const r = mix((n >> 16) & 255);
+    const g = mix((n >> 8) & 255);
+    const b = mix(n & 255);
+    return `#${[r, g, b].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+  }
+
   function renderMainContent(box) {
     const active = findItem(box, box.activeItemId) || box.root;
     if (active.type === "note") return renderEditor(box, active);
@@ -4191,15 +4209,23 @@
     item.modifiedAt = now();
     touchBox(box);
     saveState();
-    // Mise à jour surgicale de la pastille (pas de render : ne coupe pas la lecture en cours).
+    // Mise à jour surgicale (pas de render : ne coupe pas la lecture en cours).
     const shell = app.querySelector("[data-audio-item]");
-    const badge = shell?.querySelector(`[data-clip-badge][data-clip-id="${clipId}"]`);
-    if (!badge) { render(); return; }
-    badge.classList.toggle("is-colored", !!clip.color);
-    badge.classList.toggle("is-light", !!clip.color && isLightColor(clip.color));
-    if (clip.color) badge.style.setProperty("--badge-color", clip.color);
-    else badge.style.removeProperty("--badge-color");
-    const menu = badge.closest(".clip-badge-menu");
+    const clipEl = shell?.querySelector(`.audio-clip[data-clip-id="${clipId}"]`);
+    if (!clipEl) { render(); return; }
+    const colored = !!clip.color;
+    clipEl.classList.toggle("is-colored", colored);
+    if (colored) {
+      const shade = shadeColor(clip.color, -0.32);
+      clipEl.style.setProperty("--clip-color", clip.color);
+      clipEl.style.setProperty("--clip-badge", shade);
+      clipEl.classList.toggle("badge-light", isLightColor(shade));
+    } else {
+      clipEl.style.removeProperty("--clip-color");
+      clipEl.style.removeProperty("--clip-badge");
+      clipEl.classList.remove("badge-light");
+    }
+    const menu = clipEl.querySelector(".clip-badge-menu");
     menu?.querySelectorAll("[data-clip-color]").forEach((swatch) => {
       swatch.classList.toggle("is-active", (swatch.dataset.colorValue || "") === (clip.color || ""));
     });
@@ -4331,12 +4357,9 @@
   }
 
   function renderClipBadge(clip, index) {
-    const colored = clip.color ? "is-colored" : "";
-    const light = clip.color && isLightColor(clip.color) ? "is-light" : "";
-    const style = clip.color ? `--badge-color:${clip.color}` : "";
     return `
       <div class="clip-badge-menu" data-clip-badge-menu>
-        <button type="button" class="audio-clip-index ${colored} ${light}" data-clip-badge data-clip-id="${clip.id}" style="${style}" title="Marquer d'une couleur">${index + 1}</button>
+        <button type="button" class="audio-clip-index" data-clip-badge data-clip-id="${clip.id}" title="Marquer d'une couleur">${index + 1}</button>
         <div class="clip-badge-panel">
           <div class="quick-color-row">
             ${clipBadgeColors.map((color) => `<button type="button" class="quick-color ${clip.color === color ? "is-active" : ""} ${isLightColor(color) ? "is-light" : ""}" style="--quick-color:${color}" data-clip-color data-clip-id="${clip.id}" data-color-value="${color}" title="${color}" aria-label="Couleur ${color}"></button>`).join("")}
@@ -4352,10 +4375,18 @@
     const sourceLabel = clip.source === "import" ? "Importé" : "Enregistré";
     const meta = [sourceLabel, durationText, formatShortDate(clip.createdAt)].filter(Boolean).join(" · ");
     const selected = runtime.clipSelection.has(clip.id) ? "is-selected" : "";
-    const draggable = options.draggable ? 'draggable="true"' : "";
+    // Toute la case prend la couleur ; le rond numéroté prend une teinte plus foncée.
+    const colored = !!clip.color;
+    const badgeShade = colored ? shadeColor(clip.color, -0.32) : "";
+    const badgeLight = colored && isLightColor(badgeShade) ? "badge-light" : "";
+    const style = colored ? `--clip-color:${clip.color};--clip-badge:${badgeShade}` : "";
+    const grip = options.draggable
+      ? `<button class="clip-grip" draggable="true" data-clip-grip data-clip-id="${clip.id}" title="Glisser pour déplacer" aria-label="Déplacer le clip">${icon("grip")}</button>`
+      : "";
     return `
-      <div class="audio-clip ${selected}" data-clip-id="${clip.id}" ${draggable}>
+      <div class="audio-clip ${selected} ${colored ? "is-colored" : ""} ${badgeLight}" data-clip-id="${clip.id}" style="${style}">
         <div class="audio-clip-top">
+          ${grip}
           ${renderClipBadge(clip, index)}
           <input class="audio-clip-name" draggable="false" data-clip-name data-clip-id="${clip.id}" value="${escapeHtml(clip.name || "")}" placeholder="Nom du clip" maxlength="120" />
           <button class="audio-icon-btn danger" data-clip-delete data-clip-id="${clip.id}" title="Supprimer ce clip" aria-label="Supprimer ce clip">${icon("trash")}</button>
@@ -4376,6 +4407,11 @@
     const clipMarkup = clips.length
       ? clips.map((clip, index) => renderAudioClip(clip, index, { draggable: customMode })).join("")
       : `<div class="audio-empty">${icon("audio")}<p>Aucun clip pour l'instant.</p><span>Enregistre au micro ou importe un fichier audio.</span></div>`;
+    const sortControl = clips.length
+      ? `<select class="audio-sort-mini" data-clip-sort title="Ordre des clips" aria-label="Ordre des clips">
+          ${clipSortOptions.map((option) => `<option value="${option.value}" ${(item.clipSort || "custom") === option.value ? "selected" : ""}>${option.label}</option>`).join("")}
+        </select>`
+      : "";
     return `
       <article class="audio-shell" data-audio-item="${item.id}">
         <header class="audio-header">
@@ -4394,18 +4430,11 @@
               ${icon("mic")}
               <select data-audio-input aria-label="Entrée audio">${audioInputOptions()}</select>
             </label>
+            ${sortControl}
             <input type="file" accept="audio/*" multiple data-audio-file hidden />
           </div>
         </header>
-        ${clips.length ? `<div class="audio-subbar">
-          <label class="audio-sort">Tri
-            <select data-clip-sort aria-label="Tri des clips">
-              ${clipSortOptions.map((option) => `<option value="${option.value}" ${(item.clipSort || "custom") === option.value ? "selected" : ""}>${option.label}</option>`).join("")}
-            </select>
-          </label>
-          ${customMode ? `<span class="audio-sort-hint">Glisse les clips pour les réordonner</span>` : ""}
-          <div class="audio-selection-bar" data-clip-selection-bar></div>
-        </div>` : ""}
+        <div class="audio-selection-bar" data-clip-selection-bar></div>
         <div class="audio-clips" data-audio-clips data-clip-marquee>
           ${clipMarkup}
         </div>
@@ -4778,7 +4807,22 @@
       });
     });
 
-    // Sélection de clips (clic / ctrl / shift), sans capter les contrôles interactifs.
+    // Poignée de gauche : seule source du glissé-réorganisation.
+    shell.querySelectorAll("[data-clip-grip]").forEach((grip) => {
+      const clipId = grip.dataset.clipId;
+      grip.addEventListener("dragstart", (event) => {
+        runtime.clipDragId = clipId;
+        grip.closest(".audio-clip")?.classList.add("is-dragging");
+        event.dataTransfer.effectAllowed = "move";
+        try { event.dataTransfer.setData("text/plain", clipId); } catch (error) { /* ignore */ }
+      });
+      grip.addEventListener("dragend", () => {
+        shell.querySelectorAll(".is-dragging, .drop-before, .drop-after").forEach((el) => el.classList.remove("is-dragging", "drop-before", "drop-after"));
+        runtime.clipDragId = null;
+      });
+    });
+
+    // Sélection de clips (clic / ctrl / shift) + accueil des dépôts de réorganisation.
     shell.querySelectorAll(".audio-clip[data-clip-id]").forEach((row) => {
       const clipId = row.dataset.clipId;
       row.addEventListener("click", (event) => {
@@ -4786,17 +4830,6 @@
         if (event.target.closest("input, button, select, textarea, audio, .clip-badge-menu")) return;
         const { item } = currentAudioItem();
         if (item) setActiveClip(item, clipId, event);
-      });
-      row.addEventListener("dragstart", (event) => {
-        runtime.clipDragId = clipId;
-        row.classList.add("is-dragging");
-        event.dataTransfer.effectAllowed = "move";
-        try { event.dataTransfer.setData("text/plain", clipId); } catch (error) { /* ignore */ }
-      });
-      row.addEventListener("dragend", () => {
-        row.classList.remove("is-dragging");
-        shell.querySelectorAll(".drop-before, .drop-after").forEach((el) => el.classList.remove("drop-before", "drop-after"));
-        runtime.clipDragId = null;
       });
       row.addEventListener("dragover", (event) => {
         if (!runtime.clipDragId || runtime.clipDragId === clipId) return;
@@ -5638,6 +5671,9 @@
                 <div class="color-swatches">
                   ${todoColors.map((color) => `<button class="color-swatch ${color === todoColor ? "is-active" : ""} ${color === "#ffffff" ? "is-light" : ""}" style="--swatch:${color}" data-todo-swatch="${color}" aria-label="Couleur ${color}"></button>`).join("")}
                 </div>
+                <label class="modal-label">Couleur de l'icône audio (arbre)
+                  <input class="modal-field color-field" type="color" value="${escapeHtml(cleanColor(settings.audioIconColor, "#4b8bd4"))}" data-audio-icon-color />
+                </label>
                 <h3>Palette du texte (12 couleurs par defaut)</h3>
                 <p class="settings-hint">Ces 12 couleurs apparaissent dans le sélecteur de couleur du texte du mini Word (2 rangées de 6). Clic pour modifier.</p>
                 <div class="palette-editor">
@@ -6239,6 +6275,15 @@
     if (todoColor) {
       todoColor.addEventListener("input", () => {
         state.settings.todoColor = todoColor.value;
+        saveState();
+        applyAppearance();
+      });
+    }
+
+    const audioIconColor = app.querySelector("[data-audio-icon-color]");
+    if (audioIconColor) {
+      audioIconColor.addEventListener("input", () => {
+        state.settings.audioIconColor = audioIconColor.value;
         saveState();
         applyAppearance();
       });

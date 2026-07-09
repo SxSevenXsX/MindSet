@@ -1051,7 +1051,7 @@ body.is-graph-dragging {
 }
 
 .item-icon.audio {
-  color: #4b8bd4;
+  color: var(--audio-icon-color, #4b8bd4);
 }
 
 .item-label {
@@ -4317,8 +4317,26 @@ button:disabled {
   transition: transform .1s ease;
 }
 .audio-clip-index:hover { transform: scale(1.08); }
-.audio-clip-index.is-colored { background: var(--badge-color); color: #ffffff; border-color: rgba(0, 0, 0, 0.08); }
-.audio-clip-index.is-colored.is-light { color: #1c1c1c; }
+/* Quand la case est colorée, le rond prend une teinte plus foncée de la même couleur. */
+.audio-clip.is-colored .audio-clip-index { background: var(--clip-badge); color: #ffffff; border-color: rgba(0, 0, 0, 0.12); }
+.audio-clip.is-colored.badge-light .audio-clip-index { color: #1c1c1c; }
+
+.clip-grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--faint);
+  cursor: grab;
+  flex: 0 0 auto;
+}
+.clip-grip:hover { color: var(--muted); }
+.clip-grip:active { cursor: grabbing; }
+.clip-grip .icon { width: 16px; height: 16px; }
 
 .clip-badge-panel {
   position: absolute;
@@ -4373,7 +4391,9 @@ button:disabled {
   flex: 0 0 auto;
 }
 .audio-icon-btn .icon { width: 16px; height: 16px; }
-.audio-icon-btn.danger:hover { background: var(--danger-soft); color: var(--danger); border-color: var(--danger-soft); }
+/* Corbeilles en rouge pâle par défaut, plus soutenu au survol. */
+.audio-icon-btn.danger { color: #d98a8a; background: var(--danger-soft); border-color: transparent; }
+.audio-icon-btn.danger:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
 
 .audio-player {
   width: 100%;
@@ -4386,13 +4406,14 @@ button:disabled {
   font-weight: 600;
 }
 
-/* Entrée micro */
+/* Entrée micro : poussée à droite avec le tri. */
 .audio-device {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 38px;
+  height: 36px;
   padding: 0 10px;
+  margin-left: auto;
   border: 1px solid var(--border-strong);
   border-radius: 10px;
   background: var(--surface);
@@ -4412,59 +4433,59 @@ button:disabled {
 }
 .audio-device select:focus { outline: none; }
 
+/* Tri des clips : petit contrôle discret en haut à droite, sans fond marqué. */
+.audio-sort-mini {
+  height: 36px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 650;
+  padding: 0 2px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.audio-sort-mini:hover { color: var(--text); }
+.audio-sort-mini:focus { outline: none; }
+
 .audio-btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 .audio-btn.small { height: 32px; padding: 0 12px; font-size: 12px; }
 
-/* Sous-barre : tri + sélection */
-.audio-subbar {
+/* Barre de sélection (apparaît quand des clips sont sélectionnés). */
+.audio-selection-bar {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding: 2px 0 2px;
-}
-.audio-sort {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--muted);
-}
-.audio-sort select {
-  height: 32px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text);
-  font-family: var(--font);
-  font-size: 12.5px;
-  font-weight: 650;
-  padding: 0 8px;
-  cursor: pointer;
-}
-.audio-sort-hint { font-size: 11.5px; color: var(--faint); font-style: italic; }
-
-.audio-selection-bar {
-  display: inline-flex;
-  align-items: center;
   gap: 10px;
-  margin-left: auto;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--accent-soft);
 }
 .audio-selection-bar:empty { display: none; }
-.audio-selection-count { font-size: 12px; font-weight: 750; color: var(--accent-strong); }
+.audio-selection-count { font-size: 12px; font-weight: 750; color: var(--accent-strong); margin-right: auto; }
+
+/* Liste des clips : occupe l'espace restant pour offrir une grande zone vide
+   cliquable (désélection) et de démarrage du glissé (marquee). */
+.audio-clips {
+  flex: 1 0 auto;
+  min-height: 160px;
+  padding-bottom: 40px;
+}
 
 /* États d'un clip */
 .audio-clip {
   cursor: default;
   transition: border-color .12s ease, box-shadow .12s ease;
 }
+.audio-clip.is-colored { background: var(--clip-color); border-color: var(--clip-badge); }
+/* Fond coloré toujours clair : on garde un texte foncé lisible (y compris en thème sombre). */
+.audio-clip.is-colored .audio-clip-name { color: #17201c; }
+.audio-clip.is-colored .audio-clip-meta { color: rgba(23, 32, 28, 0.6); }
+.audio-clip.is-colored .clip-grip { color: rgba(23, 32, 28, 0.45); }
 .audio-clip.is-selected {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent) inset, var(--shadow-soft);
-  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent) inset, var(--shadow-soft);
 }
 .audio-clip.is-dragging { opacity: 0.5; }
 .audio-clip.drop-before { box-shadow: 0 -3px 0 -1px var(--accent); }
 .audio-clip.drop-after { box-shadow: 0 3px 0 -1px var(--accent); }
-.audio-clip[draggable="true"] .audio-clip-index { cursor: grab; }
