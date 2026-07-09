@@ -47,8 +47,14 @@
     lastListAutoFormat: null,
     suppressSelectionSave: false,
     audioDbPromise: null,
-    audioObjectUrls: [],
+    audioUrlCache: new Map(),
+    audioUrlCacheItemId: null,
     audioRecording: null,
+    clipSelection: new Set(),
+    clipSelectionOwner: null,
+    clipAnchorId: null,
+    clipDragId: null,
+    audioInputDevices: [],
   };
 
   const icons = {
@@ -143,6 +149,7 @@
   const headingLevels = ["h1", "h2", "h3", "h4", "h5", "h6"];
   const presetLevels = ["ps1", "ps2", "ps3", "ps4"];
   const allStyleLevels = [...headingLevels, ...presetLevels];
+  const clipSortValues = ["custom", "createdAsc", "createdDesc"];
 
   // Un style est repliable (comportement "titre") seulement si c'est un h1-h6 avec foldable != false.
   function isFoldableStyle(level, settings = state.settings) {
@@ -495,7 +502,13 @@
   }
 
   function itemIconMarkup(node) {
-    if (!node || node.iconKind === "none" || !node.iconKind) return "";
+    if (!node) return "";
+    // Un fichier audio affiche TOUJOURS un micro dans l'arbre, même avec iconKind "none",
+    // pour le repérer d'un coup d'œil. Les choix explicites emoji/défaut passent en dessous.
+    if (node.type === "audio" && (!node.iconKind || node.iconKind === "none")) {
+      return `<span class="item-icon audio">${icon("mic")}</span>`;
+    }
+    if (node.iconKind === "none" || !node.iconKind) return "";
     if (node.iconKind === "emoji") {
       return `<span class="item-icon emoji" aria-hidden="true">${escapeHtml(node.emoji || emojiChoices[0])}</span>`;
     }
@@ -1385,6 +1398,7 @@
       pageSetup: normalizePageSetup(previousSettings.pageSetup, previousMarginPreset, { customPageMarginPresets: previousCustomMargins }),
       statsPrefs: normalizeStatsPrefs(previousSettings.statsPrefs),
       localFonts: normalizeLocalFonts(previousSettings.localFonts),
+      audioInputDeviceId: typeof previousSettings.audioInputDeviceId === "string" ? previousSettings.audioInputDeviceId : "",
       headingPresets: (() => {
         const presets = { normal: { ...headingDefaults.normal, ...(previousHeadings.normal || {}) } };
         allStyleLevels.forEach((level) => {
@@ -1480,6 +1494,7 @@
     if (node.type === "audio") {
       if (!Array.isArray(node.clips)) node.clips = [];
       node.clips = node.clips.filter((clip) => clip && clip.id);
+      if (!clipSortValues.includes(node.clipSort)) node.clipSort = "custom";
     }
   }
 
@@ -1755,6 +1770,7 @@
         customPageMarginPresets: normalizePageCustomMarginPresets(),
         pageSetup: normalizePageSetup({ sizeId: "a4", orientation: "portrait", margins: pageMarginPresets.normal.margins }, "normal"),
         localFonts: [],
+        audioInputDeviceId: "",
       },
       boxes: [
         {
@@ -2325,9 +2341,7 @@
       bytes = await decryptAudioBytes(key, record.iv, record.data);
     }
     const blob = new Blob([bytes], { type: record.mime || "audio/webm" });
-    const url = URL.createObjectURL(blob);
-    runtime.audioObjectUrls.push(url);
-    return url;
+    return URL.createObjectURL(blob);
   }
 
   // Re-chiffre/dechiffre tous les clips d'une boite lors d'un changement de
@@ -2675,6 +2689,12 @@
     // Quitter un fichier audio en cours d'enregistrement stoppe l'enregistrement
     // (sinon le micro resterait actif sans bouton pour l'arreter).
     if (runtime.audioRecording && runtime.audioRecording.itemId !== id) stopAudioRecording();
+    // La sélection de clips est propre à un fichier audio : on la vide en changeant d'item.
+    if (id !== box.activeItemId && runtime.clipSelection.size) {
+      runtime.clipSelection.clear();
+      runtime.clipAnchorId = null;
+      runtime.clipSelectionOwner = null;
+    }
     box.activeItemId = id;
     runtime.focusedItemId = id;
     if (!Array.isArray(box.openTabIds)) box.openTabIds = [];
@@ -3239,6 +3259,7 @@
     } else if (item.type === "audio") {
       // Nouveaux ids de clips + marqueur pour copier les octets (voir copyClonedAudioBytes).
       clone.clips = (item.clips || []).map((clip) => ({ ...clip, id: uid("clip"), sourceClipId: clip.id }));
+      clone.clipSort = item.clipSort || "custom";
     } else {
       clone.content = item.content || "<p><br></p>";
     }
@@ -4053,15 +4074,290 @@
     return `${minutes}:${String(rest).padStart(2, "0")}`;
   }
 
-  function renderAudioClip(clip, index) {
+  // 8 couleurs pâles pour marquer les clips (clic sur la pastille numérotée).
+  const clipBadgeColors = ["#f8c9c9", "#ffe0b3", "#fdf3c0", "#cdeccd", "#cfe2f7", "#e0d4f5", "#f8d3e8", "#dfe3e1"];
+
+  const clipSortOptions = [
+    { value: "custom", label: "Placement personnalisé" },
+    { value: "createdDesc", label: "Date : plus récent" },
+    { value: "createdAsc", label: "Date : plus ancien" },
+  ];
+
+  // Ordre d'affichage des clips selon le mode de tri de l'item.
+  function sortedClips(item) {
+    const clips = [...(item.clips || [])];
+    const mode = item.clipSort || "custom";
+    if (mode === "custom") return clips;
+    const dir = mode.endsWith("Asc") ? 1 : -1;
+    return clips.sort((a, b) => (new Date(a.createdAt) - new Date(b.createdAt)) * dir);
+  }
+
+  function clipRangeIds(item, fromId, toId) {
+    const ids = sortedClips(item).map((clip) => clip.id);
+    const from = ids.indexOf(fromId);
+    const to = ids.indexOf(toId);
+    if (from < 0 || to < 0) return [toId].filter(Boolean);
+    return ids.slice(Math.min(from, to), Math.max(from, to) + 1);
+  }
+
+  // Sélection de clips (éphémère, dans runtime.clipSelection) — clic / ctrl / shift.
+  // Mise à jour CHIRURGICALE de l'UI (pas de render() complet, pour ne pas recharger
+  // et interrompre les lecteurs audio à chaque sélection).
+  function setActiveClip(item, id, event) {
+    const selection = runtime.clipSelection;
+    if (event?.shiftKey) {
+      const range = clipRangeIds(item, runtime.clipAnchorId || [...selection][0] || id, id);
+      if (event.ctrlKey || event.metaKey) range.forEach((clipId) => selection.add(clipId));
+      else { selection.clear(); range.forEach((clipId) => selection.add(clipId)); }
+    } else if (event && (event.ctrlKey || event.metaKey)) {
+      if (selection.has(id)) selection.delete(id); else selection.add(id);
+      runtime.clipAnchorId = id;
+    } else {
+      selection.clear();
+      selection.add(id);
+      runtime.clipAnchorId = id;
+    }
+    runtime.clipSelectionOwner = item.id;
+    refreshClipSelectionUi();
+  }
+
+  function clearClipSelection() {
+    runtime.clipSelection.clear();
+    runtime.clipAnchorId = null;
+    runtime.clipSelectionOwner = null;
+    refreshClipSelectionUi();
+  }
+
+  function clipSelectionBarHtml(count) {
+    if (!count) return "";
+    return `
+      <span class="audio-selection-count">${count} clip${count > 1 ? "s" : ""} sélectionné${count > 1 ? "s" : ""}</span>
+      <button class="audio-btn danger" data-clip-delete-selected type="button">${icon("trash")}<span>Supprimer</span></button>
+      <button class="audio-btn ghost small" data-clip-clear-selection type="button">Désélectionner</button>
+    `;
+  }
+
+  // Reflète la sélection sans reconstruire la vue (classes + barre de sélection),
+  // puis re-bind les deux boutons insérés dynamiquement.
+  function refreshClipSelectionUi() {
+    const shell = app.querySelector("[data-audio-item]");
+    if (!shell) return;
+    // La sélection appartient à un fichier audio précis : si on affiche un autre
+    // fichier (changement d'item ou de boîte), on la vide pour ne pas garder un
+    // compteur fantôme.
+    if (runtime.clipSelection.size && runtime.clipSelectionOwner && runtime.clipSelectionOwner !== shell.dataset.audioItem) {
+      runtime.clipSelection.clear();
+      runtime.clipAnchorId = null;
+      runtime.clipSelectionOwner = null;
+    }
+    shell.querySelectorAll(".audio-clip[data-clip-id]").forEach((clip) => {
+      clip.classList.toggle("is-selected", runtime.clipSelection.has(clip.dataset.clipId));
+    });
+    const slot = shell.querySelector("[data-clip-selection-bar]");
+    if (!slot) return;
+    slot.innerHTML = clipSelectionBarHtml(runtime.clipSelection.size);
+    slot.querySelector("[data-clip-delete-selected]")?.addEventListener("click", () => {
+      const { item } = currentAudioItem();
+      if (item) requestDeleteAudioClips(item, [...runtime.clipSelection]);
+    });
+    slot.querySelector("[data-clip-clear-selection]")?.addEventListener("click", () => clearClipSelection());
+  }
+
+  // Réorganise l'ordre des clips (drag) — bascule en mode personnalisé, comme l'arbre.
+  function reorderClip(box, item, draggedId, targetId, position) {
+    if (!draggedId || !targetId || draggedId === targetId) return;
+    const clips = item.clips || [];
+    const fromIndex = clips.findIndex((clip) => clip.id === draggedId);
+    if (fromIndex < 0) return;
+    rememberState("Reorganisation clips audio");
+    const [dragged] = clips.splice(fromIndex, 1);
+    let targetIndex = clips.findIndex((clip) => clip.id === targetId);
+    if (targetIndex < 0) clips.push(dragged);
+    else {
+      if (position === "after") targetIndex += 1;
+      clips.splice(targetIndex, 0, dragged);
+    }
+    item.clipSort = "custom";
+    item.modifiedAt = now();
+    touchBox(box);
+    saveState();
+    render();
+  }
+
+  function setClipColor(box, item, clipId, color) {
+    const clip = (item.clips || []).find((entry) => entry.id === clipId);
+    if (!clip) return;
+    clip.color = cleanColor(color, "") || null;
+    item.modifiedAt = now();
+    touchBox(box);
+    saveState();
+    // Mise à jour surgicale de la pastille (pas de render : ne coupe pas la lecture en cours).
+    const shell = app.querySelector("[data-audio-item]");
+    const badge = shell?.querySelector(`[data-clip-badge][data-clip-id="${clipId}"]`);
+    if (!badge) { render(); return; }
+    badge.classList.toggle("is-colored", !!clip.color);
+    badge.classList.toggle("is-light", !!clip.color && isLightColor(clip.color));
+    if (clip.color) badge.style.setProperty("--badge-color", clip.color);
+    else badge.style.removeProperty("--badge-color");
+    const menu = badge.closest(".clip-badge-menu");
+    menu?.querySelectorAll("[data-clip-color]").forEach((swatch) => {
+      swatch.classList.toggle("is-active", (swatch.dataset.colorValue || "") === (clip.color || ""));
+    });
+    menu?.classList.remove("is-open");
+  }
+
+  function setClipSort(box, item, mode) {
+    item.clipSort = clipSortValues.includes(mode) ? mode : "custom";
+    item.modifiedAt = now();
+    touchBox(box);
+    saveState();
+    render();
+  }
+
+  // Confirmation avant suppression d'un ou plusieurs clips.
+  function requestDeleteAudioClips(item, clipIds = []) {
+    const ids = [...new Set(clipIds)].filter((id) => (item.clips || []).some((clip) => clip.id === id));
+    if (!ids.length) return;
+    setModal({ type: "confirm-delete-clips", itemId: item.id, clipIds: ids });
+    render();
+  }
+
+  function deleteAudioClips(box, item, clipIds = []) {
+    if (!item?.clips) { setModal(null); render(); return; }
+    const ids = new Set(clipIds);
+    const before = item.clips.length;
+    item.clips = item.clips.filter((clip) => !ids.has(clip.id));
+    ids.forEach((id) => runtime.clipSelection.delete(id));
+    setModal(null);
+    if (item.clips.length === before) { render(); return; }
+    item.modifiedAt = now();
+    touchBox(box);
+    saveState();
+    render();
+    audioDeleteClips([...ids]).catch(() => {});
+  }
+
+  // ---- Sélecteur d'entrée micro (comme le dictaphone Windows) ----
+  function audioInputOptions() {
+    const devices = runtime.audioInputDevices || [];
+    const current = state.settings?.audioInputDeviceId || "";
+    const options = [`<option value="" ${current === "" ? "selected" : ""}>Micro par défaut</option>`];
+    devices.forEach((device, index) => {
+      const label = device.label || `Micro ${index + 1}`;
+      options.push(`<option value="${escapeHtml(device.deviceId)}" ${current === device.deviceId ? "selected" : ""}>${escapeHtml(label)}</option>`);
+    });
+    return options.join("");
+  }
+
+  async function refreshAudioInputDevices() {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      runtime.audioInputDevices = devices.filter((device) => device.kind === "audioinput");
+      // Si l'appareil mémorisé n'existe plus, on retombe sur le défaut.
+      const savedId = state.settings?.audioInputDeviceId || "";
+      if (savedId && !runtime.audioInputDevices.some((device) => device.deviceId === savedId)) {
+        state.settings.audioInputDeviceId = "";
+        saveState();
+      }
+      const select = app.querySelector("[data-audio-input]");
+      if (select) select.innerHTML = audioInputOptions();
+    } catch (error) {
+      /* énumération indisponible : on garde le défaut */
+    }
+  }
+
+  // Marquee (rubber-band) limité aux clips : remplit runtime.clipSelection.
+  function startClipMarquee(event, surface) {
+    if (event.button !== 0) return;
+    if (event.target.closest(".audio-clip, button, input, select, textarea, audio, [contenteditable='true']")) return;
+    const clips = [...surface.querySelectorAll(".audio-clip[data-clip-id]")];
+    if (!clips.length) return;
+    const ownerId = surface.closest("[data-audio-item]")?.dataset.audioItem || null;
+    const overlay = document.createElement("div");
+    overlay.className = "selection-marquee";
+    overlay.hidden = true;
+    document.body.appendChild(overlay);
+    document.body.classList.add("is-marquee-selecting");
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const base = (event.ctrlKey || event.metaKey) ? new Set(runtime.clipSelection) : new Set();
+    let moved = false;
+    const update = (pointerEvent) => {
+      const rect = normalizedRect(startX, startY, pointerEvent.clientX, pointerEvent.clientY);
+      moved = moved || rect.width > 4 || rect.height > 4;
+      overlay.hidden = !moved;
+      overlay.style.left = `${rect.left}px`;
+      overlay.style.top = `${rect.top}px`;
+      overlay.style.width = `${rect.width}px`;
+      overlay.style.height = `${rect.height}px`;
+      if (!moved) return;
+      const selected = new Set(base);
+      clips.forEach((clip) => {
+        if (intersectsRect(rect, clip.getBoundingClientRect())) selected.add(clip.dataset.clipId);
+      });
+      runtime.clipSelection = selected;
+      clips.forEach((clip) => clip.classList.toggle("is-selected", selected.has(clip.dataset.clipId)));
+    };
+    const cleanup = () => {
+      overlay.remove();
+      document.body.classList.remove("is-marquee-selecting");
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", cancel);
+    };
+    const finish = (pointerEvent) => {
+      update(pointerEvent);
+      cleanup();
+      if (moved) {
+        // Vrai glissé : on garde la sélection et on neutralise le clic qui suit.
+        runtime.clipSelectionOwner = ownerId;
+        runtime.ignoreSurfaceClick = true;
+        window.setTimeout(() => { runtime.ignoreSurfaceClick = false; }, 0);
+        refreshClipSelectionUi();
+      } else if (runtime.clipSelection.size) {
+        // Simple clic sur le vide : on désélectionne.
+        clearClipSelection();
+      } else {
+        refreshClipSelectionUi();
+      }
+    };
+    const cancel = () => cleanup();
+    const move = (pointerEvent) => { pointerEvent.preventDefault(); update(pointerEvent); };
+    event.preventDefault();
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish, { once: true });
+    window.addEventListener("pointercancel", cancel, { once: true });
+  }
+
+  function renderClipBadge(clip, index) {
+    const colored = clip.color ? "is-colored" : "";
+    const light = clip.color && isLightColor(clip.color) ? "is-light" : "";
+    const style = clip.color ? `--badge-color:${clip.color}` : "";
+    return `
+      <div class="clip-badge-menu" data-clip-badge-menu>
+        <button type="button" class="audio-clip-index ${colored} ${light}" data-clip-badge data-clip-id="${clip.id}" style="${style}" title="Marquer d'une couleur">${index + 1}</button>
+        <div class="clip-badge-panel">
+          <div class="quick-color-row">
+            ${clipBadgeColors.map((color) => `<button type="button" class="quick-color ${clip.color === color ? "is-active" : ""} ${isLightColor(color) ? "is-light" : ""}" style="--quick-color:${color}" data-clip-color data-clip-id="${clip.id}" data-color-value="${color}" title="${color}" aria-label="Couleur ${color}"></button>`).join("")}
+            <button type="button" class="quick-color is-empty" data-clip-color data-clip-id="${clip.id}" data-color-value="" title="Aucune couleur" aria-label="Aucune couleur">${icon("close")}</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderAudioClip(clip, index, options = {}) {
     const durationText = clip.duration ? formatClipDuration(clip.duration) : "";
     const sourceLabel = clip.source === "import" ? "Importé" : "Enregistré";
     const meta = [sourceLabel, durationText, formatShortDate(clip.createdAt)].filter(Boolean).join(" · ");
+    const selected = runtime.clipSelection.has(clip.id) ? "is-selected" : "";
+    const draggable = options.draggable ? 'draggable="true"' : "";
     return `
-      <div class="audio-clip" data-clip-id="${clip.id}">
+      <div class="audio-clip ${selected}" data-clip-id="${clip.id}" ${draggable}>
         <div class="audio-clip-top">
-          <span class="audio-clip-index">${index + 1}</span>
-          <input class="audio-clip-name" data-clip-name data-clip-id="${clip.id}" value="${escapeHtml(clip.name || "")}" placeholder="Nom du clip" maxlength="120" />
+          ${renderClipBadge(clip, index)}
+          <input class="audio-clip-name" draggable="false" data-clip-name data-clip-id="${clip.id}" value="${escapeHtml(clip.name || "")}" placeholder="Nom du clip" maxlength="120" />
           <button class="audio-icon-btn danger" data-clip-delete data-clip-id="${clip.id}" title="Supprimer ce clip" aria-label="Supprimer ce clip">${icon("trash")}</button>
         </div>
         <audio class="audio-player" data-clip-audio data-clip-id="${clip.id}" controls preload="none"></audio>
@@ -4071,62 +4367,97 @@
   }
 
   function renderAudioView(box, item) {
-    const clips = item.clips || [];
+    const clips = sortedClips(item);
     const recording = !!(runtime.audioRecording && runtime.audioRecording.itemId === item.id);
+    const customMode = (item.clipSort || "custom") === "custom";
     const lockNote = box.passwordHash
       ? `<span class="audio-lock" title="Ces audios sont chiffrés avec le code de la boîte">${icon("lock")}<span>chiffré</span></span>`
       : "";
     const clipMarkup = clips.length
-      ? clips.map((clip, index) => renderAudioClip(clip, index)).join("")
+      ? clips.map((clip, index) => renderAudioClip(clip, index, { draggable: customMode })).join("")
       : `<div class="audio-empty">${icon("audio")}<p>Aucun clip pour l'instant.</p><span>Enregistre au micro ou importe un fichier audio.</span></div>`;
     return `
       <article class="audio-shell" data-audio-item="${item.id}">
         <header class="audio-header">
           <div class="audio-title-row">
-            <span class="audio-file-icon">${icon("audio")}</span>
-            <input class="audio-title" data-audio-title data-item-id="${item.id}" value="${escapeHtml(item.title)}" placeholder="Titre du fichier audio" maxlength="120" />
+            <span class="audio-file-icon">${icon("mic")}</span>
+            <input class="audio-title" data-audio-title value="${escapeHtml(item.title)}" placeholder="Titre du fichier audio" maxlength="120" />
             ${lockNote}
           </div>
           <div class="audio-controls">
-            <button class="audio-btn audio-record ${recording ? "is-recording" : ""}" data-audio-record data-item-id="${item.id}" type="button">
+            <button class="audio-btn audio-record ${recording ? "is-recording" : ""}" data-audio-record type="button">
               ${icon(recording ? "stop" : "mic")}<span>${recording ? "Stopper" : "Enregistrer"}</span>
             </button>
-            <button class="audio-btn ghost" data-audio-import data-item-id="${item.id}" type="button">${icon("importAudio")}<span>Importer</span></button>
+            <button class="audio-btn ghost" data-audio-import type="button">${icon("importAudio")}<span>Importer</span></button>
             <span class="audio-status" data-audio-status></span>
+            <label class="audio-device" title="Entrée audio (micro)">
+              ${icon("mic")}
+              <select data-audio-input aria-label="Entrée audio">${audioInputOptions()}</select>
+            </label>
             <input type="file" accept="audio/*" multiple data-audio-file hidden />
           </div>
         </header>
-        <div class="audio-clips" data-audio-clips>
+        ${clips.length ? `<div class="audio-subbar">
+          <label class="audio-sort">Tri
+            <select data-clip-sort aria-label="Tri des clips">
+              ${clipSortOptions.map((option) => `<option value="${option.value}" ${(item.clipSort || "custom") === option.value ? "selected" : ""}>${option.label}</option>`).join("")}
+            </select>
+          </label>
+          ${customMode ? `<span class="audio-sort-hint">Glisse les clips pour les réordonner</span>` : ""}
+          <div class="audio-selection-bar" data-clip-selection-bar></div>
+        </div>` : ""}
+        <div class="audio-clips" data-audio-clips data-clip-marquee>
           ${clipMarkup}
         </div>
       </article>
     `;
   }
 
-  function revokeAudioObjectUrls() {
-    runtime.audioObjectUrls.forEach((url) => {
+  function revokeAudioUrlCache() {
+    runtime.audioUrlCache.forEach((url) => {
       try { URL.revokeObjectURL(url); } catch (error) { /* deja libere */ }
     });
-    runtime.audioObjectUrls = [];
+    runtime.audioUrlCache.clear();
+    runtime.audioUrlCacheItemId = null;
   }
 
-  // Apres chaque render : recharge les URLs jouables des clips (dechiffrees au
-  // besoin) et remet l'UI d'enregistrement si une session est en cours.
+  // Apres chaque render : (re)branche les URLs jouables des clips. Un CACHE par
+  // fichier audio évite de re-déchiffrer/recréer une URL à chaque render (tri,
+  // couleur, sélection…) ; on ne libère qu'en changeant de fichier ou en
+  // supprimant des clips.
   function hydrateAudioView() {
-    revokeAudioObjectUrls();
     const shell = app.querySelector("[data-audio-item]");
-    if (!shell) return;
+    if (!shell) { revokeAudioUrlCache(); return; }
     const box = activeBox();
     const item = box ? findItem(box, shell.dataset.audioItem) : null;
-    if (!box || !item) return;
+    if (!box || !item) { revokeAudioUrlCache(); return; }
+    if (runtime.audioUrlCacheItemId !== item.id) {
+      revokeAudioUrlCache();
+      runtime.audioUrlCacheItemId = item.id;
+    }
+    // Libère les URLs des clips disparus (supprimés).
+    const liveIds = new Set((item.clips || []).map((clip) => clip.id));
+    [...runtime.audioUrlCache.keys()].forEach((clipId) => {
+      if (liveIds.has(clipId)) return;
+      try { URL.revokeObjectURL(runtime.audioUrlCache.get(clipId)); } catch (error) { /* ignore */ }
+      runtime.audioUrlCache.delete(clipId);
+    });
     shell.querySelectorAll("[data-clip-audio]").forEach((element) => {
-      loadAudioClipUrl(box, element.dataset.clipId).then((url) => {
-        if (!element.isConnected) return;
-        if (url) element.src = url;
-        else element.closest(".audio-clip")?.classList.add("is-unreadable");
+      const clipId = element.dataset.clipId;
+      const cached = runtime.audioUrlCache.get(clipId);
+      if (cached) { element.src = cached; return; }
+      loadAudioClipUrl(box, clipId).then((url) => {
+        if (!url) {
+          if (element.isConnected) element.closest(".audio-clip")?.classList.add("is-unreadable");
+          return;
+        }
+        runtime.audioUrlCache.set(clipId, url);
+        if (element.isConnected) element.src = url;
+        else { try { URL.revokeObjectURL(url); } catch (error) { /* ignore */ } runtime.audioUrlCache.delete(clipId); }
       }).catch(() => {});
     });
     if (runtime.audioRecording && runtime.audioRecording.itemId === item.id) startAudioTimerUi();
+    refreshAudioInputDevices();
   }
 
   function updateAudioRecordButton(recording) {
@@ -4161,12 +4492,25 @@
       return;
     }
     let stream;
+    const deviceId = state.settings?.audioInputDeviceId || "";
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: deviceId ? { deviceId: { exact: deviceId } } : true });
     } catch (error) {
-      setToast("Micro indisponible ou accès refusé.");
-      return;
+      // Micro mémorisé débranché : on retombe sur le micro par défaut.
+      if (deviceId && (error?.name === "OverconstrainedError" || error?.name === "NotFoundError")) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (retryError) {
+          setToast("Micro indisponible ou accès refusé.");
+          return;
+        }
+      } else {
+        setToast("Micro indisponible ou accès refusé.");
+        return;
+      }
     }
+    // Les libellés des micros ne sont connus qu'après une autorisation accordée.
+    refreshAudioInputDevices();
     const preferred = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
     let mimeType = "";
     for (const candidate of preferred) {
@@ -4294,18 +4638,6 @@
     if (added) setToast(added > 1 ? `${added} audios importés.` : "Audio importé.");
   }
 
-  function deleteAudioClip(box, item, clipId) {
-    if (!item?.clips) return;
-    const before = item.clips.length;
-    item.clips = item.clips.filter((clip) => clip.id !== clipId);
-    if (item.clips.length === before) return;
-    item.modifiedAt = now();
-    touchBox(box);
-    saveState();
-    render();
-    audioDeleteClips([clipId]).catch(() => {});
-  }
-
   function renameAudioClip(box, item, clipId, name) {
     const clip = (item.clips || []).find((entry) => entry.id === clipId);
     if (!clip) return;
@@ -4367,10 +4699,12 @@
   }
 
   function bindAudioViewEvents() {
+    const shell = app.querySelector("[data-audio-item]");
+    if (!shell) return;
+
     app.querySelectorAll("[data-audio-record]").forEach((button) => {
       button.addEventListener("click", () => {
-        const box = activeBox();
-        const item = box ? findItem(box, button.dataset.itemId) : null;
+        const { box, item } = currentAudioItem();
         if (box && item) toggleAudioRecording(box, item);
       });
     });
@@ -4387,10 +4721,19 @@
       });
     }
 
+    const deviceSelect = app.querySelector("[data-audio-input]");
+    if (deviceSelect) {
+      deviceSelect.addEventListener("change", () => {
+        state.settings.audioInputDeviceId = deviceSelect.value || "";
+        saveState();
+      });
+    }
+
     app.querySelectorAll("[data-clip-delete]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const { box, item } = currentAudioItem();
-        if (box && item) deleteAudioClip(box, item, button.dataset.clipId);
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const { item } = currentAudioItem();
+        if (item) requestDeleteAudioClips(item, [button.dataset.clipId]);
       });
     });
 
@@ -4403,12 +4746,88 @@
 
     app.querySelectorAll("[data-audio-title]").forEach((input) => {
       input.addEventListener("input", () => {
-        const box = activeBox();
-        const item = box ? findItem(box, input.dataset.itemId) : null;
+        const { box, item } = currentAudioItem();
         if (box && item) renameAudioItem(box, item, input.value);
       });
       input.addEventListener("change", () => render());
     });
+
+    const sortSelect = app.querySelector("[data-clip-sort]");
+    if (sortSelect) {
+      sortSelect.addEventListener("change", () => {
+        const { box, item } = currentAudioItem();
+        if (box && item) setClipSort(box, item, sortSelect.value);
+      });
+    }
+
+    // Pastille colorée : ouvrir/fermer le popover, puis choisir une couleur.
+    app.querySelectorAll("[data-clip-badge]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const menu = button.closest("[data-clip-badge-menu]");
+        const wasOpen = menu.classList.contains("is-open");
+        app.querySelectorAll(".clip-badge-menu.is-open").forEach((other) => other.classList.remove("is-open"));
+        menu.classList.toggle("is-open", !wasOpen);
+      });
+    });
+    app.querySelectorAll("[data-clip-color]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const { box, item } = currentAudioItem();
+        if (box && item) setClipColor(box, item, button.dataset.clipId, button.dataset.colorValue);
+      });
+    });
+
+    // Sélection de clips (clic / ctrl / shift), sans capter les contrôles interactifs.
+    shell.querySelectorAll(".audio-clip[data-clip-id]").forEach((row) => {
+      const clipId = row.dataset.clipId;
+      row.addEventListener("click", (event) => {
+        if (runtime.ignoreSurfaceClick) return;
+        if (event.target.closest("input, button, select, textarea, audio, .clip-badge-menu")) return;
+        const { item } = currentAudioItem();
+        if (item) setActiveClip(item, clipId, event);
+      });
+      row.addEventListener("dragstart", (event) => {
+        runtime.clipDragId = clipId;
+        row.classList.add("is-dragging");
+        event.dataTransfer.effectAllowed = "move";
+        try { event.dataTransfer.setData("text/plain", clipId); } catch (error) { /* ignore */ }
+      });
+      row.addEventListener("dragend", () => {
+        row.classList.remove("is-dragging");
+        shell.querySelectorAll(".drop-before, .drop-after").forEach((el) => el.classList.remove("drop-before", "drop-after"));
+        runtime.clipDragId = null;
+      });
+      row.addEventListener("dragover", (event) => {
+        if (!runtime.clipDragId || runtime.clipDragId === clipId) return;
+        event.preventDefault();
+        const position = dropPosition(event, row);
+        row.classList.toggle("drop-before", position === "before");
+        row.classList.toggle("drop-after", position === "after");
+      });
+      row.addEventListener("dragleave", () => row.classList.remove("drop-before", "drop-after"));
+      row.addEventListener("drop", (event) => {
+        event.preventDefault();
+        const { box, item } = currentAudioItem();
+        const position = dropPosition(event, row);
+        row.classList.remove("drop-before", "drop-after");
+        if (box && item && runtime.clipDragId) reorderClip(box, item, runtime.clipDragId, clipId, position);
+        runtime.clipDragId = null;
+      });
+    });
+
+    // Marquee : glissé souris sur l'espace vide de la liste sélectionne les clips.
+    const marqueeSurface = app.querySelector("[data-clip-marquee]");
+    if (marqueeSurface) {
+      marqueeSurface.addEventListener("pointerdown", (event) => startClipMarquee(event, marqueeSurface));
+      marqueeSurface.addEventListener("click", (event) => {
+        if (runtime.ignoreSurfaceClick) return;
+        if (event.target.closest(".audio-clip, button, input, select, textarea, audio")) return;
+        if (runtime.clipSelection.size) clearClipSelection();
+      });
+    }
+
+    refreshClipSelectionUi();
   }
 
   function renderEditor(box, note) {
@@ -5050,6 +5469,28 @@
       `;
     }
 
+    if (runtime.modal.type === "confirm-delete-clips") {
+      const count = (runtime.modal.clipIds || []).length;
+      return `
+        <div class="modal-backdrop">
+          <div class="modal confirm-modal">
+            <div class="modal-head">
+              <h2>Supprimer ${count > 1 ? "ces audios" : "cet audio"} ?</h2>
+              <button class="icon-button" type="button" data-action="close-modal" data-tooltip="Fermer" aria-label="Fermer">${icon("close")}</button>
+            </div>
+            <div class="modal-body">
+              <p class="modal-copy">Etes-vous sur de vouloir supprimer ${count > 1 ? "ces audios" : "cet audio"} ?</p>
+              <p class="modal-hint">${count > 1 ? `${count} clips seront retires definitivement.` : "1 clip sera retire definitivement."}</p>
+            </div>
+            <div class="modal-actions">
+              <button class="ghost-button" type="button" data-action="close-modal">Non</button>
+              <button class="button danger-button" type="button" data-action="confirm-delete-clips">${icon("trash")} Oui, supprimer</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     if (runtime.modal.type === "rename-item") {
       const box = activeBox();
       const item = box ? findItem(box, runtime.modal.itemId) : null;
@@ -5558,6 +5999,10 @@
     });
 
     app.querySelectorAll("[data-item-id]").forEach((row) => {
+      // Les champs éditables (ex : titre du fichier audio) portent data-item-id pour
+      // d'autres besoins : ne pas les traiter comme des lignes navigables (sinon un clic
+      // déclenche setActiveItem → render et éjecte le curseur du champ).
+      if (row.matches("input, textarea, select")) return;
       const sortableTarget = row.matches(".tree-row, .list-row, .folder-card, .folder-tile, .graph-node");
       row.addEventListener("click", (event) => {
         if (runtime.ignoreSurfaceClick) return;
@@ -6346,6 +6791,12 @@
 
     if (action === "confirm-delete") {
       deleteSelected(box, runtime.modal?.ids || []);
+      return;
+    }
+    if (action === "confirm-delete-clips") {
+      const item = findItem(box, runtime.modal?.itemId);
+      if (item) deleteAudioClips(box, item, runtime.modal?.clipIds || []);
+      else { setModal(null); render(); }
       return;
     }
 
@@ -10496,6 +10947,9 @@
     if (!event.target.closest?.("[data-toolbar-menu]")) {
       app.querySelectorAll(".toolbar-menu.is-open").forEach((menu) => menu.classList.remove("is-open"));
     }
+    if (!event.target.closest?.("[data-clip-badge-menu]")) {
+      app.querySelectorAll(".clip-badge-menu.is-open").forEach((menu) => menu.classList.remove("is-open"));
+    }
     if (!event.target.closest?.(".combo-field")) {
       app.querySelectorAll(".combo-field.is-combo-open").forEach((field) => field.classList.remove("is-combo-open"));
     }
@@ -10644,4 +11098,9 @@
   replaceNavigationPoint();
   syncDesktopFontFolder({ silent: true, rerender: false });
   window.setTimeout(() => { garbageCollectAudio(); }, 2500);
+  if (navigator.mediaDevices) {
+    navigator.mediaDevices.addEventListener?.("devicechange", () => {
+      if (app.querySelector("[data-audio-input]")) refreshAudioInputDevices();
+    });
+  }
 })();
