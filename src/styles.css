@@ -1787,12 +1787,16 @@ body.is-graph-dragging {
 }
 
 .note-editor {
+  --ms-active-decoration: var(--normal-decoration, none);
   min-height: 520px;
   padding: 6px 26px 48px;
   color: var(--normal-color);
   font-family: var(--normal-font);
   font-size: var(--normal-size);
   font-weight: var(--normal-weight);
+  font-style: var(--normal-style, normal);
+  text-decoration-line: var(--normal-decoration, none);
+  text-decoration-color: currentColor;
   line-height: 1.72;
   outline: none;
 }
@@ -2185,6 +2189,46 @@ body.is-graph-dragging {
   margin: 0.72em 0;
 }
 
+/* Chaque niveau expose sa decoration aux descendants. Les spans colores
+   redessinent ainsi leur propre soulignement avec leur currentColor. */
+.note-editor :where(h1, .ms-style-h1, .ms-inline-h1) { --ms-active-decoration: var(--h1-decoration, none); }
+.note-editor :where(h2, .ms-style-h2, .ms-inline-h2) { --ms-active-decoration: var(--h2-decoration, none); }
+.note-editor :where(h3, .ms-style-h3, .ms-inline-h3) { --ms-active-decoration: var(--h3-decoration, none); }
+.note-editor :where(h4, .ms-style-h4, .ms-inline-h4) { --ms-active-decoration: var(--h4-decoration, none); }
+.note-editor :where(h5, .ms-style-h5, .ms-inline-h5) { --ms-active-decoration: var(--h5-decoration, none); }
+.note-editor :where(h6, .ms-style-h6, .ms-inline-h6) { --ms-active-decoration: var(--h6-decoration, none); }
+.note-editor :where(.ms-style-ps1, .ms-inline-ps1) { --ms-active-decoration: var(--ps1-decoration, none); }
+.note-editor :where(.ms-style-ps2, .ms-inline-ps2) { --ms-active-decoration: var(--ps2-decoration, none); }
+.note-editor :where(.ms-style-ps3, .ms-inline-ps3) { --ms-active-decoration: var(--ps3-decoration, none); }
+.note-editor :where(.ms-style-ps4, .ms-inline-ps4) { --ms-active-decoration: var(--ps4-decoration, none); }
+
+/* Un soulignement explicite prime sur le preset englobant et transmet ce
+   contexte aux éventuels spans de couleur qu'il contient. */
+.note-editor :where(u, [style*="text-decoration"][style*="underline"]) {
+  --ms-active-decoration: underline;
+}
+
+.note-editor :where(u, [style*="text-decoration"][style*="underline"]) :where(*:not(s):not(strike)) {
+  text-decoration-line: underline;
+  text-decoration-color: currentColor;
+}
+
+.note-editor :where(u, [style*="text-decoration"][style*="underline"]) :where(s, strike) {
+  text-decoration-line: underline line-through;
+  text-decoration-color: currentColor;
+}
+
+.note-editor :where(*:not(s):not(strike)) {
+  text-decoration-line: var(--ms-active-decoration, none);
+  text-decoration-color: currentColor;
+}
+
+/* Conserver le barré, y compris lorsqu'il se trouve dans une zone soulignée. */
+.note-editor :where(s, strike) {
+  text-decoration-line: line-through;
+  text-decoration-color: currentColor;
+}
+
 .note-editor ul,
 .note-editor ol {
   padding-left: 26px;
@@ -2197,12 +2241,12 @@ body.is-graph-dragging {
 }
 
 /* Puces par niveau d'imbrication pour les listes simples (* + espace, Tab pour descendre) */
-.note-editor ul:not([class]) > li::marker { content: "•  "; font-size: 1.3em; }
-.note-editor :is(ul, ol) ul:not([class]) > li::marker { content: "○  "; font-size: 1em; }
-.note-editor :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "■  "; font-size: 0.85em; }
-.note-editor :is(ul, ol) :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "□  "; font-size: 0.85em; }
-.note-editor :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "▲  "; font-size: 0.85em; }
-.note-editor :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "△  "; font-size: 0.85em; }
+.note-editor ul:not([class]) > li::marker { content: "•  "; font-size: 1.2em; }
+.note-editor :is(ul, ol) ul:not([class]) > li::marker { content: "○  "; font-size: 0.78em; }
+.note-editor :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "■  "; font-size: 0.66em; }
+.note-editor :is(ul, ol) :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "□  "; font-size: 0.66em; }
+.note-editor :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "▲  "; font-size: 0.68em; }
+.note-editor :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) ul:not([class]) > li::marker { content: "△  "; font-size: 0.68em; }
 
 /* Couleur des puces natives : suit la couleur du premier caractere de l'item (comme Word) */
 .note-editor :is(ul, ol) > li::marker {
@@ -2372,7 +2416,7 @@ body.is-graph-dragging {
   margin-right: 10px;
   border-top: 6px solid transparent;
   border-bottom: 6px solid transparent;
-  border-left: 10px solid var(--amber);
+  border-left: 10px solid var(--li-marker-color, #d58f27);
 }
 
 .note-editor .dash-list li::before,
@@ -2406,7 +2450,14 @@ body.is-graph-dragging {
 }
 
 .note-editor .triangle-list li::before {
-  color: var(--li-marker-color, #d58f27);
+  border-left-color: var(--li-marker-color, #d58f27);
+}
+
+/* Une indentation doit etre nettement perceptible, y compris pour les listes
+   personnalisees qui ont leur propre padding plus haut. */
+.note-editor :is(ul, ol) > li > :is(ul, ol):not([class]),
+.note-editor :is(ul, ol) > li > :is(ul, ol)[class] {
+  padding-left: 36px;
 }
 
 /* Continuation d'un item coupe par un saut de page : pas de nouvelle puce */

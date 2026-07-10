@@ -32,6 +32,7 @@
     noteHistories: new Map(),
     restoringEditorHistory: false,
     itemClipboard: null,
+    itemCopyRunning: false,
     updateStatus: { status: "idle", message: "" },
     fontFolderOpenedAt: 0,
     fontFolderScanTimer: 0,
@@ -44,9 +45,17 @@
     boxCrypto: new Map(),
     encryptTimer: 0,
     encryptRunning: false,
+    encryptPromise: null,
+    encryptRetryCount: 0,
+    storageError: false,
     lastListAutoFormat: null,
+    pendingTypingContext: null,
     suppressSelectionSave: false,
     audioDbPromise: null,
+    audioWriteCount: 0,
+    audioMutationLocked: false,
+    audioWriteWaiters: [],
+    audioLockWaiters: [],
     audioUrlCache: new Map(),
     audioUrlCacheItemId: null,
     audioRecording: null,
@@ -756,7 +765,7 @@
     .print-note-header{display:grid;gap:6px;margin:0 0 18px;padding:0 0 12px;border-bottom:1px solid #dfe3e1;}
     .print-note-header h1{margin:0;color:#17201c;font:820 22px Inter,ui-sans-serif,system-ui,sans-serif;line-height:1.2;}
     .print-note-meta{display:flex;flex-wrap:wrap;gap:8px 14px;color:#657169;font-size:11px;font-weight:760;}
-    .note-editor{font-family:var(--normal-font);font-size:var(--normal-size);font-weight:var(--normal-weight);color:var(--normal-color);line-height:1.65;}
+    .note-editor{--ms-active-decoration:var(--normal-decoration,none);font-family:var(--normal-font);font-size:var(--normal-size);font-weight:var(--normal-weight);font-style:var(--normal-style,normal);color:var(--normal-color);text-decoration-line:var(--normal-decoration,none);text-decoration-color:currentColor;line-height:1.65;}
     .note-editor h1,.note-editor h2,.note-editor h3,.note-editor h4,.note-editor h5,.note-editor h6{margin:1.2em 0 .45em;line-height:1.18;}
     .note-editor h1{font-family:var(--h1-font);font-size:var(--h1-size);font-weight:var(--h1-weight);color:var(--h1-color);font-style:var(--h1-style,normal);text-decoration:var(--h1-decoration,none);background:var(--h1-highlight,transparent);}
     .note-editor h2{font-family:var(--h2-font);font-size:var(--h2-size);font-weight:var(--h2-weight);color:var(--h2-color);font-style:var(--h2-style,normal);text-decoration:var(--h2-decoration,none);background:var(--h2-highlight,transparent);}
@@ -764,15 +773,31 @@
     .note-editor h4{font-family:var(--h4-font);font-size:var(--h4-size);font-weight:var(--h4-weight);color:var(--h4-color);font-style:var(--h4-style,normal);text-decoration:var(--h4-decoration,none);background:var(--h4-highlight,transparent);}
     .note-editor h5{font-family:var(--h5-font);font-size:var(--h5-size);font-weight:var(--h5-weight);color:var(--h5-color);font-style:var(--h5-style,normal);text-decoration:var(--h5-decoration,none);background:var(--h5-highlight,transparent);}
     .note-editor h6{font-family:var(--h6-font);font-size:var(--h6-size);font-weight:var(--h6-weight);color:var(--h6-color);font-style:var(--h6-style,normal);text-decoration:var(--h6-decoration,none);background:var(--h6-highlight,transparent);}
-    ${["h1", "h2", "h3", "h4", "h5", "h6", "ps1", "ps2", "ps3", "ps4"].map((k) => `.note-editor .ms-style-${k},.note-editor .ms-inline-${k}{font-family:var(--${k}-font);font-size:var(--${k}-size);font-weight:var(--${k}-weight);color:var(--${k}-color);font-style:var(--${k}-style,normal);text-decoration:var(--${k}-decoration,none);background:var(--${k}-highlight,transparent);}`).join("")}
+    ${["h1", "h2", "h3", "h4", "h5", "h6", "ps1", "ps2", "ps3", "ps4"].map((k) => `.note-editor .ms-style-${k},.note-editor .ms-inline-${k}{--ms-active-decoration:var(--${k}-decoration,none);font-family:var(--${k}-font);font-size:var(--${k}-size);font-weight:var(--${k}-weight);color:var(--${k}-color);font-style:var(--${k}-style,normal);text-decoration:var(--${k}-decoration,none);background:var(--${k}-highlight,transparent);}`).join("")}
+    ${["h1", "h2", "h3", "h4", "h5", "h6"].map((k) => `.note-editor ${k}{--ms-active-decoration:var(--${k}-decoration,none);}`).join("")}
+    .note-editor :where(u,[style*="text-decoration"][style*="underline"]){--ms-active-decoration:underline;}
+    .note-editor :where(u,[style*="text-decoration"][style*="underline"]) :where(*:not(s):not(strike)){text-decoration-line:underline;text-decoration-color:currentColor;}
+    .note-editor :where(u,[style*="text-decoration"][style*="underline"]) :where(s,strike){text-decoration-line:underline line-through;text-decoration-color:currentColor;}
+    .note-editor :where(*:not(s):not(strike)){text-decoration-line:var(--ms-active-decoration,none);text-decoration-color:currentColor;}
+    .note-editor :where(s,strike){text-decoration-line:line-through;text-decoration-color:currentColor;}
     .note-editor p{margin:.55em 0;}
-    .note-editor ul,.note-editor ol{margin:.65em 0;padding-left:1.6em;}
-    .note-editor .dash-list,.note-editor .arrow-list,.note-editor .circle-list,.note-editor .check-list,.note-editor .triangle-list,.note-editor .square-list{list-style:none;padding-left:0;}
-    .note-editor .dash-list li::before{content:"- ";font-weight:700;}
-    .note-editor .arrow-list li::before{content:"→ ";font-weight:700;}
-    .note-editor .circle-list li::before{content:"○ ";font-weight:700;}
-    .note-editor .triangle-list li::before{content:"△ ";font-weight:700;color:#d58f27;}
-    .note-editor .square-list li::before{content:"□ ";font-weight:700;}
+    .note-editor ul,.note-editor ol{margin:.65em 0;padding-left:26px;}
+    .note-editor :is(ul,ol)>li>:is(ul,ol){padding-left:36px;}
+    .note-editor ul>li::marker,.note-editor ol>li::marker{font-family:"Segoe UI Symbol","Segoe UI",Arial,sans-serif;color:var(--li-marker-color,currentColor);}
+    .note-editor ul:not([class])>li::marker{content:"•  ";font-size:1.2em;}
+    .note-editor :is(ul,ol) ul:not([class])>li::marker{content:"○  ";font-size:.78em;}
+    .note-editor :is(ul,ol) :is(ul,ol) ul:not([class])>li::marker{content:"■  ";font-size:.66em;}
+    .note-editor :is(ul,ol) :is(ul,ol) :is(ul,ol) ul:not([class])>li::marker{content:"□  ";font-size:.66em;}
+    .note-editor :is(ul,ol) :is(ul,ol) :is(ul,ol) :is(ul,ol) ul:not([class])>li::marker{content:"▲  ";font-size:.68em;}
+    .note-editor :is(ul,ol) :is(ul,ol) :is(ul,ol) :is(ul,ol) :is(ul,ol) ul:not([class])>li::marker{content:"△  ";font-size:.68em;}
+    .note-editor .dash-list,.note-editor .arrow-list,.note-editor .circle-list,.note-editor .check-list,.note-editor .triangle-list,.note-editor .square-list{list-style:none;padding-left:22px;}
+    .note-editor .dash-list li::before{content:"- ";font-weight:700;color:var(--li-marker-color,var(--accent));}
+    .note-editor .arrow-list li::before{content:"→ ";font-weight:700;color:var(--li-marker-color,var(--accent));}
+    .note-editor .circle-list li::before{content:"○ ";font-weight:700;color:var(--li-marker-color,currentColor);}
+    .note-editor .triangle-list li::before{content:"△ ";font-weight:700;color:var(--li-marker-color,#d58f27);}
+    .note-editor .square-list li::before{content:"□ ";font-weight:700;color:var(--li-marker-color,currentColor);}
+    .note-editor :is(ul,ol) :is(.circle-list,.triangle-list,.square-list) li::before{font-size:.72em;}
+    .note-editor :is(ul,ol)>li>:is(ul,ol)[class]{padding-left:36px;}
     .note-editor .check-list li{position:relative;min-height:1.7em;padding-left:26px;}
     .note-editor .check-list li::before{content:"";position:absolute;top:.45em;left:0;width:12px;height:12px;border:1.5px solid var(--accent);border-radius:3px;}
     .note-editor .check-list li[data-checked="true"]{color:#657169;text-decoration:line-through;}
@@ -1221,9 +1246,22 @@
     const headings = state.settings?.headingPresets || headingDefaults;
     const preset = (key) => ({ ...headingDefaults[key], ...(headings[key] || {}) });
     const normal = preset("normal");
-    const h1 = preset("h1");
-    const h2 = preset("h2");
-    const h3 = preset("h3");
+    const normalVars = headingStyleVars("normal", normal);
+    const wordStyleRules = allStyleLevels.map((key) => {
+      const style = preset(key);
+      const vars = headingStyleVars(key, style);
+      const selectors = [`.note-editor .ms-style-${key}`, `.note-editor .ms-inline-${key}`];
+      if (headingLevels.includes(key)) selectors.unshift(`.note-editor ${key}`);
+      return `${selectors.join(",")}{--ms-active-decoration:${vars.decoration};font-family:${safePrintCssValue(style.fontFamily, headingDefaults[key].fontFamily)};font-size:${safePrintCssValue(style.size, headingDefaults[key].size)};font-weight:${style.bold === false ? "400" : safePrintCssValue(style.weight, headingDefaults[key].weight)};color:${cleanColor(style.color, headingDefaults[key].color)};font-style:${vars.style};text-decoration:${vars.decoration};background:${vars.highlight};}`;
+    }).join("\n");
+    const wordUnderlineRules = allStyleLevels.map((key) => {
+      const style = preset(key);
+      if (!style.underline) return "";
+      const selectors = [`.note-editor .ms-style-${key}`, `.note-editor .ms-inline-${key}`];
+      if (headingLevels.includes(key)) selectors.unshift(`.note-editor ${key}`);
+      const descendants = selectors.map((selector) => `${selector} *`);
+      return `${[...selectors, ...descendants].join(",")}{text-decoration:underline;text-decoration-color:currentColor;}`;
+    }).filter(Boolean).join("\n");
     const todoColor = cleanColor(state.settings?.todoColor, state.settings?.selectionColor || "#0f6b58");
     const accentColor = cleanColor(state.settings?.selectionColor, "#0f6b58");
     return `<!doctype html>
@@ -1239,19 +1277,32 @@
     .Section1{page:Section1;}
     .print-sheet{page-break-after:always;}
     .print-sheet:last-child{page-break-after:auto;}
-    .note-editor{font-family:${safePrintCssValue(normal.fontFamily, headingDefaults.normal.fontFamily)};font-size:${safePrintCssValue(normal.size, headingDefaults.normal.size)};font-weight:${safePrintCssValue(normal.weight, headingDefaults.normal.weight)};color:${cleanColor(normal.color, headingDefaults.normal.color)};line-height:1.55;}
-    .note-editor h1,.note-editor h2,.note-editor h3{margin:1.2em 0 .45em;line-height:1.18;}
-    .note-editor h1{font-family:${safePrintCssValue(h1.fontFamily, headingDefaults.h1.fontFamily)};font-size:${safePrintCssValue(h1.size, headingDefaults.h1.size)};font-weight:${safePrintCssValue(h1.weight, headingDefaults.h1.weight)};color:${cleanColor(h1.color, headingDefaults.h1.color)};}
-    .note-editor h2{font-family:${safePrintCssValue(h2.fontFamily, headingDefaults.h2.fontFamily)};font-size:${safePrintCssValue(h2.size, headingDefaults.h2.size)};font-weight:${safePrintCssValue(h2.weight, headingDefaults.h2.weight)};color:${cleanColor(h2.color, headingDefaults.h2.color)};}
-    .note-editor h3{font-family:${safePrintCssValue(h3.fontFamily, headingDefaults.h3.fontFamily)};font-size:${safePrintCssValue(h3.size, headingDefaults.h3.size)};font-weight:${safePrintCssValue(h3.weight, headingDefaults.h3.weight)};color:${cleanColor(h3.color, headingDefaults.h3.color)};}
+    .note-editor{--ms-active-decoration:${normalVars.decoration};font-family:${safePrintCssValue(normal.fontFamily, headingDefaults.normal.fontFamily)};font-size:${safePrintCssValue(normal.size, headingDefaults.normal.size)};font-weight:${normal.bold === false ? "400" : safePrintCssValue(normal.weight, headingDefaults.normal.weight)};color:${cleanColor(normal.color, headingDefaults.normal.color)};font-style:${normalVars.style};text-decoration:${normalVars.decoration};text-decoration-color:currentColor;line-height:1.55;}
+    .note-editor h1,.note-editor h2,.note-editor h3,.note-editor h4,.note-editor h5,.note-editor h6{margin:1.2em 0 .45em;line-height:1.18;}
+    ${wordStyleRules}
+    ${normal.underline ? ".note-editor,.note-editor *{text-decoration:underline;text-decoration-color:currentColor;}" : ""}
+    ${wordUnderlineRules}
+    .note-editor u,.note-editor u *,.note-editor [style*="text-decoration"][style*="underline"],.note-editor [style*="text-decoration"][style*="underline"] *{text-decoration:underline;text-decoration-color:currentColor;}
+    .note-editor s,.note-editor strike{ text-decoration:line-through;text-decoration-color:currentColor;}
+    .note-editor u s,.note-editor u strike{ text-decoration:underline line-through;text-decoration-color:currentColor;}
     .note-editor p{margin:.55em 0;}
-    .note-editor ul,.note-editor ol{margin:.65em 0;padding-left:1.6em;}
-    .note-editor .dash-list,.note-editor .arrow-list,.note-editor .circle-list,.note-editor .check-list,.note-editor .triangle-list,.note-editor .square-list{list-style:none;padding-left:0;}
-    .note-editor .dash-list li::before{content:"- ";font-weight:700;}
-    .note-editor .arrow-list li::before{content:"-> ";font-weight:700;}
-    .note-editor .circle-list li::before{content:"o ";font-weight:700;}
-    .note-editor .triangle-list li::before{content:"^ ";font-weight:700;color:#d58f27;}
-    .note-editor .square-list li::before{content:"[] ";font-weight:700;}
+    .note-editor ul,.note-editor ol{margin:.65em 0;padding-left:26px;}
+    .note-editor ul ul,.note-editor ul ol,.note-editor ol ul,.note-editor ol ol{padding-left:36px;}
+    .note-editor ul>li::marker,.note-editor ol>li::marker{font-family:"Segoe UI Symbol","Segoe UI",Arial,sans-serif;color:var(--li-marker-color,currentColor);}
+    .note-editor ul:not([class])>li::marker{content:"•  ";font-size:1.2em;}
+    .note-editor ul ul:not([class])>li::marker,.note-editor ol ul:not([class])>li::marker{content:"○  ";font-size:.78em;}
+    .note-editor ul ul ul:not([class])>li::marker{content:"■  ";font-size:.66em;}
+    .note-editor ul ul ul ul:not([class])>li::marker{content:"□  ";font-size:.66em;}
+    .note-editor ul ul ul ul ul:not([class])>li::marker{content:"▲  ";font-size:.68em;}
+    .note-editor ul ul ul ul ul ul:not([class])>li::marker{content:"△  ";font-size:.68em;}
+    .note-editor .dash-list,.note-editor .arrow-list,.note-editor .circle-list,.note-editor .check-list,.note-editor .triangle-list,.note-editor .square-list{list-style:none;padding-left:22px;}
+    .note-editor .dash-list li::before{content:"- ";font-weight:700;color:var(--li-marker-color,currentColor);}
+    .note-editor .arrow-list li::before{content:"→ ";font-weight:700;color:var(--li-marker-color,currentColor);}
+    .note-editor .circle-list li::before{content:"○ ";font-weight:700;color:var(--li-marker-color,currentColor);}
+    .note-editor .triangle-list li::before{content:"△ ";font-weight:700;color:var(--li-marker-color,#d58f27);}
+    .note-editor .square-list li::before{content:"□ ";font-weight:700;color:var(--li-marker-color,currentColor);}
+    .note-editor ul .circle-list li::before,.note-editor ol .circle-list li::before,.note-editor ul .triangle-list li::before,.note-editor ol .triangle-list li::before,.note-editor ul .square-list li::before,.note-editor ol .square-list li::before{font-size:.72em;}
+    .note-editor ul>li>ul[class],.note-editor ul>li>ol[class],.note-editor ol>li>ul[class],.note-editor ol>li>ol[class]{padding-left:36px;}
     .note-editor .check-list li::before{content:"[ ] ";font-weight:700;color:${accentColor};}
     .note-editor .check-list li[data-checked="true"]{color:#657169;text-decoration:line-through;}
     .note-editor .check-list li[data-checked="true"]::before{content:"[x] ";color:${todoColor};}
@@ -1404,7 +1455,7 @@
       headingPresets: (() => {
         const presets = { normal: { ...headingDefaults.normal, ...(previousHeadings.normal || {}) } };
         allStyleLevels.forEach((level) => {
-          if (["h1", "h2", "h3"].includes(level) || previousHeadings[level]) {
+          if (headingLevels.includes(level) || previousHeadings[level]) {
             presets[level] = { ...headingDefaults[level], ...(previousHeadings[level] || {}) };
           }
         });
@@ -1415,6 +1466,7 @@
     value.boxes.forEach((box) => {
       if (!box.root) return;
       normalizeUnlockedBoxShape(box);
+      if (box.passwordHash && !box.encrypted?.data) box.legacyPlaintextProtected = true;
     });
     return value;
   }
@@ -1539,8 +1591,9 @@
   }
 
   function saveState() {
-    persistState();
+    const saved = persistState();
     scheduleProtectedBoxEncryption();
+    return saved;
   }
 
   function stateSnapshot() {
@@ -1557,6 +1610,16 @@
     if (!snapshot) return false;
     try {
       const restored = normalizeStateShape(JSON.parse(snapshot));
+      const crossesSecurityBoundary = state.boxes.some((box) => {
+        const previous = restored.boxes.find((item) => item.id === box.id);
+        if (!previous) return false;
+        return String(previous.passwordHash || "") !== String(box.passwordHash || "")
+          || String(previous.encrypted?.salt || "") !== String(box.encrypted?.salt || "");
+      });
+      if (crossesSecurityBoundary) {
+        setToast("Annulation refusee : elle modifierait le chiffrement d'une boite.");
+        return false;
+      }
       Object.keys(state).forEach((key) => delete state[key]);
       Object.assign(state, restored);
       setModal(null);
@@ -2061,7 +2124,7 @@
     if (box.sortMode === "typeFoldersFirst" || box.sortMode === "typeNotesFirst") {
       const dir = box.sortMode === "typeFoldersFirst" ? 1 : -1;
       return children.sort((a, b) => {
-        const typeBias = Number(a.type === "note") - Number(b.type === "note");
+        const typeBias = Number(a.type !== "folder") - Number(b.type !== "folder");
         return typeBias ? typeBias * dir : compareText(a, b);
       });
     }
@@ -2069,7 +2132,7 @@
     const dir = box.sortMode.endsWith("Desc") ? -1 : 1;
 
     return children.sort((a, b) => {
-      const typeBias = Number(a.type === "note") - Number(b.type === "note");
+      const typeBias = Number(a.type !== "folder") - Number(b.type !== "folder");
       if (typeBias) return typeBias;
       if (box.sortMode.startsWith("alpha")) return compareText(a, b) * dir;
       if (box.sortMode.startsWith("created")) return compareDate("createdAt")(a, b) * dir;
@@ -2150,17 +2213,76 @@
     return String(value || "").trim();
   }
 
+  const boxPasswordVerifierIterations = 310000;
+
+  async function passwordVerifierDigest(code, salt, iterations = boxPasswordVerifierIterations) {
+    const subtle = cryptoSubtle();
+    if (!subtle) return null;
+    const material = await subtle.importKey("raw", new TextEncoder().encode(String(code || "")), "PBKDF2", false, ["deriveBits"]);
+    const bits = await subtle.deriveBits(
+      { name: "PBKDF2", salt: base64ToBytes(salt), iterations, hash: "SHA-256" },
+      material,
+      256,
+    );
+    return bytesToBase64(new Uint8Array(bits));
+  }
+
+  async function createPasswordVerifier(code) {
+    const salt = bytesToBase64(window.crypto.getRandomValues(new Uint8Array(16)));
+    const digest = await passwordVerifierDigest(code, salt);
+    if (!digest) throw new Error("Verification securisee du code indisponible");
+    return `pbkdf2$v1$${boxPasswordVerifierIterations}$${salt}$${digest}`;
+  }
+
+  function passwordVerifierIsLegacy(hash) {
+    return /^[0-9a-f]{64}$/i.test(String(hash || ""));
+  }
+
+  function constantTimeTextEqual(left, right) {
+    const a = String(left || "");
+    const b = String(right || "");
+    let difference = a.length ^ b.length;
+    const length = Math.max(a.length, b.length);
+    for (let index = 0; index < length; index += 1) {
+      difference |= (a.charCodeAt(index) || 0) ^ (b.charCodeAt(index) || 0);
+    }
+    return difference === 0;
+  }
+
   async function matchingBoxCode(value, hash) {
     if (!hash) return null;
     const raw = String(value || "");
     const normalized = normalizeBoxCode(raw);
-    if (await sha256(normalized) === hash) return normalized;
-    if (raw !== normalized && await sha256(raw) === hash) return raw;
+    const candidates = raw === normalized ? [normalized] : [normalized, raw];
+    const parts = String(hash).split("$");
+    if (parts.length === 5 && parts[0] === "pbkdf2" && parts[1] === "v1") {
+      const iterations = Number(parts[2]);
+      if (!Number.isInteger(iterations) || iterations < 100000 || iterations > 2000000) return null;
+      for (const candidate of candidates) {
+        const digest = await passwordVerifierDigest(candidate, parts[3], iterations);
+        if (digest && constantTimeTextEqual(digest, parts[4])) return candidate;
+      }
+      return null;
+    }
+    if (passwordVerifierIsLegacy(hash)) {
+      for (const candidate of candidates) {
+        if (constantTimeTextEqual(await sha256(candidate), hash)) return candidate;
+      }
+    }
     return null;
   }
 
   async function boxCodeMatches(value, hash) {
     return (await matchingBoxCode(value, hash)) !== null;
+  }
+
+  async function upgradeLegacyPasswordVerifier(box, code) {
+    if (!box || !passwordVerifierIsLegacy(box.passwordHash)) return true;
+    const previous = box.passwordHash;
+    box.passwordHash = await createPasswordVerifier(code);
+    if (persistState()) return true;
+    box.passwordHash = previous;
+    return false;
   }
 
   function cryptoSubtle() {
@@ -2258,6 +2380,41 @@
     });
   }
 
+  function beginAudioWrite() {
+    if (runtime.audioMutationLocked) return false;
+    runtime.audioWriteCount += 1;
+    return true;
+  }
+
+  function endAudioWrite() {
+    runtime.audioWriteCount = Math.max(runtime.audioWriteCount - 1, 0);
+    if (runtime.audioWriteCount) return;
+    const waiters = runtime.audioWriteWaiters.splice(0);
+    waiters.forEach((resolve) => resolve());
+  }
+
+  async function lockAudioMutations() {
+    if (runtime.audioMutationLocked) return false;
+    runtime.audioMutationLocked = true;
+    if (runtime.audioWriteCount) {
+      await new Promise((resolve) => runtime.audioWriteWaiters.push(resolve));
+    }
+    return true;
+  }
+
+  function unlockAudioMutations() {
+    runtime.audioMutationLocked = false;
+    const waiters = runtime.audioLockWaiters.splice(0);
+    waiters.forEach((resolve) => resolve());
+  }
+
+  async function beginAudioWriteWhenAvailable() {
+    while (runtime.audioMutationLocked) {
+      await new Promise((resolve) => runtime.audioLockWaiters.push(resolve));
+    }
+    return beginAudioWrite();
+  }
+
   async function audioPutClip(record) {
     const db = await openAudioDb();
     return new Promise((resolve, reject) => {
@@ -2266,6 +2423,20 @@
       tx.oncomplete = () => resolve(true);
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error);
+    });
+  }
+
+  async function audioPutClips(records) {
+    const list = (records || []).filter(Boolean);
+    if (!list.length) return true;
+    const db = await openAudioDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(AUDIO_STORE, "readwrite");
+      const store = tx.objectStore(AUDIO_STORE);
+      list.forEach((record) => store.put(record));
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error || new Error("Ecriture audio echouee"));
+      tx.onabort = () => reject(tx.error || new Error("Ecriture audio annulee"));
     });
   }
 
@@ -2306,6 +2477,7 @@
 
   async function encryptAudioBytes(key, buffer) {
     const subtle = cryptoSubtle();
+    if (!subtle || !key) throw new Error("Cle de chiffrement audio indisponible");
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
     const data = await subtle.encrypt({ name: "AES-GCM", iv }, key, buffer);
     return { iv: bytesToBase64(iv), data };
@@ -2313,37 +2485,68 @@
 
   async function decryptAudioBytes(key, ivB64, buffer) {
     const subtle = cryptoSubtle();
+    if (!subtle || !key) throw new Error("Cle de dechiffrement audio indisponible");
     return subtle.decrypt({ name: "AES-GCM", iv: base64ToBytes(ivB64) }, key, buffer);
+  }
+
+  async function audioVariantBytes(variant, key) {
+    if (!variant) throw new Error("Donnees audio absentes");
+    if (!variant.enc) return variant.data;
+    if (!key) throw new Error("Cle audio absente");
+    return decryptAudioBytes(key, variant.iv, variant.data);
+  }
+
+  function audioRecordVariant(record) {
+    return { enc: !!record?.enc, iv: record?.iv || null, data: record?.data };
+  }
+
+  function finalizedAudioRecord(record) {
+    if (!record?.pending) return record;
+    const { pending, ...base } = record;
+    return { ...base, enc: !!pending.enc, iv: pending.iv || null, data: pending.data };
   }
 
   // Ecrit les octets d'un clip : chiffres si la boite a un code (et est
   // deverrouillee, ce qui est toujours le cas quand on enregistre/importe).
-  async function storeAudioClipBytes(box, clipId, mime, buffer) {
+  async function storeAudioClipBytes(box, clipId, mime, buffer, options = {}) {
+    const trackedHere = options.alreadyTracked !== true;
+    if (trackedHere && !beginAudioWrite()) throw new Error("Modification audio temporairement verrouillee");
     let enc = false;
     let iv = null;
     let data = buffer;
-    if (box?.passwordHash) {
-      const key = await boxAudioKey(box.id);
-      if (key) {
+    try {
+      if (box?.passwordHash) {
+        const key = await boxAudioKey(box.id);
+        if (!key) throw new Error("Cle de chiffrement audio indisponible");
         const result = await encryptAudioBytes(key, buffer);
         enc = true;
         iv = result.iv;
         data = result.data;
       }
+      await audioPutClip({ id: clipId, boxId: box.id, mime: mime || "audio/webm", enc, iv, data });
+    } finally {
+      if (trackedHere) endAudioWrite();
     }
-    await audioPutClip({ id: clipId, boxId: box.id, mime: mime || "audio/webm", enc, iv, data });
   }
 
   // Lit un clip et renvoie une URL objet jouable (dechiffre au besoin).
   async function loadAudioClipUrl(box, clipId) {
     const record = await audioGetClip(clipId);
     if (!record) return null;
-    let bytes = record.data;
-    if (record.enc) {
-      const key = await boxAudioKey(box.id);
-      if (!key) return null;
-      bytes = await decryptAudioBytes(key, record.iv, record.data);
+    const key = box?.passwordHash ? await boxAudioKey(box.id) : null;
+    let bytes = null;
+    const candidates = record.pending && box?.passwordHash
+      ? [record.pending, audioRecordVariant(record)]
+      : [audioRecordVariant(record), record.pending].filter(Boolean);
+    for (let index = 0; index < candidates.length; index += 1) {
+      try {
+        bytes = await audioVariantBytes(candidates[index], key);
+        break;
+      } catch (error) {
+        bytes = null;
+      }
     }
+    if (!bytes) return null;
     const blob = new Blob([bytes], { type: record.mime || "audio/webm" });
     return URL.createObjectURL(blob);
   }
@@ -2351,28 +2554,86 @@
   // Re-chiffre/dechiffre tous les clips d'une boite lors d'un changement de
   // code (par index boxId : marche meme si l'arbre n'est pas en memoire).
   async function migrateBoxAudio(boxId, fromKey, toKey) {
-    let records = [];
-    try {
-      records = await audioClipsForBox(boxId);
-    } catch (error) {
-      return;
-    }
+    const records = await audioClipsForBox(boxId);
+    const staged = [];
+    const final = [];
     for (const record of records) {
-      try {
-        let bytes = record.data;
-        if (record.enc) {
-          if (!fromKey) continue;
-          bytes = await decryptAudioBytes(fromKey, record.iv, record.data);
+      let bytes = null;
+      let currentVariant = null;
+      const candidates = record.pending && fromKey
+        ? [record.pending, audioRecordVariant(record)]
+        : [audioRecordVariant(record), record.pending].filter(Boolean);
+      for (const candidate of candidates) {
+        try {
+          bytes = await audioVariantBytes(candidate, fromKey);
+          currentVariant = candidate;
+          break;
+        } catch (error) {
+          bytes = null;
         }
-        if (toKey) {
-          const result = await encryptAudioBytes(toKey, bytes);
-          await audioPutClip({ ...record, enc: true, iv: result.iv, data: result.data });
-        } else {
-          await audioPutClip({ ...record, enc: false, iv: null, data: bytes });
-        }
-      } catch (error) {
-        /* clip illisible (mauvaise cle) : on le laisse tel quel */
       }
+      if (!bytes) throw new Error(`Cle audio source absente pour ${record.id}`);
+      let pending;
+      if (toKey) {
+        const result = await encryptAudioBytes(toKey, bytes);
+        pending = { enc: true, iv: result.iv, data: result.data };
+      } else {
+        pending = { enc: false, iv: null, data: bytes };
+      }
+      const currentRecord = currentVariant === record.pending
+        ? finalizedAudioRecord(record)
+        : (({ pending: _stalePending, ...primary }) => primary)(record);
+      const stagedRecord = { ...currentRecord, pending };
+      staged.push(stagedRecord);
+      final.push(finalizedAudioRecord(stagedRecord));
+    }
+    // Deux phases : l'ancienne variante reste lisible jusqu'a ce que le nouvel
+    // etat localStorage soit confirme. En cas de crash entre les deux commits,
+    // le lecteur sait utiliser puis promouvoir la variante pending.
+    await audioPutClips(staged);
+    return { before: records, staged, final };
+  }
+
+  async function reconcilePendingAudioForBox(boxId, key, attempt = 0) {
+    const audioLocked = await lockAudioMutations();
+    if (!audioLocked) {
+      if (attempt < 5) window.setTimeout(() => { reconcilePendingAudioForBox(boxId, key, attempt + 1); }, 500 * (attempt + 1));
+      return false;
+    }
+    try {
+      const liveBox = state.boxes.find((box) => box.id === boxId);
+      if (!liveBox) return false;
+      if (liveBox.passwordHash) {
+        const currentKey = await boxAudioKey(boxId);
+        if (!currentKey || currentKey !== key) return false;
+      } else if (key !== null) {
+        return false;
+      }
+      const records = await audioClipsForBox(boxId);
+      const promotable = [];
+      for (const record of records) {
+        if (!record.pending) continue;
+        try {
+          await audioVariantBytes(record.pending, key);
+          promotable.push(finalizedAudioRecord(record));
+        } catch (error) {
+          try {
+            await audioVariantBytes(audioRecordVariant(record), key);
+            const { pending, ...primary } = record;
+            promotable.push(primary);
+          } catch (primaryError) {
+            // Aucune variante ne correspond a l'etat courant : ne rien detruire.
+          }
+        }
+      }
+      if (promotable.length) await audioPutClips(promotable);
+      return true;
+    } catch (error) {
+      if (attempt < 5) window.setTimeout(() => { reconcilePendingAudioForBox(boxId, key, attempt + 1); }, 500 * (attempt + 1));
+      return false;
+    } finally {
+      unlockAudioMutations();
+      if (needsEncryptionPass()) scheduleProtectedBoxEncryption();
     }
   }
 
@@ -2426,11 +2687,21 @@
         const payload = JSON.parse(opened.payloadJson);
         Object.assign(box, payload);
         normalizeUnlockedBoxShape(box);
+        box.root.title = box.name;
         runtime.boxCrypto.set(box.id, { key: opened.key, salt: box.encrypted.salt, blob: box.encrypted, lastPayload: null });
+        window.setTimeout(() => { reconcilePendingAudioForBox(box.id, opened.key); }, 0);
+        window.setTimeout(() => { garbageCollectAudio(); }, 0);
         return true;
       }
       if (!box.root) return false;
-      return setupBoxEncryption(box.id, code);
+      if (!setupBoxEncryption(box.id, code)) return false;
+      const blob = await encryptUnlockedBoxNow(box);
+      if (!blob) {
+        runtime.boxCrypto.delete(box.id);
+        return false;
+      }
+      delete box.legacyPlaintextProtected;
+      return persistState();
     } catch (error) {
       console.warn("MindSet box decryption failed", error);
       return false;
@@ -2458,7 +2729,13 @@
     }
     const cryptoEntry = runtime.boxCrypto.get(box.id);
     const blob = cryptoEntry?.blob || box.encrypted || null;
-    if (!blob) return box;
+    if (!blob) {
+      // Compatibilite avec les toutes premieres versions : ces boites etaient
+      // protegees par code mais encore stockees en clair. Elles sont migrees au
+      // premier deverrouillage, sans bloquer les autres sauvegardes entre-temps.
+      if (box.legacyPlaintextProtected) return box;
+      throw new Error("Sauvegarde chiffree indisponible");
+    }
     return {
       id: box.id,
       name: box.name,
@@ -2469,20 +2746,62 @@
     };
   }
 
-  function persistState() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, boxes: state.boxes.map(boxForDisk) }));
+  function stateForDisk() {
+    return {
+      ...state,
+      settings: {
+        ...state.settings,
+        // Les polices du dossier Electron sont relues au demarrage. Les dupliquer
+        // en base64 dans localStorage peut bloquer toutes les sauvegardes.
+        localFonts: (state.settings?.localFonts || []).filter((font) => font.source !== "desktop-folder"),
+      },
+      boxes: state.boxes.map(boxForDisk),
+    };
+  }
+
+  function persistState(options = {}) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(stateForDisk()));
+      runtime.storageError = false;
+      return true;
+    } catch (error) {
+      console.error("MindSet state persistence failed", error);
+      if (!runtime.storageError && options.silent !== true) {
+        runtime.storageError = true;
+        const encryptionMissing = String(error?.message || "").includes("chiffree indisponible");
+        setToast(encryptionMissing
+          ? "Sauvegarde securisee en attente : la boite reste ouverte."
+          : "Stockage local plein : la derniere modification n'a pas ete sauvegardee.");
+      }
+      return false;
+    }
   }
 
   function needsEncryptionPass() {
-    return state.boxes.some((box) => box.passwordHash && box.root && runtime.boxCrypto.has(box.id));
+    return state.boxes.some((box) => {
+      if (!box.passwordHash || !box.root || !runtime.boxCrypto.has(box.id)) return false;
+      const entry = runtime.boxCrypto.get(box.id);
+      return !entry?.blob || entry.lastPayload !== JSON.stringify(protectedBoxPayload(box));
+    });
   }
 
-  function scheduleProtectedBoxEncryption() {
+  function scheduleProtectedBoxEncryption(delay = 150) {
     if (!needsEncryptionPass()) return;
     window.clearTimeout(runtime.encryptTimer);
-    runtime.encryptTimer = window.setTimeout(() => {
-      runProtectedBoxEncryption();
-    }, 150);
+    runtime.encryptTimer = window.setTimeout(async () => {
+      try {
+        await runProtectedBoxEncryption();
+        runtime.encryptRetryCount = 0;
+        if (needsEncryptionPass()) scheduleProtectedBoxEncryption();
+      } catch (error) {
+        console.warn("MindSet box encryption failed", error);
+        runtime.encryptRetryCount = Math.min(runtime.encryptRetryCount + 1, 8);
+        if (needsEncryptionPass()) {
+          const retryDelay = Math.min(1000 * (2 ** (runtime.encryptRetryCount - 1)), 30000);
+          scheduleProtectedBoxEncryption(retryDelay);
+        }
+      }
+    }, delay);
   }
 
   async function encryptUnlockedBoxNow(box) {
@@ -2500,24 +2819,57 @@
   }
 
   async function runProtectedBoxEncryption() {
-    if (runtime.encryptRunning) {
-      scheduleProtectedBoxEncryption();
-      return;
-    }
-    runtime.encryptRunning = true;
-    try {
+    if (runtime.encryptPromise) return runtime.encryptPromise;
+    runtime.encryptPromise = (async () => {
+      runtime.encryptRunning = true;
       let changed = false;
+      const changedBoxes = [];
       for (const box of state.boxes) {
         if (!box.passwordHash || !box.root || !runtime.boxCrypto.has(box.id)) continue;
         const before = runtime.boxCrypto.get(box.id)?.blob;
         const blob = await encryptUnlockedBoxNow(box);
-        if (blob && blob !== before) changed = true;
+        if (!blob) throw new Error(`Chiffrement impossible pour ${box.name || box.id}`);
+        if (blob !== before) {
+          changed = true;
+          changedBoxes.push(box);
+        }
       }
-      if (changed) persistState();
-    } catch (error) {
-      console.warn("MindSet box encryption failed", error);
+      if (changed && !persistState()) {
+        changedBoxes.forEach((box) => {
+          const entry = runtime.boxCrypto.get(box.id);
+          if (entry) entry.lastPayload = null;
+        });
+        throw new Error("Persistance du chiffrement impossible");
+      }
+      return changed;
+    })();
+    try {
+      return await runtime.encryptPromise;
     } finally {
       runtime.encryptRunning = false;
+      runtime.encryptPromise = null;
+    }
+  }
+
+  async function flushAppState() {
+    cancelDeferredEditorWork({ suppressIdleMs: 1000 });
+    if (runtime.audioRecording && !(await awaitAudioRecordingStop({}, 5200))) {
+      throw new Error("L'enregistrement audio ne s'est pas termine");
+    }
+    const audioLocked = await lockAudioMutations();
+    if (!audioLocked) throw new Error("Une operation audio ou de securite est en cours");
+    try {
+      flushActiveEditorContent();
+      window.clearTimeout(runtime.encryptTimer);
+      runtime.encryptTimer = 0;
+      await runProtectedBoxEncryption();
+      // Si une passe etait deja en cours au debut du flush, une seconde passe
+      // capture les changements arrives pendant cette premiere promesse.
+      if (needsEncryptionPass()) await runProtectedBoxEncryption();
+      if (!persistState()) throw new Error("La sauvegarde finale a echoue");
+      return true;
+    } finally {
+      unlockAudioMutations();
     }
   }
 
@@ -2563,6 +2915,41 @@
 
   function desktopBridge() {
     return window.mindsetDesktop || null;
+  }
+
+  function bindDesktopCloseHandshake() {
+    const bridge = desktopBridge();
+    if (!bridge?.onPrepareClose || !bridge?.closeReady) return;
+    let closing = false;
+    let activeRequestId = "";
+    bridge.onCloseCancelled?.((payload = {}) => {
+      const requestId = String(payload.requestId || "");
+      if (activeRequestId && requestId && requestId !== activeRequestId) return;
+      activeRequestId = "";
+      closing = false;
+      if (payload.reason === "timeout") setToast("Fermeture annulee : la sauvegarde prend trop de temps.");
+    });
+    bridge.onPrepareClose(async (payload = {}) => {
+      const requestId = String(payload.requestId || "");
+      if (!requestId) return;
+      if (closing) {
+        bridge.closeReady({ ok: false, requestId, message: "Une sauvegarde finale est deja en cours" });
+        return;
+      }
+      closing = true;
+      activeRequestId = requestId;
+      try {
+        await flushAppState();
+        if (activeRequestId === requestId) bridge.closeReady({ ok: true, requestId });
+      } catch (error) {
+        console.error("MindSet final flush failed", error);
+        if (activeRequestId !== requestId) return;
+        setToast("Fermeture annulee : la sauvegarde finale a echoue.");
+        bridge.closeReady({ ok: false, requestId, message: error?.message || "Sauvegarde impossible" });
+        activeRequestId = "";
+        closing = false;
+      }
+    });
   }
 
   function normalizeDesktopUpdateStatus(payload = {}) {
@@ -3115,26 +3502,50 @@
   async function lockBox(boxId) {
     const target = state.boxes.find((item) => item.id === boxId);
     if (!target?.passwordHash) return;
-    if (target.root && runtime.boxCrypto.has(boxId)) {
-      try {
-        await encryptUnlockedBoxNow(target);
-      } catch (error) {
-        console.warn("MindSet lock encryption failed", error);
-      }
+    if (runtime.audioRecording?.boxId === boxId && !(await awaitAudioRecordingStop({}, 5200))) {
+      setToast("Verrouillage annule : l'enregistrement audio se termine encore.");
+      return false;
     }
-    const blob = runtime.boxCrypto.get(boxId)?.blob || target.encrypted || null;
-    if (blob) {
+    const audioLocked = await lockAudioMutations();
+    if (!audioLocked) {
+      setToast("Verrouillage annule : une operation audio est en cours.");
+      return false;
+    }
+    try {
+      window.clearTimeout(runtime.encryptTimer);
+      runtime.encryptTimer = 0;
+      if (runtime.encryptPromise) await runtime.encryptPromise;
+      if (state.currentBoxId === boxId) flushActiveEditorContent();
+      const cryptoEntry = runtime.boxCrypto.get(boxId);
+      if (!target.root || !cryptoEntry) throw new Error("Cle de chiffrement indisponible");
+      let blob = null;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        blob = await encryptUnlockedBoxNow(target);
+        const currentPayload = JSON.stringify(protectedBoxPayload(target));
+        if (blob && cryptoEntry.lastPayload === currentPayload) break;
+        blob = null;
+      }
+      if (!blob) throw new Error("Le contenu a change pendant le chiffrement");
+      if (!persistState()) throw new Error("Impossible de persister le contenu chiffre");
       stripProtectedBoxPlaintext(target, blob);
       runtime.noteHistories.clear();
       runtime.undoStack = [];
       runtime.redoStack = [];
+      runtime.boxCrypto.delete(boxId);
+      runtime.unlockedBoxIds.delete(boxId);
+      if (state.currentBoxId === boxId) state.currentBoxId = null;
+      pushNavigationPoint();
+      persistState();
+      render();
+      return true;
+    } catch (error) {
+      console.error("MindSet lock encryption failed", error);
+      setToast("Verrouillage annule : la derniere version n'a pas pu etre chiffree.");
+      return false;
+    } finally {
+      unlockAudioMutations();
+      if (needsEncryptionPass()) scheduleProtectedBoxEncryption();
     }
-    runtime.boxCrypto.delete(boxId);
-    runtime.unlockedBoxIds.delete(boxId);
-    if (state.currentBoxId === boxId) state.currentBoxId = null;
-    pushNavigationPoint();
-    saveState();
-    render();
   }
 
   function reorderBoxes(draggedId, targetId, position) {
@@ -3159,6 +3570,7 @@
   function deleteBoxById(boxId) {
     const target = state.boxes.find((item) => item.id === boxId);
     if (!target) return;
+    if (runtime.audioRecording?.boxId === boxId) stopAudioRecording({ discard: true });
     rememberState("Suppression de boite");
     state.boxes = state.boxes.filter((box) => box.id !== boxId);
     runtime.unlockedBoxIds.delete(boxId);
@@ -3171,7 +3583,7 @@
   }
 
   function updateHeadingPreset(level, field, value) {
-    if (!["normal", ...headingLevels].includes(level)) return;
+    if (!["normal", ...allStyleLevels].includes(level)) return;
     state.settings.headingPresets = state.settings.headingPresets || {};
     state.settings.headingPresets[level] = {
       ...headingDefaults[level],
@@ -3208,6 +3620,9 @@
       const item = findItem(box, id);
       if (item) walk(item, (node) => affectedIds.add(node.id));
     });
+    if (runtime.audioRecording?.boxId === box.id && affectedIds.has(runtime.audioRecording.itemId)) {
+      stopAudioRecording({ discard: true });
+    }
     const deletesItem = (id) => affectedIds.has(id);
 
     function removeFrom(folder) {
@@ -3281,26 +3696,35 @@
       else if (node.type === "folder") (node.children || []).forEach(collect);
     };
     clones.forEach(collect);
-    if (!pending.length) return;
-    for (const clip of pending) {
-      try {
+    if (!pending.length) return [];
+    const writtenIds = [];
+    try {
+      for (const clip of pending) {
         const record = await audioGetClip(clip.sourceClipId);
-        if (record) {
-          let bytes = record.data;
-          if (record.enc) {
-            const key = await boxAudioKey(sourceBox.id);
-            if (!key) { delete clip.sourceClipId; continue; }
-            bytes = await decryptAudioBytes(key, record.iv, record.data);
+        if (!record) throw new Error(`Clip source introuvable : ${clip.sourceClipId}`);
+        const key = sourceBox?.passwordHash ? await boxAudioKey(sourceBox.id) : null;
+        const candidates = record.pending && sourceBox?.passwordHash
+          ? [record.pending, audioRecordVariant(record)]
+          : [audioRecordVariant(record), record.pending].filter(Boolean);
+        let bytes = null;
+        for (const candidate of candidates) {
+          try {
+            bytes = await audioVariantBytes(candidate, key);
+            break;
+          } catch (error) {
+            bytes = null;
           }
-          await storeAudioClipBytes(targetBox, clip.id, clip.mime, bytes);
         }
-      } catch (error) {
-        /* clip source illisible : on abandonne cette copie */
+        if (!bytes) throw new Error("Cle de la boite source indisponible");
+        await storeAudioClipBytes(targetBox, clip.id, clip.mime, bytes, { alreadyTracked: true });
+        writtenIds.push(clip.id);
       }
-      delete clip.sourceClipId;
+    } catch (error) {
+      await audioDeleteClips(writtenIds).catch(() => {});
+      throw error;
     }
-    saveState();
-    if (app.querySelector("[data-audio-item]")) hydrateAudioView();
+    pending.forEach((clip) => delete clip.sourceClipId);
+    return writtenIds;
   }
 
   function selectItemsAfterInsert(box, items, parent) {
@@ -3314,30 +3738,59 @@
     if (parent?.id && !box.expandedIds.includes(parent.id)) box.expandedIds.push(parent.id);
   }
 
-  function duplicateItems(box, idsToDuplicate = box.selectedIds || []) {
+  async function duplicateItems(box, idsToDuplicate = box.selectedIds || []) {
+    if (runtime.itemCopyRunning) {
+      setToast("Une copie est deja en cours.");
+      return false;
+    }
     const ids = topLevelItemIds(box, idsToDuplicate);
     if (!ids.length) return false;
-    rememberState("Duplication");
     const timestamp = now();
-    const clones = [];
+    const plans = [];
     ids.forEach((id) => {
       const item = findItem(box, id);
       const parent = findParent(box, id);
       if (!item || !parent?.children) return;
       const clone = cloneItemTree(item, { prefixTitle: true, timestamp });
       const index = parent.children.findIndex((child) => child.id === id);
-      parent.children.splice(index >= 0 ? index + 1 : parent.children.length, 0, clone);
-      parent.modifiedAt = timestamp;
-      clones.push(clone);
+      plans.push({ parentId: parent.id, sourceId: id, index: index >= 0 ? index + 1 : parent.children.length, clone });
     });
+    const clones = plans.map((plan) => plan.clone);
     if (!clones.length) return false;
-    selectItemsAfterInsert(box, clones, findParent(box, clones[0].id));
-    runtime.contextMenu = null;
-    touchBox(box);
-    saveState();
-    render();
-    copyClonedAudioBytes(box, clones, box);
-    return true;
+    if (!beginAudioWrite()) {
+      setToast("Copie temporairement indisponible : une operation securisee est en cours.");
+      return false;
+    }
+    runtime.itemCopyRunning = true;
+    let writtenIds = [];
+    try {
+      writtenIds = await copyClonedAudioBytes(box, clones, box);
+      if (!state.boxes.includes(box)) throw new Error("La boite cible n'est plus disponible");
+      const livePlans = plans.map((plan) => ({ ...plan, parent: findItem(box, plan.parentId) }));
+      if (livePlans.some((plan) => !plan.parent?.children)) throw new Error("Le dossier cible n'est plus disponible");
+      rememberState("Duplication");
+      livePlans.forEach((plan) => {
+        const parent = plan.parent;
+        const sourceIndex = parent.children.findIndex((child) => child.id === plan.sourceId);
+        const insertIndex = sourceIndex >= 0 ? sourceIndex + 1 : Math.min(plan.index, parent.children.length);
+        parent.children.splice(insertIndex, 0, plan.clone);
+        parent.modifiedAt = timestamp;
+      });
+      selectItemsAfterInsert(box, clones, findParent(box, clones[0].id));
+      runtime.contextMenu = null;
+      touchBox(box);
+      saveState();
+      render();
+      return true;
+    } catch (error) {
+      await audioDeleteClips(writtenIds).catch(() => {});
+      console.error("MindSet duplication failed", error);
+      setToast("Duplication annulee : un contenu audio n'a pas pu etre copie.");
+      return false;
+    } finally {
+      runtime.itemCopyRunning = false;
+      endAudioWrite();
+    }
   }
 
   function copySelectedItems(box, mode = "copy") {
@@ -3362,7 +3815,11 @@
     return clipboard?.mode === "cut" && clipboard.boxId === box?.id && (clipboard.ids || []).includes(id);
   }
 
-  function pasteItemClipboard(box) {
+  async function pasteItemClipboard(box) {
+    if (runtime.itemCopyRunning) {
+      setToast("Une copie est deja en cours.");
+      return false;
+    }
     const clipboard = runtime.itemClipboard;
     if (!clipboard?.ids?.length) {
       setToast("Rien a coller.");
@@ -3372,6 +3829,10 @@
     const target = creationFolder(box);
     if (!sourceBox || !target?.children) {
       setToast("Impossible de coller ici.");
+      return false;
+    }
+    if (!sourceBox.root) {
+      setToast("Deverrouille d'abord la boite source pour coller son contenu.");
       return false;
     }
 
@@ -3401,15 +3862,34 @@
       return false;
     }
 
-    rememberState("Collage");
-    target.children.push(...clones);
-    target.modifiedAt = timestamp;
-    selectItemsAfterInsert(box, clones, target);
-    touchBox(box);
-    saveState();
-    render();
-    copyClonedAudioBytes(box, clones, sourceBox);
-    return true;
+    runtime.itemCopyRunning = true;
+    if (!beginAudioWrite()) {
+      runtime.itemCopyRunning = false;
+      setToast("Collage temporairement indisponible : une operation securisee est en cours.");
+      return false;
+    }
+    let writtenIds = [];
+    try {
+      writtenIds = await copyClonedAudioBytes(box, clones, sourceBox);
+      const liveTarget = findItem(box, target.id);
+      if (!state.boxes.includes(box) || !liveTarget?.children) throw new Error("Le dossier cible n'est plus disponible");
+      rememberState("Collage");
+      liveTarget.children.push(...clones);
+      liveTarget.modifiedAt = timestamp;
+      selectItemsAfterInsert(box, clones, liveTarget);
+      touchBox(box);
+      saveState();
+      render();
+      return true;
+    } catch (error) {
+      await audioDeleteClips(writtenIds).catch(() => {});
+      console.error("MindSet paste failed", error);
+      setToast("Collage annule : un contenu audio n'a pas pu etre copie.");
+      return false;
+    } finally {
+      runtime.itemCopyRunning = false;
+      endAudioWrite();
+    }
   }
 
   function isDescendant(box, parentId, childId) {
@@ -3589,6 +4069,11 @@
 
   function render() {
     removeImageToolbar();
+    const audioSession = runtime.audioRecording;
+    const audioBox = activeBox();
+    if (audioSession && (audioBox?.id !== audioSession.boxId || audioBox.activeItemId !== audioSession.itemId)) {
+      stopAudioRecording();
+    }
     const previousModalType = runtime.modal?.type;
     const previousEditorFocus = captureNoteEditorFocus();
     const previousModalFocus = captureModalFieldFocus();
@@ -4010,8 +4495,8 @@
       { value: "modifiedAsc", label: "Modification : ancien" },
       { value: "alphaAsc", label: "A à Z" },
       { value: "alphaDesc", label: "Z à A" },
-      { value: "typeFoldersFirst", label: "Type : dossiers puis notes" },
-      { value: "typeNotesFirst", label: "Type : notes puis dossiers" },
+      { value: "typeFoldersFirst", label: "Type : dossiers puis fichiers" },
+      { value: "typeNotesFirst", label: "Type : fichiers puis dossiers" },
     ];
   }
 
@@ -4514,31 +4999,78 @@
     session.timer = window.setInterval(tick, 500);
   }
 
+  function audioSessionTarget(session) {
+    const liveBox = state.boxes.find((entry) => entry.id === session?.boxId);
+    const liveItem = liveBox?.root ? findItem(liveBox, session.itemId) : null;
+    return liveBox && liveItem?.type === "audio" ? { box: liveBox, item: liveItem } : null;
+  }
+
+  function settleAudioSession(session, saved = false, error = null) {
+    if (!session || session.settled) return;
+    session.settled = true;
+    if (session.timer) window.clearInterval(session.timer);
+    if (session.stopTimer) window.clearTimeout(session.stopTimer);
+    session.stream?.getTracks?.().forEach((track) => track.stop());
+    if (runtime.audioRecording === session) runtime.audioRecording = null;
+    session.resolveDone?.({ saved: !!saved, error: error || null });
+    updateAudioRecordButton(false);
+  }
+
   async function startAudioRecording(box, item) {
-    if (runtime.audioRecording) return;
+    if (runtime.audioRecording) return runtime.audioRecording.done;
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
       setToast("Enregistrement audio non supporté ici.");
-      return;
+      return false;
     }
+    let resolveDone;
+    const session = {
+      itemId: item.id,
+      boxId: box.id,
+      phase: "pending",
+      cancelled: false,
+      discard: false,
+      settled: false,
+      stream: null,
+      recorder: null,
+      startedAt: Date.now(),
+      timer: 0,
+      stopTimer: 0,
+      done: new Promise((resolve) => { resolveDone = resolve; }),
+      resolveDone: null,
+      finalize: null,
+    };
+    session.resolveDone = resolveDone;
+    runtime.audioRecording = session;
+
     let stream;
     const deviceId = state.settings?.audioInputDeviceId || "";
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: deviceId ? { deviceId: { exact: deviceId } } : true });
     } catch (error) {
-      // Micro mémorisé débranché : on retombe sur le micro par défaut.
       if (deviceId && (error?.name === "OverconstrainedError" || error?.name === "NotFoundError")) {
         try {
           stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         } catch (retryError) {
+          settleAudioSession(session, false);
           setToast("Micro indisponible ou accès refusé.");
-          return;
+          return session.done;
         }
       } else {
+        settleAudioSession(session, false);
         setToast("Micro indisponible ou accès refusé.");
-        return;
+        return session.done;
       }
     }
-    // Les libellés des micros ne sont connus qu'après une autorisation accordée.
+    session.stream = stream;
+    const targetStillActive = audioSessionTarget(session)
+      && state.currentBoxId === session.boxId
+      && box.activeItemId === session.itemId;
+    if (session.cancelled || runtime.audioRecording !== session || !targetStillActive) {
+      stream.getTracks().forEach((track) => track.stop());
+      settleAudioSession(session, false);
+      return session.done;
+    }
+
     refreshAudioInputDevices();
     const preferred = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
     let mimeType = "";
@@ -4549,40 +5081,91 @@
     try {
       recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
     } catch (error) {
-      stream.getTracks().forEach((track) => track.stop());
+      settleAudioSession(session, false);
       setToast("Enregistrement impossible.");
-      return;
+      return session.done;
     }
+    session.recorder = recorder;
     const chunks = [];
     recorder.addEventListener("dataavailable", (event) => {
       if (event.data && event.data.size) chunks.push(event.data);
     });
-    recorder.addEventListener("stop", () => {
-      const session = runtime.audioRecording;
-      const elapsed = session ? Math.round((Date.now() - session.startedAt) / 1000) : 0;
-      if (session?.timer) window.clearInterval(session.timer);
-      runtime.audioRecording = null;
-      stream.getTracks().forEach((track) => track.stop());
+    session.finalize = async () => {
+      if (session.finalizing || session.settled) return session.done;
+      session.finalizing = true;
+      const elapsed = Math.round((Date.now() - session.startedAt) / 1000);
       const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || "audio/webm" });
-      if (!blob.size) { render(); return; }
-      addAudioClip(box, item, { blob, duration: elapsed, source: "record" });
-    });
-    runtime.audioRecording = { itemId: item.id, boxId: box.id, recorder, stream, startedAt: Date.now(), timer: 0 };
+      let saved = false;
+      let failure = session.failure || null;
+      const liveTarget = audioSessionTarget(session);
+      if (!session.discard && blob.size && liveTarget) {
+        saved = await addAudioClip(liveTarget.box, liveTarget.item, {
+          blob,
+          duration: elapsed,
+          source: "record",
+        }, { skipRender: true });
+        if (!saved) failure = new Error("Le clip audio n'a pas pu etre sauvegarde");
+      } else if (!session.discard && blob.size && !liveTarget) {
+        failure = new Error("La destination du clip audio n'existe plus");
+      }
+      settleAudioSession(session, saved, failure);
+      if (state.currentBoxId === session.boxId && liveTarget?.box.activeItemId === session.itemId) render();
+      return session.done;
+    };
+    recorder.addEventListener("stop", () => { session.finalize().catch((error) => settleAudioSession(session, false, error)); }, { once: true });
+    recorder.addEventListener("error", () => {
+      session.failure = new Error("Erreur du micro pendant l'enregistrement");
+      session.discard = true;
+      stopAudioRecording({ discard: true });
+    }, { once: true });
     try {
       recorder.start();
+      session.phase = "recording";
+      session.startedAt = Date.now();
     } catch (error) {
-      runtime.audioRecording = null;
-      stream.getTracks().forEach((track) => track.stop());
+      settleAudioSession(session, false);
       setToast("Enregistrement impossible.");
-      return;
+      return session.done;
     }
     startAudioTimerUi();
+    return session.done;
   }
 
-  function stopAudioRecording() {
+  function stopAudioRecording(options = {}) {
     const session = runtime.audioRecording;
-    if (!session) return;
-    try { session.recorder.stop(); } catch (error) { /* le handler stop nettoie */ }
+    if (!session) return Promise.resolve(false);
+    if (options.discard) session.discard = true;
+    if (session.phase === "pending") {
+      session.cancelled = true;
+      settleAudioSession(session, false);
+      return session.done;
+    }
+    try {
+      if (session.recorder?.state && session.recorder.state !== "inactive") session.recorder.stop();
+      else Promise.resolve(session.finalize?.()).catch((error) => settleAudioSession(session, false, error));
+    } catch (error) {
+      session.finalize?.().catch((finalizeError) => settleAudioSession(session, false, finalizeError));
+    }
+    if (!session.stopTimer) {
+      session.stopTimer = window.setTimeout(
+        () => settleAudioSession(session, false, new Error("La finalisation audio a expire")),
+        4000,
+      );
+    }
+    return session.done;
+  }
+
+  async function awaitAudioRecordingStop(options = {}, timeoutMs = 5200) {
+    const session = runtime.audioRecording;
+    if (!session) return true;
+    const done = stopAudioRecording(options).catch((error) => ({ saved: false, error }));
+    let timeout = 0;
+    const expired = new Promise((resolve) => {
+      timeout = window.setTimeout(() => resolve(false), timeoutMs);
+    });
+    const result = await Promise.race([done, expired]);
+    window.clearTimeout(timeout);
+    return !!result && result !== false && !result.error && session.settled;
   }
 
   function toggleAudioRecording(box, item) {
@@ -4611,6 +5194,15 @@
   }
 
   async function addAudioClip(box, item, clip, options = {}) {
+    const boxId = box?.id;
+    const itemId = item?.id;
+    const liveTarget = () => {
+      const currentBox = state.boxes.find((entry) => entry.id === boxId);
+      const currentItem = currentBox?.root ? findItem(currentBox, itemId) : null;
+      return currentBox && currentItem?.type === "audio" ? { box: currentBox, item: currentItem } : null;
+    };
+    let target = liveTarget();
+    if (!target) return false;
     const clipId = uid("clip");
     let buffer;
     try {
@@ -4619,17 +5211,28 @@
       setToast("Fichier audio illisible.");
       return false;
     }
+    if (!(await beginAudioWriteWhenAvailable())) {
+      setToast("Modification audio temporairement indisponible.");
+      return false;
+    }
     try {
-      await storeAudioClipBytes(box, clipId, clip.blob.type, buffer);
+    try {
+      await storeAudioClipBytes(target.box, clipId, clip.blob.type, buffer, { alreadyTracked: true });
     } catch (error) {
       console.warn("MindSet audio store failed", error);
       setToast("Échec du stockage audio.");
       return false;
     }
-    item.clips = item.clips || [];
-    const fallbackName = `Clip ${item.clips.length + 1}`;
+    target = liveTarget();
+    if (!target) {
+      await audioDeleteClips([clipId]).catch(() => {});
+      return false;
+    }
+    const liveItem = target.item;
+    liveItem.clips = liveItem.clips || [];
+    const fallbackName = `Clip ${liveItem.clips.length + 1}`;
     const name = clip.name && String(clip.name).trim() ? String(clip.name).trim().slice(0, 120) : fallbackName;
-    item.clips.push({
+    liveItem.clips.push({
       id: clipId,
       name,
       mime: clip.blob.type || "audio/webm",
@@ -4638,11 +5241,18 @@
       source: clip.source || "record",
       createdAt: now(),
     });
-    item.modifiedAt = now();
-    touchBox(box);
-    saveState();
+    liveItem.modifiedAt = now();
+    touchBox(target.box);
+    if (!saveState()) {
+      liveItem.clips = liveItem.clips.filter((entry) => entry.id !== clipId);
+      await audioDeleteClips([clipId]).catch(() => {});
+      return false;
+    }
     if (!options.skipRender) render();
     return true;
+    } finally {
+      endAudioWrite();
+    }
   }
 
   async function importAudioFiles(box, item, fileList) {
@@ -4700,23 +5310,84 @@
     });
   }
 
+  async function allAudioClipKeysByBox() {
+    const db = await openAudioDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(AUDIO_STORE, "readonly");
+      const index = tx.objectStore(AUDIO_STORE).index("boxId");
+      const keys = [];
+      const request = index.openKeyCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (cursor) {
+          keys.push({ boxId: cursor.key, id: cursor.primaryKey });
+          cursor.continue();
+        } else {
+          resolve(keys);
+        }
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  function historicalAudioReferences() {
+    const boxIds = new Set();
+    const clipsByBox = new Map();
+    [...runtime.undoStack, ...runtime.redoStack].forEach((entry) => {
+      try {
+        const snapshot = JSON.parse(entry.snapshot || "{}");
+        (snapshot.boxes || []).forEach((box) => {
+          boxIds.add(box.id);
+          if (!box.root) return;
+          const clips = [];
+          collectAudioClipIds(box.root, clips);
+          if (!clipsByBox.has(box.id)) clipsByBox.set(box.id, new Set());
+          clips.forEach((id) => clipsByBox.get(box.id).add(id));
+        });
+      } catch (error) {
+        /* snapshot ancien ou invalide : ignore */
+      }
+    });
+    return { boxIds, clipsByBox };
+  }
+
   // Purge les octets orphelins (clip supprimé, item supprimé) des seules boites
   // inspectables (deverrouillees) — on ne touche jamais aux clips d'une boite
   // verrouillee dont on ne connait pas l'arbre.
   async function garbageCollectAudio() {
     if (!window.indexedDB) return;
+    const unprotectedBoxIds = state.boxes
+      .filter((box) => box.root && !box.passwordHash)
+      .map((box) => box.id);
+    const audioLocked = await lockAudioMutations();
+    if (!audioLocked) {
+      window.setTimeout(() => { garbageCollectAudio(); }, 500);
+      return;
+    }
     try {
+      const allKeys = await allAudioClipKeysByBox();
+      const liveBoxIds = new Set(state.boxes.map((box) => box.id));
+      const history = historicalAudioReferences();
+      const retainedBoxIds = new Set([...liveBoxIds, ...history.boxIds]);
+      const removedBoxOrphans = allKeys.filter((entry) => !retainedBoxIds.has(entry.boxId)).map((entry) => entry.id);
+      if (removedBoxOrphans.length) await audioDeleteClips(removedBoxOrphans);
       for (const box of state.boxes) {
         if (!box.root) continue;
         const referenced = [];
         collectAudioClipIds(box.root, referenced);
         const referencedSet = new Set(referenced);
+        (history.clipsByBox.get(box.id) || []).forEach((id) => referencedSet.add(id));
         const keys = await audioClipKeysForBox(box.id);
         const orphans = keys.filter((id) => !referencedSet.has(id));
         if (orphans.length) await audioDeleteClips(orphans);
       }
     } catch (error) {
       /* nettoyage best-effort */
+    } finally {
+      unlockAudioMutations();
+      unprotectedBoxIds.forEach((boxId) => {
+        window.setTimeout(() => { reconcilePendingAudioForBox(boxId, null); }, 0);
+      });
     }
   }
 
@@ -7097,8 +7768,15 @@
       }
     }
 
+    const previousFonts = state.settings.localFonts || [];
     state.settings.localFonts = normalizeLocalFonts(nextFonts);
-    saveState();
+    if (!saveState()) {
+      state.settings.localFonts = previousFonts;
+      persistState({ silent: true });
+      render();
+      setToast("Police trop volumineuse : import annule pour proteger les sauvegardes.");
+      return;
+    }
     render();
     setToast(added ? `${added} police${added > 1 ? "s" : ""} ajoutee${added > 1 ? "s" : ""}.` : "Format de police non reconnu.");
   }
@@ -7169,11 +7847,10 @@
         const name = String(form.get("name") || "Nouvelle boîte").trim() || "Nouvelle boîte";
         const password = normalizeBoxCode(form.get("password"));
         const createdAt = now();
-        rememberState("Creation de boite");
         const box = {
           id: uid("box"),
           name,
-          passwordHash: password ? await sha256(password) : "",
+          passwordHash: password ? await createPasswordVerifier(password) : "",
           createdAt,
           modifiedAt: createdAt,
           activeItemId: "",
@@ -7200,12 +7877,22 @@
         box.expandedIds = [box.root.id];
         box.openTabIds = [box.root.id];
         box.iconFolderId = box.root.id;
-        state.boxes.push(box);
-        state.currentBoxId = runtime.modal?.returnToLobby ? null : box.id;
         if (password) {
           runtime.unlockedBoxIds.add(box.id);
           setupBoxEncryption(box.id, password);
+          try {
+            if (!(await encryptUnlockedBoxNow(box))) throw new Error("Chiffrement initial impossible");
+          } catch (error) {
+            runtime.unlockedBoxIds.delete(box.id);
+            runtime.boxCrypto.delete(box.id);
+            console.error("MindSet initial box encryption failed", error);
+            modalError("impossible de creer la boite protegee");
+            return;
+          }
         }
+        rememberState("Creation de boite");
+        state.boxes.push(box);
+        state.currentBoxId = runtime.modal?.returnToLobby ? null : box.id;
         setModal(null);
         saveState();
         render();
@@ -7225,6 +7912,7 @@
               modalError("impossible de dechiffrer cette boite");
               return;
             }
+            await upgradeLegacyPasswordVerifier(box, code);
             openUnlockedBox(box);
           } else {
             modalError("mot de passe incorrect");
@@ -7245,10 +7933,12 @@
         const box = state.boxes.find((item) => item.id === boxId);
         const password = new FormData(boxAuthForm).get("password");
         try {
-          if (!box || !box.passwordHash || !(await boxCodeMatches(password, box.passwordHash))) {
+          const code = box?.passwordHash ? await matchingBoxCode(password, box.passwordHash) : null;
+          if (!box || code === null) {
             modalError("mot de passe incorrect");
             return;
           }
+          await upgradeLegacyPasswordVerifier(box, code);
         } catch (error) {
           console.error("MindSet box auth failed", error);
           modalError("impossible de verifier le code");
@@ -7267,7 +7957,7 @@
         if (!box || !name) return;
         rememberState("Renommage de boite");
         box.name = name;
-        box.root.title = name;
+        if (box.root) box.root.title = name;
         box.modifiedAt = now();
         setModal(null);
         saveState();
@@ -7319,6 +8009,9 @@
           submittingBoxPassword = false;
           return;
         }
+        let audioMigration = null;
+        let rollbackState = null;
+        let audioMutationLocked = false;
         try {
           let matchedOldCode = null;
           if (mode === "change") {
@@ -7332,51 +8025,88 @@
             modalError("les deux nouveaux codes ne correspondent pas");
             return;
           }
-          if (mode === "change" && !box.root && box.encrypted) {
+          audioMutationLocked = await lockAudioMutations();
+          if (!audioMutationLocked) throw new Error("Une autre operation audio est en cours");
+          window.clearTimeout(runtime.encryptTimer);
+          runtime.encryptTimer = 0;
+          if (runtime.encryptPromise) await runtime.encryptPromise;
+          let payloadJson = "";
+          let previousAudioKey = null;
+          if (box.root) {
+            payloadJson = JSON.stringify(protectedBoxPayload(box));
+            previousAudioKey = mode === "change" ? await boxAudioKey(box.id) : null;
+            if (mode === "change" && !previousAudioKey) throw new Error("Ancienne cle indisponible");
+          } else {
+            if (mode !== "change" || !box.encrypted) throw new Error("Boite verrouillee invalide");
             const opened = await decryptBoxBlob(matchedOldCode, box.encrypted);
-            if (!opened) {
-              modalError("impossible de rechiffrer la boite");
-              return;
-            }
-            rememberState("Modification de code");
-            const salt = bytesToBase64(window.crypto.getRandomValues(new Uint8Array(16)));
-            const key = await deriveBoxKey(newPassword, salt);
-            const blob = await encryptBoxPayload({ key, salt }, opened.payloadJson);
-            if (!blob) {
-              modalError("impossible de rechiffrer la boite");
-              return;
-            }
-            box.encrypted = blob;
-            box.passwordHash = await sha256(newPassword);
-            box.modifiedAt = now();
-            // Re-chiffre les clips audio avec la nouvelle cle (boite verrouillee).
-            await migrateBoxAudio(box.id, opened.key, key);
-            setModal(null);
-            saveState();
-            render();
-            setToast("Code de la boite modifie.");
-            return;
+            if (!opened) throw new Error("Impossible de dechiffrer la boite");
+            payloadJson = opened.payloadJson;
+            previousAudioKey = opened.key;
           }
-          rememberState(mode === "change" ? "Modification de code" : "Ajout de code");
-          box.passwordHash = await sha256(newPassword);
+
+          const salt = bytesToBase64(window.crypto.getRandomValues(new Uint8Array(16)));
+          const key = await deriveBoxKey(newPassword, salt);
+          const blob = key ? await encryptBoxPayload({ key, salt }, payloadJson) : null;
+          if (!blob) throw new Error("Impossible de rechiffrer la boite");
+          const nextPasswordHash = await createPasswordVerifier(newPassword);
+          rollbackState = {
+            passwordHash: box.passwordHash,
+            encrypted: box.encrypted,
+            modifiedAt: box.modifiedAt,
+            cryptoEntry: runtime.boxCrypto.get(box.id) || null,
+            unlocked: runtime.unlockedBoxIds.has(box.id),
+          };
+
+          // La migration est preparee en memoire puis ecrite dans une transaction
+          // IndexedDB unique. Aucune metadonnee n'est modifiee avant son succes.
+          audioMigration = await migrateBoxAudio(box.id, previousAudioKey, key);
+          box.passwordHash = nextPasswordHash;
+          box.encrypted = blob;
           box.modifiedAt = now();
           if (box.root) {
-            // Migre les clips audio : ajout de code = clair -> chiffre ;
-            // changement de code = ancienne cle -> nouvelle cle.
-            const previousAudioKey = mode === "change" ? await boxAudioKey(box.id) : null;
             runtime.unlockedBoxIds.add(box.id);
-            setupBoxEncryption(box.id, newPassword);
-            const nextAudioKey = await boxAudioKey(box.id);
-            if (nextAudioKey) await migrateBoxAudio(box.id, previousAudioKey, nextAudioKey);
+            runtime.boxCrypto.set(box.id, { key, salt, blob, lastPayload: payloadJson });
           }
+          if (!persistState()) throw new Error("Impossible de sauvegarder le nouveau code");
+          if (audioMigration?.final?.length) {
+            try {
+              await audioPutClips(audioMigration.final);
+            } catch (finalizeError) {
+              // Le format staged reste volontairement lisible avec la nouvelle
+              // cle ; une prochaine migration saura aussi le reprendre.
+              console.warn("MindSet audio password finalization deferred", finalizeError);
+              window.setTimeout(() => { reconcilePendingAudioForBox(box.id, key); }, 500);
+            }
+          }
+          runtime.undoStack = [];
+          runtime.redoStack = [];
+          runtime.noteHistories.clear();
           setModal(null);
-          saveState();
           render();
           setToast(mode === "change" ? "Code de la boite modifie." : "Code ajoute a la boite.");
         } catch (error) {
           console.error("MindSet box password update failed", error);
+          if (audioMigration?.before) {
+            try {
+              await audioPutClips(audioMigration.before);
+            } catch (rollbackError) {
+              console.error("MindSet audio password rollback failed", rollbackError);
+            }
+          }
+          if (rollbackState) {
+            box.passwordHash = rollbackState.passwordHash;
+            box.encrypted = rollbackState.encrypted;
+            box.modifiedAt = rollbackState.modifiedAt;
+            if (rollbackState.cryptoEntry) runtime.boxCrypto.set(box.id, rollbackState.cryptoEntry);
+            else runtime.boxCrypto.delete(box.id);
+            if (rollbackState.unlocked) runtime.unlockedBoxIds.add(box.id);
+            else runtime.unlockedBoxIds.delete(box.id);
+            persistState({ silent: true });
+          }
           modalError("impossible d'enregistrer le code");
         } finally {
+          if (audioMutationLocked) unlockAudioMutations();
+          if (needsEncryptionPass()) scheduleProtectedBoxEncryption();
           submittingBoxPassword = false;
         }
       };
@@ -8344,8 +9074,7 @@
     const index = editor.querySelectorAll(".page-sheet").length;
     const sheet = createPageSheet(editor, index);
     configurePageSheet(sheet, index, { editable: true });
-    const paragraph = document.createElement("p");
-    paragraph.appendChild(document.createElement("br"));
+    const paragraph = blankParagraph(captureTypingContext(editor));
     sheet.appendChild(paragraph);
     runtime.activePageIndex = index;
     updatePagedLayout(editor.closest(".editor-page.is-page-mode"));
@@ -8552,13 +9281,6 @@
 
       if (!pasteAllowedTags.has(tag)) {
         element.replaceWith(...element.childNodes);
-        return;
-      }
-
-      if (/^H[4-6]$/.test(tag)) {
-        const h3 = document.createElement("h3");
-        while (element.firstChild) h3.appendChild(element.firstChild);
-        element.replaceWith(h3);
         return;
       }
 
@@ -8859,6 +9581,7 @@
       prepareCollapsibleHeadings(boundEditor, note, box);
       bindPagedEditor(boundEditor);
       boundEditor.addEventListener("pointerdown", (event) => {
+        if (runtime.lastListAutoFormat?.noteId === note.id) runtime.lastListAutoFormat = null;
         markEditorPointerIntent();
         const sheet = event?.target?.closest?.(".page-sheet");
         runtime.activePageIndex = Number(sheet?.dataset.pageSheet || 0);
@@ -8890,6 +9613,7 @@
         });
       });
       boundEditor.addEventListener("beforeinput", (event) => {
+        if (runtime.lastListAutoFormat?.noteId === note.id) runtime.lastListAutoFormat = null;
         if (event.inputType === "historyUndo" || event.inputType === "historyRedo") {
           event.preventDefault();
           restoreEditorHistory(boundEditor, note, box, event.inputType === "historyRedo" ? "redo" : "undo");
@@ -8903,6 +9627,9 @@
             return;
           }
         }
+        runtime.pendingTypingContext = event.inputType === "insertParagraph"
+          ? { noteId: note.id, context: captureTypingContext(boundEditor) }
+          : null;
         rememberEditorSnapshot(note, boundEditor);
       });
       boundEditor.addEventListener("keydown", (event) => handleEditorAutomation(event, boundEditor, note, box, repaginatePagesInPlace));
@@ -8930,6 +9657,8 @@
         fixNestedListClasses(boundEditor);
       });
       boundEditor.addEventListener("input", (event) => {
+        if (runtime.lastListAutoFormat?.noteId === note.id) runtime.lastListAutoFormat = null;
+        restoreTypingContextAfterParagraph(boundEditor, note, event?.inputType || "");
         if (enforceIndependentPageLimit(boundEditor, note, box)) return;
         if (ensureFirstContinuousPage(boundEditor, note, box)) return;
         if (removeCurrentEmptyContinuousPageIfNeeded(boundEditor, note, box)) return;
@@ -9272,12 +10001,20 @@
   }
 
   function prepareCollapsibleHeadings(editor, note, box) {
-    syncCollapsedHeadings(editor);
     syncListMarkerColors(editor);
     editor.querySelectorAll("h1, h2, h3, h4, h5, h6").forEach((heading) => {
-      heading.classList.add("collapsible-heading");
-      heading.title = "Cliquer la flèche ou double-cliquer pour replier / deplier";
+      const foldable = isFoldableStyle(heading.tagName.toLowerCase());
+      heading.classList.toggle("collapsible-heading", foldable);
+      if (foldable) {
+        heading.title = "Cliquer la flèche ou double-cliquer pour replier / deplier";
+      } else {
+        heading.removeAttribute("title");
+        heading.removeAttribute("data-collapsed");
+        heading.classList.remove("is-heading-collapsed");
+        setHeadingSectionVisibility(heading, false);
+      }
     });
+    syncCollapsedHeadings(editor);
     if (editor.dataset.headingHandlers === "true") return;
     editor.dataset.headingHandlers = "true";
     editor.addEventListener("click", (event) => {
@@ -9290,14 +10027,14 @@
       }
 
       const heading = event.target.closest("h1, h2, h3, h4, h5, h6");
-      if (!heading || !editor.contains(heading) || !isHeadingToggleHit(event, heading)) return;
+      if (!heading || !editor.contains(heading) || !isFoldableStyle(heading.tagName.toLowerCase()) || !isHeadingToggleHit(event, heading)) return;
       event.preventDefault();
       event.stopPropagation();
       toggleHeadingSection(editor, note, box, heading);
     });
     editor.addEventListener("dblclick", (event) => {
       const heading = event.target.closest("h1, h2, h3, h4, h5, h6");
-      if (!heading || !editor.contains(heading)) return;
+      if (!heading || !editor.contains(heading) || !isFoldableStyle(heading.tagName.toLowerCase())) return;
       event.preventDefault();
       toggleHeadingSection(editor, note, box, heading);
     });
@@ -9323,7 +10060,7 @@
 
   function syncCollapsedHeadings(editor) {
     editor.querySelectorAll("h1[data-collapsed='true'], h2[data-collapsed='true'], h3[data-collapsed='true'], h4[data-collapsed='true'], h5[data-collapsed='true'], h6[data-collapsed='true']").forEach((heading) => {
-      setHeadingSectionVisibility(heading, true);
+      if (isFoldableStyle(heading.tagName.toLowerCase())) setHeadingSectionVisibility(heading, true);
     });
   }
 
@@ -9333,7 +10070,7 @@
     let element = selection?.anchorNode || null;
     if (element?.nodeType === Node.TEXT_NODE) element = element.parentElement;
     const heading = element?.closest?.("h1, h2, h3, h4, h5, h6");
-    if (!heading || !editor.contains(heading)) {
+    if (!heading || !editor.contains(heading) || !isFoldableStyle(heading.tagName.toLowerCase())) {
       setToast("Place le curseur dans un titre.");
       return;
     }
@@ -9341,7 +10078,8 @@
   }
 
   function toggleAllHeadingSections(editor, note, box) {
-    const headings = [...editor.querySelectorAll("h1, h2, h3, h4, h5, h6")];
+    const headings = [...editor.querySelectorAll("h1, h2, h3, h4, h5, h6")]
+      .filter((heading) => isFoldableStyle(heading.tagName.toLowerCase()));
     if (!headings.length) {
       setToast("Aucun titre dans cette note.");
       return;
@@ -9376,6 +10114,7 @@
   }
 
   function toggleHeadingSection(editor, note, box, heading) {
+    if (!heading || !isFoldableStyle(heading.tagName.toLowerCase())) return;
     rememberEditorSnapshot(note, editor);
     const collapsed = heading.dataset.collapsed !== "true";
     heading.dataset.collapsed = collapsed ? "true" : "false";
@@ -9428,6 +10167,13 @@
   }
 
   function handleEditorAutomation(event, editor, note, box, repaginateNow = null) {
+    if (
+      runtime.lastListAutoFormat
+      && event.key !== "Backspace"
+      && !["Shift", "Control", "Alt", "Meta", "CapsLock"].includes(event.key)
+    ) {
+      runtime.lastListAutoFormat = null;
+    }
     if ((event.ctrlKey || event.metaKey) && !event.altKey) {
       const key = event.key.toLowerCase();
       if (key === "a") {
@@ -9492,6 +10238,8 @@
         li
         && window.getSelection()?.isCollapsed
         && runtime.lastListAutoFormat?.li === li
+        && runtime.lastListAutoFormat?.noteId === note.id
+        && performance.now() - runtime.lastListAutoFormat.createdAt <= 3000
         && li.textContent === runtime.lastListAutoFormat.text
         && isCaretAtStartOfListItem(li)
       ) {
@@ -9577,19 +10325,33 @@
 
   const customListClasses = ["dash-list", "arrow-list", "circle-list", "check-list", "triangle-list", "square-list"];
 
+  function markerTextNodeHasContent(node) {
+    return !!String(node?.textContent || "")
+      .replace(/[\u200b\ufeff]/g, "")
+      .replace(/[\r\n\t]/g, "").length;
+  }
+
+  function explicitTextColor(node, boundary) {
+    let element = node?.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+    while (element) {
+      const presetClass = [...(element.classList || [])]
+        .some((className) => className.startsWith("ms-style-") || className.startsWith("ms-inline-"));
+      const presetTag = /^H[1-6]$/.test(element.tagName || "");
+      if (element.style?.color || (element.tagName === "FONT" && element.getAttribute("color")) || presetClass || presetTag) {
+        return getComputedStyle(element).color || null;
+      }
+      if (element === boundary) break;
+      element = element.parentElement;
+    }
+    return null;
+  }
+
   function firstOwnTextColor(li) {
     const walker = document.createTreeWalker(li, NodeFilter.SHOW_TEXT);
     let node = walker.nextNode();
     while (node) {
       if (node.textContent.trim() && node.parentElement?.closest("li") === li) {
-        let element = node.parentElement;
-        while (element && element !== li) {
-          if (element.style?.color || (element.tagName === "FONT" && element.getAttribute("color"))) {
-            return getComputedStyle(element).color;
-          }
-          element = element.parentElement;
-        }
-        return null;
+        return explicitTextColor(node, li);
       }
       node = walker.nextNode();
     }
@@ -9597,21 +10359,32 @@
   }
 
   function lastExplicitTextColor(root) {
-    if (!root || root.nodeType !== Node.ELEMENT_NODE) return null;
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    let lastNode = null;
-    let node = walker.nextNode();
-    while (node) {
-      if (node.textContent.trim()) lastNode = node;
-      node = walker.nextNode();
+    if (!root) return null;
+    let lastNode = root.nodeType === Node.TEXT_NODE && markerTextNodeHasContent(root) ? root : null;
+    if (root.nodeType === Node.ELEMENT_NODE) {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let node = walker.nextNode();
+      while (node) {
+        if (markerTextNodeHasContent(node)) lastNode = node;
+        node = walker.nextNode();
+      }
     }
     if (!lastNode) return null;
-    let element = lastNode.parentElement;
-    while (element && element !== root) {
-      if (element.style?.color || (element.tagName === "FONT" && element.getAttribute("color"))) {
-        return getComputedStyle(element).color;
+    const boundary = root.nodeType === Node.ELEMENT_NODE ? root : root.parentElement;
+    return explicitTextColor(lastNode, boundary);
+  }
+
+  function contentImmediatelyBeforeListItem(li) {
+    if (li.previousElementSibling) return li.previousElementSibling;
+    const editor = li.closest?.("[data-note-editor]");
+    let cursor = li.parentNode;
+    while (cursor && cursor !== editor) {
+      let sibling = cursor.previousSibling;
+      while (sibling) {
+        if (sibling.nodeType === Node.ELEMENT_NODE || markerTextNodeHasContent(sibling)) return sibling;
+        sibling = sibling.previousSibling;
       }
-      element = element.parentElement;
+      cursor = cursor.parentNode;
     }
     return null;
   }
@@ -9619,7 +10392,7 @@
   function listMarkerColor(li) {
     // La puce prend la couleur du texte juste AVANT elle : fin de l'item precedent,
     // ou fin du bloc au-dessus de la liste pour le premier item.
-    const previous = li.previousElementSibling || li.parentElement?.previousElementSibling;
+    const previous = contentImmediatelyBeforeListItem(li);
     const beforeColor = lastExplicitTextColor(previous);
     if (beforeColor) return beforeColor;
     return firstOwnTextColor(li);
@@ -9707,10 +10480,75 @@
     return node?.closest?.("p, div:not(.page-sheet), h1, h2, h3, h4, h5, h6, li") || editor;
   }
 
-  function blankParagraph() {
+  const typingContextProperties = [
+    "font-family",
+    "font-size",
+    "font-weight",
+    "font-style",
+    "color",
+    "text-decoration-line",
+  ];
+
+  function styleElementAtSelection(editor) {
+    const selection = window.getSelection();
+    if (!editor || !selection || !selection.rangeCount || !selection.isCollapsed) return null;
+    const range = selection.getRangeAt(0);
+    if (!selectionInsideEditor(editor, range)) return null;
+    let node = range.startContainer;
+    if (node.nodeType === Node.ELEMENT_NODE && range.startOffset > 0) {
+      node = node.childNodes[Math.min(range.startOffset - 1, node.childNodes.length - 1)] || node;
+      while (node?.lastChild) node = node.lastChild;
+    }
+    if (node?.nodeType === Node.TEXT_NODE) return node.parentElement;
+    return node?.nodeType === Node.ELEMENT_NODE ? node : null;
+  }
+
+  function captureTypingContext(editor) {
+    const source = styleElementAtSelection(editor);
+    if (!source || source === editor || source.classList?.contains("page-sheet")) return null;
+    const block = source.closest?.("p, div:not(.page-sheet), blockquote, h1, h2, h3, h4, h5, h6, li");
+    if (isHeadingBlock(block)) return null;
+    const computed = getComputedStyle(source);
+    const normal = getComputedStyle(editor);
+    const context = {};
+    typingContextProperties.forEach((property) => {
+      const value = computed.getPropertyValue(property).trim();
+      const defaultValue = normal.getPropertyValue(property).trim();
+      if (value && value !== defaultValue && !(property === "text-decoration-line" && value === "none")) {
+        context[property] = value;
+      }
+    });
+    return Object.keys(context).length ? context : null;
+  }
+
+  function applyTypingContext(target, context) {
+    if (!target || !context) return target;
+    Object.entries(context).forEach(([property, value]) => {
+      if (!typingContextProperties.includes(property) || !value) return;
+      target.style.setProperty(property, value);
+    });
+    if (String(context["text-decoration-line"] || "").includes("underline")) {
+      target.style.setProperty("text-decoration-color", "currentColor");
+    }
+    return target;
+  }
+
+  function restoreTypingContextAfterParagraph(editor, note, inputType) {
+    const pending = runtime.pendingTypingContext;
+    runtime.pendingTypingContext = null;
+    if (inputType !== "insertParagraph" || !pending || pending.noteId !== note?.id || !pending.context) return;
+    const block = currentEditableBlock(editor);
+    if (!block || block === editor || isHeadingBlock(block)) return;
+    const hasUserContent = !!block.textContent.replace(/[\u200b\ufeff\u00a0]/g, " ").trim()
+      || !!block.querySelector?.("img, video, audio, iframe, table, hr");
+    if (hasUserContent) return;
+    applyTypingContext(block, pending.context);
+  }
+
+  function blankParagraph(context = null) {
     const paragraph = document.createElement("p");
     paragraph.appendChild(document.createElement("br"));
-    return paragraph;
+    return applyTypingContext(paragraph, context);
   }
 
   function directSheetChildForBlock(block, sheet) {
@@ -9758,8 +10596,9 @@
   function insertBlankParagraphInCurrentSheet(editor, note, box) {
     const sheet = currentPageSheet(editor) || editor.querySelector?.(".page-sheet");
     if (!sheet) return false;
+    const typingContext = captureTypingContext(editor);
     rememberEditorSnapshot(note, editor);
-    const paragraph = blankParagraph();
+    const paragraph = blankParagraph(typingContext);
     sheet.appendChild(paragraph);
     placeCaretInside(paragraph);
     note.content = editorSnapshotContent(editor);
@@ -9783,11 +10622,12 @@
     if (!canInsertImmediatePageBreak(editor, block)) return false;
     const currentSheet = currentPageSheet(editor);
     if (!currentSheet) return false;
+    const typingContext = captureTypingContext(editor);
     rememberEditorSnapshot(note, editor);
     const snapshot = capturePagedViewport(editor);
     const nextSheet = createPageSheetAfter(editor, currentSheet);
     configurePageSheet(nextSheet, Number(nextSheet.dataset.pageSheet || 0), { editable: false });
-    const paragraph = blankParagraph();
+    const paragraph = blankParagraph(typingContext);
     nextSheet.appendChild(paragraph);
     runtime.activePageIndex = Number(nextSheet.dataset.pageSheet || 0);
     editor.focus({ preventScroll: true });
@@ -9816,6 +10656,7 @@
     const block = currentEditableBlock(editor);
     if (insertImmediatePageBreak(editor, note, box, block)) return true;
 
+    const typingContext = captureTypingContext(editor);
     rememberEditorSnapshot(note, editor);
     const snapshot = capturePagedViewport(editor);
     const nextSheet = createPageSheetAfter(editor, currentSheet);
@@ -9828,7 +10669,7 @@
       return false;
     }
     const tail = tailRange.extractContents();
-    const paragraph = blankParagraph();
+    const paragraph = blankParagraph(typingContext);
     nextSheet.appendChild(paragraph);
     nextSheet.appendChild(tail);
 
@@ -10013,7 +10854,7 @@
     const before = range.cloneRange();
     before.selectNodeContents(block);
     before.setEnd(range.startContainer, range.startOffset);
-    const typed = before.toString().replace(/\u00a0/g, " ");
+    const typed = before.toString().replace(/[\u200b\ufeff]/g, "").replace(/\u00a0/g, " ");
     if (!typed || typed !== typed.trim()) return null;
     const markers = {
       "*": { tag: "ul", className: "" },
@@ -10031,10 +10872,67 @@
     return config ? { ...config, markerText: typed } : null;
   }
 
+  const blockTextFormattingProperties = [
+    "font-family",
+    "font-size",
+    "font-weight",
+    "font-style",
+    "color",
+    "background-color",
+    "text-decoration",
+    "text-decoration-line",
+    "text-decoration-color",
+    "text-decoration-style",
+    "text-decoration-thickness",
+    "text-align",
+    "line-height",
+  ];
+
+  function copyBlockTextFormatting(source, target) {
+    if (!source || !target) return;
+    blockTextFormattingProperties.forEach((property) => {
+      const value = source.style?.getPropertyValue?.(property);
+      if (value) target.style.setProperty(property, value);
+    });
+    [...(source.classList || [])]
+      .filter((className) => className.startsWith("ms-style-"))
+      .forEach((className) => target.classList.add(className));
+    if (isHeadingBlock(source)) target.classList.add(`ms-style-${source.tagName.toLowerCase()}`);
+  }
+
+  function blockWithListMarkerRestored(block, markerText) {
+    if (!block || block.nodeType !== Node.ELEMENT_NODE) return null;
+    const restored = block.cloneNode(true);
+    const walker = document.createTreeWalker(restored, NodeFilter.SHOW_TEXT);
+    let textNode = walker.nextNode();
+    while (textNode) {
+      textNode.textContent = textNode.textContent.replace(/[\u200b\ufeff]/g, "");
+      textNode = walker.nextNode();
+    }
+    restored.normalize();
+    const point = textPointFromOffset(restored, String(markerText || "").length);
+    const range = document.createRange();
+    try {
+      range.setStart(point.node, point.offset);
+      range.collapse(true);
+      range.insertNode(document.createTextNode(" "));
+      restored.normalize();
+      return restored;
+    } catch (error) {
+      return null;
+    }
+  }
+
   function convertCurrentBlockToList(editor, note, box, marker) {
     const block = currentEditableBlock(editor);
     if (!block) return;
     rememberEditorSnapshot(note, editor);
+    if (isHeadingBlock(block) && block.dataset.collapsed === "true") {
+      setHeadingSectionVisibility(block, false);
+      block.removeAttribute("data-collapsed");
+      block.classList.remove("is-heading-collapsed");
+    }
+    const revertedBlock = block === editor ? null : blockWithListMarkerRestored(block, marker.markerText || "*");
     const list = document.createElement(marker.tag);
     if (marker.className) list.className = marker.className;
     const item = document.createElement("li");
@@ -10044,6 +10942,7 @@
       item.appendChild(document.createElement("br"));
       editor.appendChild(list);
     } else {
+      copyBlockTextFormatting(block, item);
       const selection = window.getSelection();
       if (selection && selection.rangeCount) {
         const caret = selection.getRangeAt(0);
@@ -10061,33 +10960,50 @@
       block.replaceWith(list);
     }
     placeCaretInside(item);
+    const token = uid("list-auto");
+    item.dataset.listAutoformatToken = token;
     runtime.lastListAutoFormat = {
       li: item,
       marker: marker.markerText || "*",
       text: item.textContent,
+      revertedBlock,
+      noteId: note.id,
+      createdAt: performance.now(),
+      token,
     };
     syncListMarkerColors(editor);
     syncEditorContent(editor, note, box);
+    const liveItem = [...editor.querySelectorAll("[data-list-autoformat-token]")]
+      .find((candidate) => candidate.dataset.listAutoformatToken === token);
+    if (!liveItem) {
+      runtime.lastListAutoFormat = null;
+      return;
+    }
+    delete liveItem.dataset.listAutoformatToken;
+    runtime.lastListAutoFormat.li = liveItem;
+    note.content = editorSnapshotContent(editor);
+    markEditorHistoryCurrent(note, note.content);
+    saveState();
   }
 
   function revertListAutoFormat(editor, note, box) {
     const memo = runtime.lastListAutoFormat;
     runtime.lastListAutoFormat = null;
     const li = memo?.li;
+    if (!memo || memo.noteId !== note?.id || performance.now() - memo.createdAt > 3000) return false;
     if (!li || !li.isConnected || !editor.contains(li)) return false;
     if (li.textContent !== memo.text) return false;
     const list = li.parentElement;
     if (!list || list.children.length !== 1) return false;
     rememberEditorSnapshot(note, editor);
-    const paragraph = document.createElement("p");
-    const restored = memo.text ? `${memo.marker} ${memo.text}` : `${memo.marker} `;
-    paragraph.textContent = restored;
+    const paragraph = memo.revertedBlock?.cloneNode?.(true) || document.createElement("p");
+    if (!memo.revertedBlock) paragraph.textContent = memo.text ? `${memo.marker} ${memo.text}` : `${memo.marker} `;
     list.replaceWith(paragraph);
-    const textNode = paragraph.firstChild;
     const selection = window.getSelection();
     const range = document.createRange();
-    const caretOffset = Math.min(memo.marker.length + 1, textNode.textContent.length);
-    range.setStart(textNode, caretOffset);
+    const caretOffset = Math.min(memo.marker.length + 1, paragraph.textContent.length);
+    const caret = textPointFromOffset(paragraph, caretOffset);
+    range.setStart(caret.node, caret.offset);
     range.collapse(true);
     selection.removeAllRanges();
     selection.addRange(range);
@@ -10101,6 +11017,7 @@
   }
 
   function exitListItem(editor, note, box, li) {
+    const typingContext = captureTypingContext(editor);
     rememberEditorSnapshot(note, editor);
     const list = li.parentElement;
     const afterList = list.cloneNode(false);
@@ -10138,6 +11055,7 @@
     }
 
     const paragraph = document.createElement("p");
+    applyTypingContext(paragraph, typingContext);
     while (li.firstChild) paragraph.appendChild(li.firstChild);
     if (!paragraph.textContent.trim() && !paragraph.querySelector("br")) {
       paragraph.textContent = "";
@@ -10262,7 +11180,12 @@
     if (!box) return false;
     const note = findItem(box, editor.dataset.editorNoteId || box.activeItemId);
     if (note?.type !== "note") return false;
-    note.content = editorSnapshotContent(editor);
+    const content = editorSnapshotContent(editor);
+    if (content === note.content) {
+      markEditorHistoryCurrent(note, content);
+      return true;
+    }
+    note.content = content;
     note.modifiedAt = now();
     touchBox(box);
     markEditorHistoryCurrent(note, note.content);
@@ -10369,6 +11292,13 @@
       applyPresetClassToSelection(editor, note, box, value);
       return;
     }
+    const blocksBeforeFormat = selectedEditorBlocks(editor);
+    (blocksBeforeFormat.length ? blocksBeforeFormat : [currentEditableBlock(editor)]).forEach((block) => {
+      if (!isHeadingBlock(block) || block.dataset.collapsed !== "true") return;
+      setHeadingSectionVisibility(block, false);
+      block.removeAttribute("data-collapsed");
+      block.classList.remove("is-heading-collapsed");
+    });
     const info = value === "p" ? { tag: "p", className: "" } : styleTagInfo(value);
     document.execCommand("formatBlock", false, `<${info.tag}>`);
     // Choisir "Normal" retire aussi les presets inline presents dans la selection.
@@ -10558,10 +11488,19 @@
     if (!select || !editor) return;
     const block = currentEditableBlock(editor);
     let value = "p";
-    if (isHeadingBlock(block)) {
+    const selection = window.getSelection();
+    let selectionElement = selection?.anchorNode || null;
+    if (selectionElement?.nodeType === Node.TEXT_NODE) selectionElement = selectionElement.parentElement;
+    const inlinePreset = allStyleLevels.find((level) => {
+      const match = selectionElement?.closest?.(`.ms-inline-${level}`);
+      return !!match && editor.contains(match);
+    });
+    if (inlinePreset) {
+      value = inlinePreset;
+    } else if (isHeadingBlock(block)) {
       value = block.tagName.toLowerCase();
     } else if (block && block !== editor) {
-      const presetClass = presetLevels.find((level) => block.classList?.contains(`ms-style-${level}`));
+      const presetClass = allStyleLevels.find((level) => block.classList?.contains(`ms-style-${level}`));
       if (presetClass) value = presetClass;
     }
     if ([...select.options].some((option) => option.value === value) && select.value !== value) {
@@ -10885,7 +11824,36 @@
     const selection = window.getSelection();
     if (!selection || !selection.rangeCount) return false;
     const range = selection.getRangeAt(0);
-    if (!selectionInsideEditor(editor, range) || range.collapsed) return false;
+    if (!selectionInsideEditor(editor, range)) return false;
+    if (range.collapsed) {
+      let anchor = range.startContainer;
+      if (anchor.nodeType === Node.TEXT_NODE) anchor = anchor.parentElement;
+      const presetSpan = anchor?.closest?.("span");
+      if (
+        !presetSpan
+        || !editor.contains(presetSpan)
+        || !allStyleLevels.some((level) => presetSpan.classList.contains(`ms-inline-${level}`))
+      ) return false;
+
+      const tailRange = range.cloneRange();
+      tailRange.setEnd(presetSpan, presetSpan.childNodes.length);
+      const tailContents = tailRange.extractContents();
+      const tailSpan = presetSpan.cloneNode(false);
+      tailSpan.appendChild(tailContents);
+      const normalSpan = document.createElement("span");
+      normalSpan.appendChild(document.createTextNode("\u200b"));
+      presetSpan.after(normalSpan);
+      if (tailSpan.hasChildNodes()) normalSpan.after(tailSpan);
+      if (!presetSpan.hasChildNodes()) presetSpan.remove();
+
+      const caret = document.createRange();
+      caret.setStart(normalSpan.firstChild, normalSpan.firstChild.textContent.length);
+      caret.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(caret);
+      saveEditorSelection(editor);
+      return true;
+    }
     const container = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
       ? range.commonAncestorContainer
       : range.commonAncestorContainer.parentElement;
@@ -10938,7 +11906,7 @@
 
     const convertible = (candidate) => !!candidate
       && candidate !== editor
-      && ["P", "DIV", "BLOCKQUOTE", "H1", "H2", "H3"].includes(candidate.tagName)
+      && ["P", "DIV", "BLOCKQUOTE", "H1", "H2", "H3", "H4", "H5", "H6"].includes(candidate.tagName)
       && !candidate.classList.contains("page-sheet");
 
     let targetBlocks = [];
@@ -10956,7 +11924,13 @@
       if (className) list.className = className;
       targetBlocks[0].before(list);
       targetBlocks.forEach((block) => {
+        if (isHeadingBlock(block) && block.dataset.collapsed === "true") {
+          setHeadingSectionVisibility(block, false);
+          block.removeAttribute("data-collapsed");
+          block.classList.remove("is-heading-collapsed");
+        }
         const item = document.createElement("li");
+        copyBlockTextFormatting(block, item);
         while (block.firstChild) item.appendChild(block.firstChild);
         if (!item.textContent.trim() && !item.querySelector("br, img")) item.appendChild(document.createElement("br"));
         list.appendChild(item);
@@ -11138,7 +12112,17 @@
     }, 250);
   });
 
+  const stopAudioForPageExit = () => {
+    const session = runtime.audioRecording;
+    if (!session) return;
+    stopAudioRecording();
+    session.stream?.getTracks?.().forEach((track) => track.stop());
+  };
+  window.addEventListener("pagehide", stopAudioForPageExit);
+  window.addEventListener("beforeunload", stopAudioForPageExit);
+
   bindDesktopUpdates();
+  bindDesktopCloseHandshake();
   render();
   replaceNavigationPoint();
   syncDesktopFontFolder({ silent: true, rerender: false });

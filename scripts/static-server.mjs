@@ -1,6 +1,6 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer } from "node:http";
-import { extname, join, normalize, resolve } from "node:path";
+import { extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 
 const root = resolve(process.cwd());
 const port = Number(process.env.PORT || 4173);
@@ -17,14 +17,27 @@ const types = new Map([
 ]);
 
 function safePath(urlPath) {
-  const decoded = decodeURIComponent(urlPath.split("?")[0]);
+  let decoded = "";
+  try {
+    decoded = decodeURIComponent(urlPath.split("?")[0]);
+  } catch (error) {
+    return null;
+  }
   const candidate = normalize(join(root, decoded === "/" ? "index.html" : decoded));
-  return candidate.startsWith(root) ? candidate : null;
+  const fromRoot = relative(root, candidate);
+  const escapesRoot = fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot);
+  return escapesRoot ? null : candidate;
 }
 
 createServer((request, response) => {
   const path = safePath(request.url || "/");
-  if (!path || !existsSync(path) || !statSync(path).isFile()) {
+  let isFile = false;
+  try {
+    isFile = !!path && existsSync(path) && statSync(path).isFile();
+  } catch (error) {
+    isFile = false;
+  }
+  if (!isFile) {
     response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
     response.end("Not found");
     return;

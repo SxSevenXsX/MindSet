@@ -1,10 +1,12 @@
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
 let mainWindow = null;
 let updateState = { status: "idle", message: "" };
+let closeFlushState = null;
+let closeRequestCounter = 0;
 
 autoUpdater.autoDownload = false;
 autoUpdater.setFeedURL({
@@ -91,6 +93,61 @@ function updateAvailablePayload(info) {
   };
 }
 
+function configureFrenchSpellChecker(webContents) {
+  const spellSession = webContents?.session;
+  if (!spellSession) return;
+  const available = spellSession.availableSpellCheckerLanguages || [];
+  const french = available.find((language) => language.toLowerCase() === "fr-fr")
+    || available.find((language) => /^fr(?:-|$)/i.test(language));
+  if (french) spellSession.setSpellCheckerLanguages([french]);
+}
+
+function showSpellCheckerMenu(webContents, params) {
+  if (!params?.isEditable || !params.spellcheckEnabled || !params.misspelledWord) return false;
+  const suggestions = [...new Set(params.dictionarySuggestions || [])]
+    .filter(Boolean)
+    .slice(0, 8);
+  const template = suggestions.length
+    ? suggestions.map((suggestion) => ({
+      label: suggestion,
+      click: () => {
+        if (!webContents.isDestroyed()) webContents.replaceMisspelling(suggestion);
+      },
+    }))
+    : [{ label: "Aucune suggestion", enabled: false }];
+  const popupOptions = {
+    window: mainWindow,
+    sourceType: params.menuSourceType,
+  };
+  if (params.frame) popupOptions.frame = params.frame;
+  Menu.buildFromTemplate(template).popup(popupOptions);
+  return true;
+}
+
+function externalWebUrl(value) {
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === "http:" || protocol === "https:" || protocol === "mailto:";
+  } catch (error) {
+    return false;
+  }
+}
+
+function finishWindowClose() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (closeFlushState?.timer) clearTimeout(closeFlushState.timer);
+  closeFlushState = { requested: true, allow: true, timer: null };
+  mainWindow.close();
+}
+
+function cancelWindowClose(requestId, reason = "cancelled") {
+  if (!mainWindow || mainWindow.isDestroyed() || closeFlushState?.requestId !== requestId) return;
+  if (closeFlushState.timer) clearTimeout(closeFlushState.timer);
+  closeFlushState = { requested: false, allow: false, timer: null, requestId: null };
+  mainWindow.webContents.send("mindset:close-cancelled", { requestId, reason });
+  mainWindow.show();
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -105,7 +162,82 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       devTools: !app.isPackaged,
+      spellcheck: true,
     },
+  });
+
+  const webContents = mainWindow.webContents;
+  closeFlushState = { requested: false, allow: false, timer: null, requestId: null };
+  configureFrenchSpellChecker(webContents);
+  webContents.on("context-menu", (event, params) => {
+    if (!showSpellCheckerMenu(webContents, params)) return;
+    event.preventDefault();
+  });
+  webContents.setWindowOpenHandler(({ url }) => {
+    if (url === "about:blank") {
+      return {
+        action: "allow",
+        overrideBrowserWindowOptions: {
+          webPreferences: {
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true,
+            preload: path.join(__dirname, "print-preload.js"),
+          },
+        },
+      };
+    }
+    if (externalWebUrl(url)) shell.openExternal(url).catch(() => {});
+    return { action: "deny" };
+  });
+  webContents.on("will-navigate", (event) => {
+    const url = event.url;
+    if (url === webContents.getURL()) return;
+    event.preventDefault();
+    if (externalWebUrl(url)) shell.openExternal(url).catch(() => {});
+  });
+  webContents.on("did-create-window", (childWindow) => {
+    const childContents = childWindow.webContents;
+    childContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    childContents.on("will-navigate", (event) => {
+      const url = event.url;
+      if (url === childContents.getURL()) return;
+      event.preventDefault();
+      if (externalWebUrl(url)) shell.openExternal(url).catch(() => {});
+    });
+  });
+
+  mainWindow.on("close", (event) => {
+    if (closeFlushState?.allow) return;
+    event.preventDefault();
+    if (closeFlushState?.requested) return;
+    const requestId = String(++closeRequestCounter);
+    closeFlushState = { requested: true, allow: false, timer: null, requestId };
+    webContents.send("mindset:prepare-close", { requestId });
+    closeFlushState.timer = setTimeout(() => cancelWindowClose(requestId, "timeout"), 30000);
+  });
+  mainWindow.on("unresponsive", async () => {
+    const requestId = closeFlushState?.requested ? closeFlushState.requestId : null;
+    if (!requestId || !mainWindow || mainWindow.isDestroyed()) return;
+    const answer = await dialog.showMessageBox(mainWindow, {
+      type: "warning",
+      title: "MindSet ne repond pas",
+      message: "La sauvegarde finale ne repond pas encore.",
+      detail: "Forcer la fermeture peut perdre les toutes dernieres modifications.",
+      buttons: ["Continuer a attendre", "Forcer la fermeture"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    if (answer.response === 1 && closeFlushState?.requestId === requestId) mainWindow.destroy();
+  });
+  webContents.on("render-process-gone", () => {
+    if (closeFlushState?.requested && mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
+  });
+  mainWindow.on("closed", () => {
+    if (closeFlushState?.timer) clearTimeout(closeFlushState.timer);
+    closeFlushState = null;
+    mainWindow = null;
   });
 
   mainWindow.setMenuBarVisibility(false);
@@ -227,6 +359,23 @@ ipcMain.handle("mindset:fonts:open-folder", async () => {
   } catch (error) {
     return { status: "error", message: updateMessage(error), fonts: [] };
   }
+});
+
+ipcMain.on("mindset:close-ready", (event, result = {}) => {
+  if (
+    !mainWindow
+    || mainWindow.isDestroyed()
+    || event.sender !== mainWindow.webContents
+    || event.senderFrame !== mainWindow.webContents.mainFrame
+    || !closeFlushState?.requested
+  ) return;
+  if (!result || typeof result !== "object") result = { ok: false };
+  if (String(result.requestId || "") !== closeFlushState.requestId) return;
+  if (result.ok !== true) {
+    cancelWindowClose(closeFlushState.requestId, "renderer-error");
+    return;
+  }
+  finishWindowClose();
 });
 
 app.whenReady().then(() => {
