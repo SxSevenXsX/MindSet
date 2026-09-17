@@ -1,0 +1,99 @@
+name: Publish Windows release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to build and publish
+        required: true
+        default: v1.3.1
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - name: Validate release tag
+        shell: pwsh
+        run: |
+          if ($env:RELEASE_TAG -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
+            throw 'Use an existing version tag such as v1.3.1.'
+          }
+
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Verify source version and syntax
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($env:RELEASE_TAG -cne "v$version") { throw 'Tag and package version differ.' }
+          foreach ($source in @('src/app.js', 'src/editor-blocks.js', 'src/editor-document.js', 'scripts/release.mjs')) {
+            node --check $source
+            if ($LASTEXITCODE -ne 0) { throw "Syntax check failed: $source" }
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows installer
+        run: npm run dist -- --publish never
+
+      - name: Upload and publish verified assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $names = @("MindSet-Setup-$version.exe", "MindSet-Setup-$version.exe.blockmap", 'latest.yml')
+          foreach ($name in $names) {
+            if (!(Test-Path -LiteralPath "dist/$name")) { throw "Missing artifact: $name" }
+          }
+          $manifest = Get-Content dist/latest.yml -Raw
+          $hash = [Convert]::ToBase64String([Security.Cryptography.SHA512]::HashData([IO.File]::ReadAllBytes("dist/$($names[0])")))
+          if (!$manifest.Contains("version: $version") -or !$manifest.Contains($hash)) {
+            throw 'The update manifest does not match the installer.'
+          }
+          $existingJson = gh release view $env:RELEASE_TAG --json isDraft
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:RELEASE_TAG --draft --verify-tag --title $version --notes-file CHANGELOG.md
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create draft release.' }
+          } elseif (!(($existingJson | ConvertFrom-Json).isDraft)) {
+            throw 'This version is already published. Use a new version tag.'
+          }
+          $paths = $names | ForEach-Object { "dist/$_" }
+          gh release upload $env:RELEASE_TAG @paths --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Asset upload failed; release remains unpublished.' }
+          $releaseJson = gh release view $env:RELEASE_TAG --json assets
+          if ($LASTEXITCODE -ne 0) { throw 'Could not verify uploaded assets.' }
+          $assets = ($releaseJson | ConvertFrom-Json).assets
+          foreach ($name in $names) {
+            $asset = @($assets | Where-Object { $_.name -ceq $name })
+            if ($asset.Count -ne 1 -or $asset[0].size -ne (Get-Item -LiteralPath "dist/$name").Length) {
+              throw "Uploaded asset verification failed: $name"
+            }
+          }
+          gh release edit $env:RELEASE_TAG --draft=false --latest --notes-file CHANGELOG.md
+          if ($LASTEXITCODE -ne 0) { throw 'Could not publish release.' }
