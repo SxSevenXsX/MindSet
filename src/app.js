@@ -17,6 +17,8 @@
     focusedItemId: null,
     dragIds: [],
     editorRange: null,
+    blockTools: null,
+    editorComposing: false,
     editorSelectionSnapshot: null,
     boxMenuOpen: false,
     loadedFontIds: new Set(),
@@ -143,7 +145,7 @@
 
   const inter = "Inter, ui-sans-serif, system-ui, sans-serif";
   const headingDefaults = {
-    normal: { name: "Normal", size: "17px", color: "#17201c", weight: "400", fontFamily: "Georgia, Times New Roman, serif", bold: false, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8", foldable: false },
+    normal: { name: "Normal", size: "17px", color: "#17201c", weight: "400", fontFamily: '"Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif', bold: false, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8", foldable: false },
     h1: { name: "Titre 1", size: "30px", color: "#17201c", weight: "820", fontFamily: inter, bold: true, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8", foldable: true },
     h2: { name: "Titre 2", size: "24px", color: "#17201c", weight: "780", fontFamily: inter, bold: true, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8", foldable: true },
     h3: { name: "Titre 3", size: "19px", color: "#17201c", weight: "740", fontFamily: inter, bold: true, italic: false, underline: false, highlight: false, highlightColor: "#fff0a8", foldable: true },
@@ -199,6 +201,7 @@
   }
 
   const fontOptions = [
+    { label: "Système", value: '"Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif' },
     { label: "Serif", value: "Georgia, Times New Roman, serif" },
     { label: "Inter", value: "Inter, ui-sans-serif, system-ui, sans-serif" },
     { label: "Arial", value: "Arial, Helvetica, sans-serif" },
@@ -282,7 +285,8 @@
   }
 
   function isIndependentPageMode() {
-    return normalizeEditorViewMode(state.settings?.editorViewMode) === "pages" && isIndependentPageFlow();
+    // Legacy independent sheets are migrated to explicit print breaks on opening.
+    return false;
   }
 
   function clampPageZoom(value) {
@@ -592,12 +596,15 @@
   }
 
   function visibleEditorPageCount() {
-    const page = app.querySelector(".editor-page.is-page-mode");
-    if (!page) return 1;
-    return Math.max(page.querySelectorAll(".page-sheet").length, 1);
+    return 1 + (app.querySelector("[data-note-editor]")?.querySelectorAll(".note-page-break").length || 0);
   }
 
   function updateEditorStats(note) {
+    const outline = app.querySelector("[data-note-outline]");
+    if (outline && note) {
+      const html = renderOutline(note);
+      if (outline.innerHTML !== html) outline.innerHTML = html;
+    }
     const stats = noteStats(note);
     const pageCount = visibleEditorPageCount();
     app.querySelectorAll("[data-word-count]").forEach((element) => {
@@ -607,7 +614,7 @@
       element.textContent = `${stats.chars} caracteres`;
     });
     app.querySelectorAll("[data-page-count]").forEach((element) => {
-      element.textContent = `${pageCount} page${pageCount > 1 ? "s" : ""}`;
+      element.textContent = `${pageCount} section${pageCount > 1 ? "s" : ""}`;
     });
   }
 
@@ -689,7 +696,11 @@
 
   function sanitizePrintableHtml(html) {
     const template = document.createElement("template");
-    template.innerHTML = html || "<p><br></p>";
+    template.innerHTML = stableDocumentHtml(html);
+    template.content.querySelectorAll("[data-collapsed-hidden]").forEach((node) => {
+      node.style.display = "";
+      node.removeAttribute("data-collapsed-hidden");
+    });
     template.content.querySelectorAll("script, style, iframe, object, embed, link, meta, base, [data-editor-selection-marker], [data-pagination-probe]").forEach((node) => node.remove());
     template.content.querySelectorAll("*").forEach((element) => {
       [...element.attributes].forEach((attribute) => {
@@ -765,7 +776,7 @@
     .print-note-header{display:grid;gap:6px;margin:0 0 18px;padding:0 0 12px;border-bottom:1px solid #dfe3e1;}
     .print-note-header h1{margin:0;color:#17201c;font:820 22px Inter,ui-sans-serif,system-ui,sans-serif;line-height:1.2;}
     .print-note-meta{display:flex;flex-wrap:wrap;gap:8px 14px;color:#657169;font-size:11px;font-weight:760;}
-    .note-editor{--ms-active-decoration:var(--normal-decoration,none);font-family:var(--normal-font);font-size:var(--normal-size);font-weight:var(--normal-weight);font-style:var(--normal-style,normal);color:var(--normal-color);text-decoration-line:var(--normal-decoration,none);text-decoration-color:currentColor;line-height:1.65;}
+    .note-editor{white-space:pre-wrap;overflow-wrap:anywhere;--ms-active-decoration:var(--normal-decoration,none);font-family:var(--normal-font);font-size:var(--normal-size);font-weight:var(--normal-weight);font-style:var(--normal-style,normal);color:var(--normal-color);text-decoration-line:var(--normal-decoration,none);text-decoration-color:currentColor;line-height:1.65;}
     .note-editor h1,.note-editor h2,.note-editor h3,.note-editor h4,.note-editor h5,.note-editor h6{margin:1.2em 0 .45em;line-height:1.18;}
     .note-editor h1{font-family:var(--h1-font);font-size:var(--h1-size);font-weight:var(--h1-weight);color:var(--h1-color);font-style:var(--h1-style,normal);text-decoration:var(--h1-decoration,none);background:var(--h1-highlight,transparent);}
     .note-editor h2{font-family:var(--h2-font);font-size:var(--h2-size);font-weight:var(--h2-weight);color:var(--h2-color);font-style:var(--h2-style,normal);text-decoration:var(--h2-decoration,none);background:var(--h2-highlight,transparent);}
@@ -807,6 +818,14 @@
     .note-editor li.is-split-continuation::before{content:none !important;}
     .note-editor li.is-split-continuation::marker{content:"";}
     .note-editor img{max-width:100%;height:auto;}
+    .note-editor p{orphans:3;widows:3;}
+    .note-editor h1,.note-editor h2,.note-editor h3,.note-editor h4,.note-editor h5,.note-editor h6{break-after:avoid;}
+    .note-editor blockquote{margin:1em 0;padding:.3em 1em;border-left:3px solid #83948a;}
+    .note-editor .note-callout{padding:1em;background:#f1f4f2;border-radius:6px;}
+    .note-editor pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f1f4f2;padding:1em;}
+    .note-editor .note-page-break{break-before:page;page-break-before:always;height:0;border:0;margin:0;}
+    .note-editor table{border-collapse:collapse;width:100%;}
+    .note-editor td,.note-editor th{border:1px solid #c8ceca;padding:6px;}
     @media print{
       body{background:#fff;}
       .print-toolbar{display:none;}
@@ -1010,7 +1029,14 @@
     source.innerHTML = sanitizePrintableHtml(sourceHtml);
     const sheets = [...source.querySelectorAll(".page-sheet")];
     const roots = sheets.length ? sheets : [source];
-    return roots.map((root) => printableTextLinesFromRoot(root));
+    return roots.flatMap((root) => {
+      const pages = [[]];
+      [...root.childNodes].forEach((node) => {
+        if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains("note-page-break")) pages.push([]);
+        else collectPrintableLines(node, pages[pages.length - 1]);
+      });
+      return pages.map((lines) => lines.length ? lines : [""]);
+    });
   }
 
   function wrapPdfLine(line, maxChars) {
@@ -1233,9 +1259,9 @@
 
   function activePrintableSource(box, note) {
     const pageEditor = app.querySelector(".editor-page.is-page-mode [data-note-editor]");
-    if (pageEditor && findItem(box, note?.id)?.id === note?.id) return pageEditor.innerHTML;
+    if (pageEditor && pageEditor.dataset.editorNoteId === note?.id) return pageEditor.innerHTML;
     const editor = app.querySelector("[data-note-editor]");
-    if (editor && findItem(box, note?.id)?.id === note?.id) return editor.innerHTML;
+    if (editor && editor.dataset.editorNoteId === note?.id) return editor.innerHTML;
     return note?.content || "<p><br></p>";
   }
 
@@ -1277,7 +1303,7 @@
     .Section1{page:Section1;}
     .print-sheet{page-break-after:always;}
     .print-sheet:last-child{page-break-after:auto;}
-    .note-editor{--ms-active-decoration:${normalVars.decoration};font-family:${safePrintCssValue(normal.fontFamily, headingDefaults.normal.fontFamily)};font-size:${safePrintCssValue(normal.size, headingDefaults.normal.size)};font-weight:${normal.bold === false ? "400" : safePrintCssValue(normal.weight, headingDefaults.normal.weight)};color:${cleanColor(normal.color, headingDefaults.normal.color)};font-style:${normalVars.style};text-decoration:${normalVars.decoration};text-decoration-color:currentColor;line-height:1.55;}
+    .note-editor{white-space:pre-wrap;overflow-wrap:anywhere;--ms-active-decoration:${normalVars.decoration};font-family:${safePrintCssValue(normal.fontFamily, headingDefaults.normal.fontFamily)};font-size:${safePrintCssValue(normal.size, headingDefaults.normal.size)};font-weight:${normal.bold === false ? "400" : safePrintCssValue(normal.weight, headingDefaults.normal.weight)};color:${cleanColor(normal.color, headingDefaults.normal.color)};font-style:${normalVars.style};text-decoration:${normalVars.decoration};text-decoration-color:currentColor;line-height:1.55;}
     .note-editor h1,.note-editor h2,.note-editor h3,.note-editor h4,.note-editor h5,.note-editor h6{margin:1.2em 0 .45em;line-height:1.18;}
     ${wordStyleRules}
     ${normal.underline ? ".note-editor,.note-editor *{text-decoration:underline;text-decoration-color:currentColor;}" : ""}
@@ -1309,6 +1335,12 @@
     .note-editor li.is-split-continuation{list-style:none;}
     .note-editor li.is-split-continuation::before{content:"" !important;}
     .note-editor img{max-width:100%;height:auto;}
+    .note-editor .note-page-break{page-break-before:always;break-before:page;border:0;height:0;margin:0;}
+    .note-editor blockquote{padding:8px 16px;border-left:3px solid #83948a;}
+    .note-editor .note-callout,.note-editor pre{padding:16px;background:#f1f4f2;}
+    .note-editor pre{white-space:pre-wrap;}
+    .note-editor table{border-collapse:collapse;width:100%;}
+    .note-editor td,.note-editor th{border:1px solid #c8ceca;padding:6px;}
   </style>
 </head>
 <body>
@@ -1443,7 +1475,8 @@
       graphPanX: clampGraphPan(previousSettings.graphPanX),
       graphPanY: clampGraphPan(previousSettings.graphPanY),
       editorViewMode: normalizeEditorViewMode(previousSettings.editorViewMode),
-      pageFlowMode: normalizePageFlowMode(previousSettings.pageFlowMode),
+      pageFlowMode: "continuous",
+      editorRevision: 2,
       pageZoom: clampPageZoom(previousSettings.pageZoom || 1),
       pageMarginPreset: previousMarginPreset,
       customPageMarginPresets: previousCustomMargins,
@@ -1454,6 +1487,9 @@
       audioIconColor: cleanColor(previousSettings.audioIconColor, "#4b8bd4"),
       headingPresets: (() => {
         const presets = { normal: { ...headingDefaults.normal, ...(previousHeadings.normal || {}) } };
+        if (!previousSettings.editorRevision && presets.normal.fontFamily === "Georgia, Times New Roman, serif") {
+          presets.normal.fontFamily = headingDefaults.normal.fontFamily;
+        }
         allStyleLevels.forEach((level) => {
           if (headingLevels.includes(level) || previousHeadings[level]) {
             presets[level] = { ...headingDefaults[level], ...(previousHeadings[level] || {}) };
@@ -1734,6 +1770,7 @@
     return {
       kind: "editor",
       offsets,
+      bookmark: selectionBookmark(editor),
       noteId: editor.dataset.editorNoteId || activeBox()?.activeItemId || "",
     };
   }
@@ -1756,7 +1793,9 @@
     if (!editor) return false;
     const focusTarget = isIndependentPageMode() ? (currentPageSheet(editor) || editor) : editor;
     focusTarget.focus({ preventScroll: true });
-    if (snapshot.offsets) restoreEditorSelectionOffsets(editor, snapshot.offsets);
+    if (!restoreSelectionBookmark(editor, snapshot.bookmark) && snapshot.offsets) {
+      restoreEditorSelectionOffsets(editor, snapshot.offsets);
+    }
     saveEditorSelection(editor);
     return true;
   }
@@ -3350,9 +3389,7 @@
       iconKind: "none",
       createdAt,
       modifiedAt: createdAt,
-      content: quick
-        ? "<h2>Note rapide</h2><p></p>"
-        : "<h1>Nouveau titre</h1><p>Commence à écrire ici.</p>",
+      content: "<p><br></p>",
     };
     folder.children.push(note);
     folder.modifiedAt = createdAt;
@@ -4069,6 +4106,8 @@
 
   function render() {
     removeImageToolbar();
+    runtime.blockTools?.destroy();
+    runtime.blockTools = null;
     const audioSession = runtime.audioRecording;
     const audioBox = activeBox();
     if (audioSession && (audioBox?.id !== audioSession.boxId || audioBox.activeItemId !== audioSession.itemId)) {
@@ -4530,9 +4569,12 @@
           <button class="format-button color-apply" data-apply-color="${kind}" title="Appliquer ${escapeHtml(label)}" aria-label="Appliquer ${escapeHtml(label)}">${icon("check")}</button>
           ${kind === "highlight" ? `<button class="format-button color-clear" data-clear-highlight title="Enlever le surlignage" aria-label="Enlever le surlignage">${icon("eraser")}</button>` : ""}
         </div>
-        <div class="quick-colors" aria-label="${escapeHtml(label)}">
-          ${rows.map((row) => `<div class="quick-color-row">${row.map(renderSwatch).join("")}</div>`).join("")}
-        </div>
+        <details class="color-palette-menu" data-color-palette>
+          <summary aria-label="Palette ${escapeHtml(label)}" title="Palette ${escapeHtml(label)}">${icon("chevronDown")}</summary>
+          <div class="quick-colors" aria-label="${escapeHtml(label)}">
+            ${rows.map((row) => `<div class="quick-color-row">${row.map(renderSwatch).join("")}</div>`).join("")}
+          </div>
+        </details>
       </div>
     `;
   }
@@ -5545,14 +5587,11 @@
     const pageSetup = normalizePageSetup(settings?.pageSetup, settings?.pageMarginPreset, settings);
     const marginLabel = pageMarginLabel(state.settings);
     const pageFlowMode = normalizePageFlowMode(state.settings?.pageFlowMode);
-    const pageFlowLabel = pageFlowMode === "continuous" ? "Pages continues" : "Pages independantes";
     const pageStyle = pageMode
       ? `--page-zoom:${pageZoom};${pageSetupStyle(state.settings)}`
       : "";
     const fonts = availableFontOptions();
-    const flowContent = note.content && note.content.includes("data-split-continuation")
-      ? normalizedEditorHtml(note.content)
-      : note.content || "";
+    const flowContent = stableDocumentHtml(note.content);
     return `
       <article class="editor-shell">
         <div class="editor-toolbar" aria-label="Barre de mise en forme">
@@ -5632,8 +5671,8 @@
                   <button class="menu-panel-item" type="button" data-action="open-page-margins-settings">Personnaliser les marges…</button>
                 </div>
               </div>` : ""}
-            ${pageMode ? `<button class="format-button ${pageFlowMode === "continuous" ? "is-active" : ""}" data-action="toggle-page-flow-mode" data-tooltip="${escapeHtml(pageFlowLabel)}" aria-label="${escapeHtml(pageFlowLabel)}">${icon(pageFlowMode === "continuous" ? "linkedPages" : "splitPages")}</button>` : ""}
-            ${pageMode && pageFlowMode === "independent" ? `<button class="format-button" data-action="add-independent-page" data-tooltip="Ajouter une page" aria-label="Ajouter une page">${icon("plus")}</button>` : ""}
+            <button class="format-button" data-editor-insert-break title="Saut de page (Ctrl + Entrée)" aria-label="Insérer un saut de page">${icon("splitPages")}</button>
+            <span class="writing-hint">Écrire, puis <kbd>/</kbd> pour les blocs</span>
             <button class="format-button ${splitMode ? "is-active" : ""}" data-action="toggle-editor-split-view" data-tooltip="${splitMode ? "Mode ecriture simple" : "Tableau coupe en 2"}" aria-label="${splitMode ? "Mode ecriture simple" : "Tableau coupe en 2"}">${icon("splitColumns")}</button>
             ${pageMode ? `
               <button class="format-button" data-action="page-zoom-out" data-tooltip="Dezoomer les feuilles" aria-label="Dezoomer les feuilles">${icon("zoomOut")}</button>
@@ -5646,7 +5685,7 @@
           <div class="toolbar-stats" aria-live="polite">
             <span data-char-count>${stats.chars} caracteres</span>
             <span data-word-count>${stats.words} mots</span>
-            <span data-page-count>1 page</span>
+            <span data-page-count title="Sections séparées par un saut explicite ; les pages finales sont calculées à l’impression">1 section</span>
             <div class="toolbar-export-actions">
               <button class="stats-action-button" data-action="export-note-pdf" data-tooltip="Exporter en PDF" aria-label="Exporter en PDF">${icon("filePdf")}</button>
               <button class="stats-action-button" data-action="export-note-word" data-tooltip="Exporter en Word" aria-label="Exporter en Word">${icon("fileWord")}</button>
@@ -5658,9 +5697,10 @@
         </div>
         <section class="editor-page ${pageMode ? "is-page-mode" : ""} ${splitMode ? "is-split-mode" : ""}" style="${pageStyle}">
           <input class="title-input" data-note-title value="${escapeHtml(note.title)}" aria-label="Titre de la note" />
+          ${pageMode ? `<p class="paper-caption">Vue papier continue · Les pages sont calculées à l’impression</p>` : ""}
           ${pageMode
-            ? `<div class="page-editor-viewport" data-page-viewport><div class="page-editor-scale" data-page-scale><div class="note-editor page-document" data-note-editor data-editor-note-id="${note.id}" data-page-flow="${pageFlowMode}" contenteditable="${pageFlowMode === "independent" ? "false" : "true"}" spellcheck="true"></div></div></div>`
-            : `<div class="note-editor" data-note-editor data-editor-note-id="${note.id}" contenteditable="true" spellcheck="true">${flowContent}</div>`}
+            ? `<div class="page-editor-viewport" data-page-viewport><div class="page-editor-scale" data-page-scale><div class="note-editor page-document" data-note-editor data-editor-note-id="${note.id}" data-page-flow="continuous" contenteditable="true" role="textbox" aria-label="Contenu de la note" aria-multiline="true" spellcheck="true">${flowContent}</div></div></div>`
+            : `<div class="note-editor" data-note-editor data-editor-note-id="${note.id}" contenteditable="true" role="textbox" aria-label="Contenu de la note" aria-multiline="true" spellcheck="true">${flowContent}</div>`}
           <div class="editor-status" aria-live="polite">
             ${pageMode && pageFlowMode === "independent" ? `<span class="page-full-notice" data-page-full-notice></span>` : ""}
             <span data-word-count>${stats.words} mots</span>
@@ -5698,13 +5738,13 @@
       <div class="panel-head">
         <div class="panel-title">
           <strong>Plan de la note</strong>
-          <span>${active.type === "note" ? escapeHtml(active.title) : "Vue de la boîte"}</span>
+          <span data-inspector-title>${active.type === "note" ? escapeHtml(active.title) : "Vue de la boîte"}</span>
         </div>
       </div>
       <div class="inspector-scroll">
         <section class="inspector-section">
           <div class="inspector-label">Plan</div>
-          ${active.type === "note" ? renderOutline(active) : '<div class="empty-state">Aucune note ouverte</div>'}
+          <div data-note-outline>${active.type === "note" ? renderOutline(active) : '<div class="empty-state">Aucune note ouverte</div>'}</div>
         </section>
         <section class="inspector-section">
           <div class="inspector-label">Vue arbre</div>
@@ -8354,6 +8394,10 @@
     return blocks;
   }
 
+  function stableDocumentHtml(html) {
+    return window.MindSetDocument.normalize(html);
+  }
+
   function normalizedEditorHtml(html) {
     const container = document.createElement("div");
     editableBlocksFromHtml(html).forEach((block) => container.appendChild(block));
@@ -8584,6 +8628,7 @@
     const keepSheets = !!options.keepSheets;
     const editor = app.querySelector(".editor-page.is-page-mode [data-note-editor]");
     if (!editor) return "<p><br></p>";
+    if (!editor.querySelector(".page-sheet")) return editorSnapshotContent(editor);
     const parts = [...editor.childNodes].map((node) => {
       if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains("page-sheet")) {
         const source = cleanNodeForMerge(node, keepMarkers);
@@ -9051,18 +9096,8 @@
   }
 
   function updatePagedLayout(page) {
-    const viewport = page?.querySelector?.("[data-page-viewport]");
-    const pageCount = page?.querySelectorAll?.(".page-sheet").length || 1;
-    if (!page || !viewport) return;
-    const pageWidth = cssNumber(page, "--page-width", 560);
-    const pageGap = cssNumber(page, "--page-gap", 28);
-    const zoom = clampPageZoom(state.settings?.pageZoom || 1);
-    const twoPagesWidth = ((pageWidth * 2) + pageGap) * zoom;
-    const pagesPerRow = twoPagesWidth <= Math.max(viewport.clientWidth - 32, pageWidth * zoom) ? 2 : 1;
-    page.style.setProperty("--page-count", String(pageCount));
-    page.style.setProperty("--page-rows", String(Math.ceil(pageCount / pagesPerRow)));
-    page.style.setProperty("--pages-per-row", String(Math.min(2, pagesPerRow)));
-    page.style.setProperty("--page-zoom", String(zoom));
+    if (!page) return;
+    page.style.setProperty("--page-zoom", String(clampPageZoom(state.settings?.pageZoom || 1)));
   }
 
   function addIndependentPage(box = activeBox()) {
@@ -9125,77 +9160,13 @@
 
   function paginateNoteIntoPages(note, options = {}) {
     const page = app.querySelector(".editor-page.is-page-mode");
-    const editor = page?.querySelector?.("[data-note-editor]");
-    if (!page || !editor) return [];
-
-    const selectionOffsets = options.selectionOffsets || getEditorSelectionOffsets(editor);
-    if (normalizePageFlowMode(state.settings?.pageFlowMode) === "independent") {
-      return renderIndependentPages(note, editor, page, selectionOffsets, options.restoreSelection);
-    }
-    const blocks = editableBlocksFromHtml(note.content);
-    editor.setAttribute("contenteditable", "true");
-    editor.setAttribute("spellcheck", "true");
+    const editor = page?.querySelector("[data-note-editor]");
+    if (!editor) return [];
+    const offsets = options.selectionOffsets || getEditorSelectionOffsets(editor);
+    editor.innerHTML = stableDocumentHtml(note.content);
     editor.dataset.pageFlow = "continuous";
-    runtime.independentPageSnapshot = null;
-    editor.innerHTML = "";
-    const sheets = [];
-    let sheet = createPageSheet(editor, 0);
-    sheets.push(sheet);
-
-    blocks.forEach((block) => {
-      sheet.appendChild(block);
-      if (!sheetOverflows(sheet)) return;
-
-      const remainder = splitBlockToFit(block, sheet);
-      if (remainder) {
-        sheet = createPageSheet(editor, sheets.length);
-        sheets.push(sheet);
-        sheet.appendChild(remainder);
-        sheet = keepOverflowOnNextSheets(sheet, sheets, editor);
-        return;
-      }
-
-      if (sheet.childNodes.length <= 1) {
-        sheet = keepOverflowOnNextSheets(sheet, sheets, editor);
-        return;
-      }
-
-      sheet.removeChild(block);
-      sheet = createPageSheet(editor, sheets.length);
-      sheets.push(sheet);
-      sheet.appendChild(block);
-      sheet = keepOverflowOnNextSheets(sheet, sheets, editor);
-    });
-
-    if (!sheets.some((item) => item.childNodes.length)) {
-      const paragraph = document.createElement("p");
-      paragraph.appendChild(document.createElement("br"));
-      sheets[0].appendChild(paragraph);
-    }
-
-    // Filet de securite "zone interdite" : si un chemin de coupure a laisse un bloc
-    // entier dans la marge basse, on le deplace sur la feuille suivante.
-    for (let index = 0; index < sheets.length; index += 1) {
-      const current = sheets[index];
-      if (canAcceptPageOverflow(current)) continue;
-      let guardNet = 0;
-      while (sheetOverflows(current) && current.children.length > 1 && guardNet < 200) {
-        guardNet += 1;
-        let target = sheets[index + 1];
-        if (!target) {
-          target = createPageSheet(editor, sheets.length);
-          sheets.push(target);
-        }
-        target.insertBefore(current.lastElementChild, target.firstChild);
-      }
-    }
-
-    sheets.forEach((sheet) => {
-      sheet.classList.toggle("is-overflow-accepted", canAcceptPageOverflow(sheet));
-    });
-
     updatePagedLayout(page);
-    if (options.restoreSelection !== false) restoreEditorSelectionOffsets(editor, selectionOffsets);
+    if (options.restoreSelection !== false) restoreEditorSelectionOffsets(editor, offsets);
     return [editor];
   }
 
@@ -9204,37 +9175,8 @@
     if (page) updatePagedLayout(page);
   }
 
-  function refreshPagedEditorIfNeeded(editor, note, scrollMode = "preserve", options = {}) {
-    if (normalizeEditorViewMode(state.settings?.editorViewMode) !== "pages" || !editor || !note) {
-      syncPagedEditorMetrics(editor);
-      return;
-    }
-    if (normalizePageFlowMode(state.settings?.pageFlowMode) === "independent") {
-      note.content = mergePageEditorHtml({ keepActiveBlankSheet: true, keepSheets: true });
-      syncPagedEditorMetrics(editor);
-      return;
-    }
-    const snapshot = capturePagedViewport(editor);
-    const selectionOffsets = getEditorSelectionOffsets(editor);
-    const markers = captureEditorSelectionMarkers(editor);
-    if (options.force || needsPagedLayoutRefresh(editor)) {
-      note.content = mergePageEditorHtml({ keepMarkers: !!markers });
-      paginateNoteIntoPages(note, { selectionOffsets, restoreSelection: !markers });
-    } else {
-      updatePagedLayout(editor.closest(".editor-page.is-page-mode"));
-    }
-    const markerTarget = pageSheetForMarker(editor, markers);
-    const restored = markers ? restoreEditorSelectionMarkers(editor, markers) : false;
-    if (!restored) restoreEditorSelectionOffsets(editor, selectionOffsets);
-    removeEditorSelectionMarkers(editor);
-    note.content = mergePageEditorHtml({ keepActiveBlankSheet: true });
-    const target = currentSelectionScrollTarget(editor)
-      || markerTarget
-      || pageSheetForTextOffset(editor, selectionOffsets?.end ?? selectionOffsets?.start)
-      || currentPageSheet(editor)
-      || editor.querySelector(".page-sheet")
-      || editor;
-    requestAnimationFrame(() => restorePagedViewport(snapshot, target, scrollMode));
+  function refreshPagedEditorIfNeeded(editor) {
+    syncPagedEditorMetrics(editor);
   }
 
   function bindPagedEditor(editor) {
@@ -9252,7 +9194,7 @@
     }, { passive: false });
   }
 
-  const pasteAllowedTags = new Set(["P", "H1", "H2", "H3", "H4", "H5", "H6", "UL", "OL", "LI", "BR", "B", "STRONG", "I", "EM", "U", "S", "STRIKE", "SPAN", "A", "IMG", "BLOCKQUOTE", "DIV", "PRE", "CODE", "SUB", "SUP"]);
+  const pasteAllowedTags = new Set(["P", "H1", "H2", "H3", "H4", "H5", "H6", "UL", "OL", "LI", "BR", "B", "STRONG", "I", "EM", "U", "S", "STRIKE", "SPAN", "A", "IMG", "BLOCKQUOTE", "DIV", "PRE", "CODE", "SUB", "SUP", "HR", "TABLE", "THEAD", "TBODY", "TR", "TD", "TH"]);
   const pasteAllowedStyles = ["font-family", "font-size", "color", "background-color", "font-weight", "font-style", "text-decoration", "text-align", "width", "line-height", "margin-top", "margin-bottom"];
   const imageLayoutClasses = ["img-float-left", "img-float-right", "img-block-center"];
 
@@ -9288,6 +9230,11 @@
         const name = attribute.name.toLowerCase();
         const value = String(attribute.value || "");
         if (name === "style") return;
+        if (name === "class" && !["UL", "OL", "IMG"].includes(tag)) {
+          const allowed = ["note-callout", "note-page-break", ...allStyleLevels.flatMap((level) => [`ms-style-${level}`, `ms-inline-${level}`])];
+          const kept = allowed.filter((cls) => element.classList.contains(cls));
+          if (kept.length) { element.className = kept.join(" "); return; }
+        }
         if (name === "class" && (tag === "UL" || tag === "OL")) {
           const kept = customListClasses.filter((cls) => element.classList.contains(cls));
           if (kept.length) {
@@ -9322,6 +9269,7 @@
       }
     });
 
+    template.content.querySelectorAll("hr.note-page-break").forEach((node) => node.setAttribute("contenteditable", "false"));
     return template.innerHTML.trim();
   }
 
@@ -9496,11 +9444,25 @@
     let editor = app.querySelector("[data-note-editor]");
 
     if (title) {
+      title.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        const current = app.querySelector("[data-note-editor]");
+        current?.focus({ preventScroll: true });
+        if (current) placeCaretInside(current.firstElementChild || current);
+      });
       title.addEventListener("input", () => {
         note.title = title.value || "Sans titre";
         note.modifiedAt = now();
         touchBox(box);
         updateTabTitle(note.id, note.title);
+        const label = app.querySelector("[data-inspector-title]");
+        if (label) label.textContent = note.title;
+        app.querySelectorAll("[data-item-id]").forEach((element) => {
+          if (element.dataset.itemId !== note.id) return;
+          const text = element.querySelector(".item-label") || (element.matches(".mini-node-pill") ? element.querySelector(":scope > span:last-child") : null);
+          if (text) text.textContent = note.title;
+        });
         saveState();
       });
       title.addEventListener("blur", scheduleRenderWhenIdle);
@@ -9538,46 +9500,24 @@
       saveEditorSelection(current);
     };
 
-    function repaginatePagesInPlace(sourceEditor, options = {}) {
-      if (normalizeEditorViewMode(state.settings?.editorViewMode) !== "pages") return;
-      const snapshot = capturePagedViewport(sourceEditor);
-      const selectionOffsets = getEditorSelectionOffsets(sourceEditor);
-      const markers = captureEditorSelectionMarkers(sourceEditor);
-      note.content = mergePageEditorHtml({ keepMarkers: !!markers });
-      const nextEditors = paginateNoteIntoPages(note, { selectionOffsets, restoreSelection: false });
-      nextEditors.forEach(bindSingleEditor);
-      const targetEditor = nextEditors[0] || sourceEditor;
-      const markerTarget = pageSheetForMarker(targetEditor, markers);
-      const restored = markers ? restoreEditorSelectionMarkers(targetEditor, markers) : false;
-      if (!restored) restoreEditorSelectionOffsets(targetEditor, selectionOffsets);
-      removeEditorSelectionMarkers(targetEditor);
-      note.content = mergePageEditorHtml({ keepActiveBlankSheet: true });
-      const targetSheet = currentSelectionScrollTarget(targetEditor)
-        || markerTarget
-        || pageSheetForTextOffset(targetEditor, selectionOffsets?.end ?? selectionOffsets?.start)
-        || currentPageSheet(targetEditor)
-        || targetEditor?.querySelector?.(".page-sheet")
-        || targetEditor;
-      if (targetEditor && options.focus !== false) {
-        targetEditor.focus({ preventScroll: true });
-        saveEditorSelection(targetEditor);
-        updateEditorToolbarState(targetEditor);
-      }
-      updateEditorStats(note);
-      saveState();
-      requestAnimationFrame(() => restorePagedViewport(snapshot, targetSheet, options.scroll || "preserve"));
-    }
-
-    function schedulePageRepagination(sourceEditor, options = {}) {
-      window.clearTimeout(runtime.pagePaginationTimer);
-      runtime.pagePaginationTimer = window.setTimeout(() => {
-        repaginatePagesInPlace(sourceEditor, options);
-      }, options.delay ?? 180);
-    }
-
     function bindSingleEditor(boundEditor) {
       if (!boundEditor || boundEditor.dataset.editorBound === "true") return;
       boundEditor.dataset.editorBound = "true";
+      document.execCommand("defaultParagraphSeparator", false, "p");
+      runtime.blockTools = window.MindSetBlocks.mount(boundEditor, {
+        remember: () => rememberEditorSnapshot(note, boundEditor),
+        caret: placeCaretInside,
+        expand: (heading) => toggleHeadingSection(boundEditor, note, box, heading),
+        highlight: () => state.settings.lastHighlightColor || "#fff0a8",
+        changed: () => {
+          prepareCollapsibleHeadings(boundEditor, note, box);
+          saveEditorSelection(boundEditor);
+          updateEditorToolbarState(boundEditor);
+          syncEditorContent(boundEditor, note, box);
+        },
+      });
+      boundEditor.addEventListener("compositionstart", () => { runtime.editorComposing = true; rememberEditorSnapshot(note, boundEditor); });
+      boundEditor.addEventListener("compositionend", () => { runtime.editorComposing = false; syncEditorContent(boundEditor, note, box); });
       prepareCollapsibleHeadings(boundEditor, note, box);
       bindPagedEditor(boundEditor);
       boundEditor.addEventListener("pointerdown", (event) => {
@@ -9613,6 +9553,7 @@
         });
       });
       boundEditor.addEventListener("beforeinput", (event) => {
+        if (event.isComposing || runtime.editorComposing) return;
         if (runtime.lastListAutoFormat?.noteId === note.id) runtime.lastListAutoFormat = null;
         if (event.inputType === "historyUndo" || event.inputType === "historyRedo") {
           event.preventDefault();
@@ -9630,9 +9571,9 @@
         runtime.pendingTypingContext = event.inputType === "insertParagraph"
           ? { noteId: note.id, context: captureTypingContext(boundEditor) }
           : null;
-        rememberEditorSnapshot(note, boundEditor);
+        rememberEditorSnapshot(note, boundEditor, event.inputType);
       });
-      boundEditor.addEventListener("keydown", (event) => handleEditorAutomation(event, boundEditor, note, box, repaginatePagesInPlace));
+      boundEditor.addEventListener("keydown", (event) => handleEditorAutomation(event, boundEditor, note, box));
       boundEditor.addEventListener("click", (event) => {
         const img = event.target.closest?.("img");
         if (img && boundEditor.contains(img)) {
@@ -9655,59 +9596,32 @@
           document.execCommand("insertText", false, text);
         }
         fixNestedListClasses(boundEditor);
+        prepareCollapsibleHeadings(boundEditor, note, box);
+        syncEditorContent(boundEditor, note, box);
       });
       boundEditor.addEventListener("input", (event) => {
+        if (event.isComposing || runtime.editorComposing) return;
         if (runtime.lastListAutoFormat?.noteId === note.id) runtime.lastListAutoFormat = null;
         restoreTypingContextAfterParagraph(boundEditor, note, event?.inputType || "");
-        if (enforceIndependentPageLimit(boundEditor, note, box)) return;
-        if (ensureFirstContinuousPage(boundEditor, note, box)) return;
-        if (removeCurrentEmptyContinuousPageIfNeeded(boundEditor, note, box)) return;
-        syncListMarkerColors(boundEditor);
-        note.content = editorSnapshotContent(boundEditor);
-        note.modifiedAt = now();
-        touchBox(box);
-        updateEditorStats(note);
+        syncEditorContent(boundEditor, note, box);
         saveEditorSelection(boundEditor);
         updateEditorToolbarState(boundEditor);
-        commitEditorHistoryChange(note, note.content);
-        saveState();
-        if (normalizeEditorViewMode(state.settings?.editorViewMode) === "pages") {
-          if (isContinuousPageFlow()) {
-            const inputType = event?.inputType || "";
-            const isDeletion = inputType.startsWith("delete");
-            const multiPage = boundEditor.querySelectorAll(".page-sheet").length > 1;
-            // Une suppression ne peut que reduire le contenu : sur un document multi-pages
-            // on repagine toujours pour laisser le texte remonter (reflow vers le haut).
-            if (isDeletion && multiPage) {
-              repaginatePagesInPlace(boundEditor, { scroll: "caret" });
-            } else if (needsPagedLayoutRefresh(boundEditor)) {
-              const immediatePagination = inputType.startsWith("insert") || isDeletion;
-              if (immediatePagination) {
-                repaginatePagesInPlace(boundEditor, { scroll: "caret" });
-              } else {
-                schedulePageRepagination(boundEditor, { scroll: "caret", delay: 140 });
-              }
-            } else {
-              syncPagedEditorMetrics(boundEditor);
-            }
-          } else {
-            syncPagedEditorMetrics(boundEditor);
-          }
-          // Le caret reste toujours en vue pendant la frappe (aucun effet s'il l'est deja)
-          window.requestAnimationFrame(() => restorePagedViewport(null, null, "caret"));
-        } else {
-          syncPagedEditorMetrics(boundEditor);
-        }
       });
       boundEditor.addEventListener("blur", () => {
-        if (normalizeEditorViewMode(state.settings?.editorViewMode) !== "pages") return;
-        note.content = mergePageEditorHtml({ keepActiveBlankSheet: true, keepSheets: !isContinuousPageFlow() });
+        note.content = editorSnapshotContent(boundEditor);
         saveState();
       });
     }
 
     editors.forEach(bindSingleEditor);
+    updateEditorStats(note);
+    app.querySelector("[data-editor-insert-break]")?.addEventListener("mousedown", (event) => event.preventDefault());
+    app.querySelector("[data-editor-insert-break]")?.addEventListener("click", () => {
+      const current = activeEditor();
+      if (current) { restoreEditorSelection(current); runtime.blockTools?.insertPageBreak(); }
+    });
 
+    app.querySelectorAll("[data-color-palette] summary").forEach((summary) => summary.addEventListener("mousedown", saveToolbarSelection));
     app.querySelectorAll("[data-editor-cmd]").forEach((button) => {
       button.addEventListener("mousedown", (event) => {
         const current = activeEditor();
@@ -9990,13 +9904,17 @@
       });
     });
 
-    app.querySelectorAll("[data-heading-index]").forEach((button) => {
-      button.addEventListener("click", () => {
+    app.querySelector("[data-note-outline]")?.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-heading-index]");
+        if (!button) return;
         const current = activeEditor();
         if (!current) return;
         const headings = [...current.querySelectorAll("h1, h2, h3, h4, h5, h6")];
-        headings[Number(button.dataset.headingIndex)]?.scrollIntoView({ behavior: "smooth", block: "center" });
-      });
+        const heading = headings[Number(button.dataset.headingIndex)];
+        if (!heading) return;
+        const hiddenBy = collapsedHeadingForHiddenBlock(heading);
+        if (hiddenBy) toggleHeadingSection(current, note, box, hiddenBy);
+        heading.scrollIntoView({ behavior: "smooth", block: "center" });
     });
   }
 
@@ -10006,7 +9924,7 @@
       const foldable = isFoldableStyle(heading.tagName.toLowerCase());
       heading.classList.toggle("collapsible-heading", foldable);
       if (foldable) {
-        heading.title = "Cliquer la flèche ou double-cliquer pour replier / deplier";
+        heading.title = "Cliquer la flèche pour replier / déplier";
       } else {
         heading.removeAttribute("title");
         heading.removeAttribute("data-collapsed");
@@ -10032,17 +9950,12 @@
       event.stopPropagation();
       toggleHeadingSection(editor, note, box, heading);
     });
-    editor.addEventListener("dblclick", (event) => {
-      const heading = event.target.closest("h1, h2, h3, h4, h5, h6");
-      if (!heading || !editor.contains(heading) || !isFoldableStyle(heading.tagName.toLowerCase())) return;
-      event.preventDefault();
-      toggleHeadingSection(editor, note, box, heading);
-    });
+
   }
 
   function isHeadingToggleHit(event, heading) {
     const rect = heading.getBoundingClientRect();
-    return event.clientX - rect.left <= 42;
+    return event.clientX >= rect.left - 24 && event.clientX <= rect.left;
   }
 
   function isChecklistToggleHit(event, li) {
@@ -10059,6 +9972,10 @@
   }
 
   function syncCollapsedHeadings(editor) {
+    editor.querySelectorAll("[data-collapsed-hidden]").forEach((node) => {
+      delete node.dataset.collapsedHidden;
+      node.style.display = "";
+    });
     editor.querySelectorAll("h1[data-collapsed='true'], h2[data-collapsed='true'], h3[data-collapsed='true'], h4[data-collapsed='true'], h5[data-collapsed='true'], h6[data-collapsed='true']").forEach((heading) => {
       if (isFoldableStyle(heading.tagName.toLowerCase())) setHeadingSectionVisibility(heading, true);
     });
@@ -10167,6 +10084,7 @@
   }
 
   function handleEditorAutomation(event, editor, note, box, repaginateNow = null) {
+    if (event.defaultPrevented || event.isComposing || runtime.editorComposing || event.keyCode === 229) return;
     if (
       runtime.lastListAutoFormat
       && event.key !== "Backspace"
@@ -10201,10 +10119,17 @@
     if (event.key === "Enter") {
       const collapsed = !!window.getSelection()?.isCollapsed;
       const block = currentEditableBlock(editor);
-      if (block === editor && normalizeEditorViewMode(state.settings?.editorViewMode) === "pages" && isContinuousPageFlow()) {
-        event.preventDefault();
-        insertBlankParagraphInCurrentSheet(editor, note, box);
-        return;
+      if (!event.shiftKey && collapsed && block?.matches("blockquote, pre")) {
+        if (!block.textContent.trim() || (block.tagName === "BLOCKQUOTE" && isCaretAtEndOfBlock(block)) || (block.tagName === "PRE" && isCaretAtEndOfBlock(block) && /\n\n$/.test(nodeTextWithBreaks(block)))) {
+          event.preventDefault();
+          rememberEditorSnapshot(note, editor);
+          const paragraph = blankParagraph();
+          if (!block.textContent.trim()) block.replaceWith(paragraph);
+          else block.after(paragraph);
+          placeCaretInside(paragraph);
+          syncEditorContent(editor, note, box);
+          return;
+        }
       }
       if (!event.shiftKey && collapsed && isHeadingBlock(block)) {
         event.preventDefault();
@@ -10213,7 +10138,7 @@
       }
 
       const li = currentListItem(editor);
-      if (li && collapsed && (listItemIsEmpty(li) || isCaretAtStartOfListItem(li))) {
+      if (li && collapsed && !event.shiftKey && listItemIsEmpty(li)) {
         event.preventDefault();
         exitListItem(editor, note, box, li);
       }
@@ -10477,7 +10402,7 @@
     let node = selection?.anchorNode;
     if (!node || !editor.contains(node)) return null;
     if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
-    return node?.closest?.("p, div:not(.page-sheet), h1, h2, h3, h4, h5, h6, li") || editor;
+    return node?.closest?.("p, div:not(.page-sheet), h1, h2, h3, h4, h5, h6, li, blockquote, pre") || editor;
   }
 
   const typingContextProperties = [
@@ -10804,6 +10729,11 @@
 
   function exitHeadingBlock(editor, note, box, heading) {
     rememberEditorSnapshot(note, editor);
+    if (heading.dataset.collapsed === "true") {
+      heading.dataset.collapsed = "false";
+      heading.classList.remove("is-heading-collapsed");
+      setHeadingSectionVisibility(heading, false);
+    }
     const selection = window.getSelection();
     if (selection && selection.rangeCount && selection.isCollapsed && heading.contains(selection.getRangeAt(0).startContainer)) {
       const caret = selection.getRangeAt(0);
@@ -11193,29 +11123,62 @@
     return true;
   }
 
+  function selectionBookmark(editor) {
+    const selection = window.getSelection();
+    if (!selection?.rangeCount || !selectionInsideEditor(editor, selection.getRangeAt(0))) return null;
+    const path = (node) => {
+      const parts = [];
+      while (node && node !== editor) {
+        parts.unshift([...node.parentNode.childNodes].indexOf(node));
+        node = node.parentNode;
+      }
+      return parts;
+    };
+    const range = selection.getRangeAt(0);
+    return { start: path(range.startContainer), startOffset: range.startOffset, end: path(range.endContainer), endOffset: range.endOffset };
+  }
+
+  function restoreSelectionBookmark(editor, bookmark) {
+    if (!bookmark) return false;
+    const resolve = (path) => path.reduce((node, index) => node?.childNodes[index], editor);
+    const start = resolve(bookmark.start), end = resolve(bookmark.end);
+    if (!start || !end) return false;
+    const limit = (node) => node.nodeType === Node.TEXT_NODE ? node.length : node.childNodes.length;
+    const range = document.createRange();
+    range.setStart(start, Math.min(bookmark.startOffset, limit(start)));
+    range.setEnd(end, Math.min(bookmark.endOffset, limit(end)));
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return true;
+  }
+
   function editorHistory(note) {
     const id = note?.id || "active";
-    if (!runtime.noteHistories.has(id)) {
-      runtime.noteHistories.set(id, {
-        undo: [],
-        redo: [],
-        current: note?.content || "<p><br></p>",
-      });
-    }
+    if (!runtime.noteHistories.has(id)) runtime.noteHistories.set(id, {
+      undo: [], redo: [], current: note?.content || "<p><br></p>", selection: null, group: null,
+    });
     return runtime.noteHistories.get(id);
   }
 
-  function rememberEditorSnapshot(note, editor) {
+  function rememberEditorSnapshot(note, editor, inputType = "") {
     if (!note || !editor || runtime.restoringEditorHistory) return;
-    rememberIndependentPageSnapshot(editor);
     const history = editorHistory(note);
-    const snapshot = editorSnapshotContent(editor);
-    if (history.undo[history.undo.length - 1] !== snapshot) {
-      history.undo.push(snapshot);
+    const content = editorSnapshotContent(editor);
+    const selection = selectionBookmark(editor);
+    const groupable = ["insertText", "deleteContentBackward", "deleteContentForward"].includes(inputType);
+    const grouped = groupable && history.group?.type === inputType
+      && performance.now() - history.group.at < 700
+      && JSON.stringify(selection) === JSON.stringify(history.selection)
+      && content === history.current;
+    if (!grouped && history.undo.at(-1)?.content !== content) {
+      history.undo.push({ content, selection });
       if (history.undo.length > 120) history.undo.shift();
     }
     history.redo = [];
-    history.current = snapshot;
+    history.current = content;
+    history.selection = selection;
+    history.group = groupable ? { type: inputType, at: performance.now() } : null;
   }
 
   function markEditorHistoryCurrent(note, content) {
@@ -11228,14 +11191,15 @@
     if (!note || runtime.restoringEditorHistory) return;
     const history = editorHistory(note);
     const next = content || "<p><br></p>";
-    if (history.current !== next) {
-      if (history.undo[history.undo.length - 1] !== history.current) {
-        history.undo.push(history.current);
-        if (history.undo.length > 120) history.undo.shift();
-      }
+    // beforeinput/commands already recorded the pre-edit state, including its caret.
+    if (history.current !== next && !history.group && history.undo.at(-1)?.content !== history.current) {
+      history.undo.push({ content: history.current, selection: history.selection });
+      if (history.undo.length > 120) history.undo.shift();
       history.redo = [];
     }
     history.current = next;
+    const editor = app.querySelector("[data-note-editor]");
+    if (editor?.dataset.editorNoteId === note.id) history.selection = selectionBookmark(editor);
   }
 
   function restoreEditorHistory(editor, note, box, direction) {
@@ -11244,36 +11208,33 @@
     const from = direction === "redo" ? history.redo : history.undo;
     const to = direction === "redo" ? history.undo : history.redo;
     if (!from.length) return false;
-
-    const current = editorSnapshotContent(editor);
     const target = from.pop();
-    to.push(current);
+    to.push({ content: editorSnapshotContent(editor), selection: selectionBookmark(editor) });
     if (to.length > 120) to.shift();
-
     runtime.restoringEditorHistory = true;
-    note.content = target || "<p><br></p>";
-    note.modifiedAt = now();
-    touchBox(box);
-    if (normalizeEditorViewMode(state.settings?.editorViewMode) === "pages") {
-      paginateNoteIntoPages(note);
-    } else {
-      editor.innerHTML = note.content;
-    }
-    prepareCollapsibleHeadings(editor, note, box);
-    updateEditorStats(note);
-    markEditorHistoryCurrent(note, note.content);
-    saveState();
-    const focusTarget = isIndependentPageMode() ? (currentPageSheet(editor) || editor) : editor;
-    focusTarget.focus({ preventScroll: true });
-    placeCaretAtEnd(focusTarget);
-    saveEditorSelection(editor);
-    runtime.restoringEditorHistory = false;
+    try {
+      note.content = target.content || "<p><br></p>";
+      note.modifiedAt = now();
+      touchBox(box);
+      editor.innerHTML = stableDocumentHtml(note.content);
+      prepareCollapsibleHeadings(editor, note, box);
+      updateEditorStats(note);
+      history.current = note.content;
+      history.group = null;
+      editor.focus({ preventScroll: true });
+      if (!restoreSelectionBookmark(editor, target.selection)) placeCaretAtEnd(editor);
+      history.selection = selectionBookmark(editor);
+      saveEditorSelection(editor);
+      updateEditorToolbarState(editor);
+      saveState();
+    } finally { runtime.restoringEditorHistory = false; }
     return true;
   }
 
   function syncEditorContent(editor, note, box) {
     if (enforceIndependentPageLimit(editor, note, box)) return;
     syncListMarkerColors(editor);
+    syncCollapsedHeadings(editor);
     note.content = editorSnapshotContent(editor);
     note.modifiedAt = now();
     touchBox(box);
@@ -11963,6 +11924,7 @@
   });
 
   document.addEventListener("click", (event) => {
+    app.querySelectorAll("[data-color-palette][open]").forEach((palette) => { if (!palette.contains(event.target)) palette.open = false; });
     if (!event.target.closest?.("[data-toolbar-menu]")) {
       app.querySelectorAll(".toolbar-menu.is-open").forEach((menu) => menu.classList.remove("is-open"));
     }

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="fr"><meta charset="utf-8"><title>Régressions du document MindSet</title>
+<style>body{font:16px/1.6 system-ui;margin:40px;max-width:960px}li{margin:8px 0}.fail{color:#b42318}.pass{color:#18704b}pre{white-space:pre-wrap}</style>
+<h1>Migration des documents — MindSet 1.3.0</h1><p id="summary">Vérification…</p><ol id="results"></ol>
+<script src="../src/editor-document.js"></script>
+<script>
+const tests = [];
+const check = (name, run) => tests.push({name, run});
+const root = html => { const node = document.createElement('div'); node.innerHTML = MindSetDocument.normalize(html); return node; };
+const assert = (condition, message = 'Résultat inattendu') => { if (!condition) throw Error(message); };
+check('Une note vide conserve un paragraphe éditable', () => assert(root('').innerHTML === '<p><br></p>'));
+check('Les paragraphes vides intentionnels survivent', () => assert(root('<p>A</p><p><br></p><p><br></p>').children.length === 3));
+check('Les retours simples et les accents survivent', () => assert(root('<p>Été\nà Paris<br>suite</p>').textContent === 'Été\nà Parissuite'));
+check('Les spans de couleur et le gras restent dans la continuation', () => {
+ const doc = root('<div class="page-sheet"><p>Avant <b>gras</b></p></div><div class="page-sheet"><p data-split-continuation="true"><span style="color:red"> après</span></p></div>');
+ assert(doc.children.length === 1 && doc.textContent === 'Avant gras après' && doc.querySelector('span').style.color === 'red' && doc.querySelector('b'));
+});
+check('Les anciens paragraphes coupés se recollent sans espace ajouté', () => assert(root('<p>extra</p><p data-split-continuation="true">ordinaire</p>').innerHTML === '<p>extraordinaire</p>'));
+check('Les anciens éléments de liste coupés se recollent', () => {
+ const doc = root('<ul><li>Une tâ</li></ul><ul data-split-continuation="true"><li data-split-continuation="true">che</li><li>Suite</li></ul>');
+ assert(doc.querySelectorAll('ul').length === 1 && doc.querySelectorAll('li').length === 2 && doc.querySelector('li').textContent === 'Une tâche');
+});
+check('Deux listes de types différents ne fusionnent pas', () => assert(root('<ul class="check-list"><li>A</li></ul><ul data-split-continuation="true"><li>B</li></ul>').children.length === 2));
+check('Un marqueur parasite au milieu d’une feuille ne détruit pas un retour', () => {
+ const doc = root('<div class="page-sheet"><p>A</p><p data-split-continuation="true">B</p></div>'); assert(doc.children.length === 2);
+});
+check('Les feuilles indépendantes deviennent des sauts explicites', () => {
+ const doc = root('<div class="page-sheet" contenteditable="true"><p>A</p></div><div class="page-sheet" contenteditable="true"><p>B</p></div>');
+ assert(doc.querySelectorAll('.note-page-break').length === 1 && !doc.querySelector('.page-sheet') && doc.textContent === 'AB');
+});
+check('Une page indépendante vide reste une section vide', () => {
+ const doc = root('<div class="page-sheet" contenteditable="true"><p>A</p></div><div class="page-sheet" contenteditable="true"></div>');
+ assert(doc.querySelector('.note-page-break') && doc.lastElementChild.innerHTML === '<br>');
+});
+check('Le texte situé en dehors des anciennes feuilles reste présent', () => assert(root('Début<div class="page-sheet"><p>Milieu</p></div>Fin').textContent === 'DébutMilieuFin'));
+check('Les images, les tableaux et les annotations restent intacts', () => {
+ const doc = root('<blockquote class="note-callout">Note</blockquote><table><tr><td>Cellule</td></tr></table><p><img src="data:image/png;base64,AAAA"></p>');
+ assert(doc.querySelector('.note-callout') && doc.querySelector('td').textContent === 'Cellule' && doc.querySelector('img'));
+});
+check('Les marqueurs temporaires ne deviennent pas du contenu', () => assert(!root('<p>A<span data-editor-selection-marker="true"></span><span data-pagination-probe="true"></span></p>').querySelector('span')));
+check('Un second chargement ne modifie plus le document', () => {
+ const html = '<div class="page-sheet" contenteditable="true"><p>A</p></div><div class="page-sheet" contenteditable="true"><p>B</p></div>';
+ const once = MindSetDocument.normalize(html); assert(MindSetDocument.normalize(once) === once);
+});
+let passed = 0;
+for (const {name, run} of tests) {
+ const item = document.createElement('li');
+ try { run(); passed++; item.className='pass'; item.textContent='✓ ' + name; }
+ catch (error) { item.className='fail'; item.textContent='✗ ' + name + ' — ' + error.message; }
+ document.querySelector('#results').append(item);
+}
+document.querySelector('#summary').textContent = `${passed} / ${tests.length} vérifications réussies`;
+</script></html>

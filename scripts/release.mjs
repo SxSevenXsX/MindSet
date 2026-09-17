@@ -60,6 +60,7 @@ if (existing.status === 404) {
     name: version,
     draft: false,
     prerelease: false,
+    body: readFileSync(join(root, "CHANGELOG.md"), "utf8"),
   });
   if (created.status !== 201) fail(`Creation de la release impossible (HTTP ${created.status}): ${JSON.stringify(created.data)}`);
   console.log(`[release] Release GitHub ${tag} creee.`);

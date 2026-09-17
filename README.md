@@ -1,27 +1,30 @@
 # MindSet
 
-MindSet est un prototype local d'application de prise de notes personnalisée.
+Application Windows de prise de notes locale : boîtes de projets, dossiers imbriqués, notes, onglets, signets, vue graphique et enregistrements audio. Les boîtes protégées utilisent un chiffrement AES-GCM ; les clips audio sont conservés dans IndexedDB.
 
-## Lancer
+## Développement
 
-Ouvrir `index.html` dans un navigateur moderne.
+- `npm install` puis `npm start` pour Electron.
+- `node scripts/static-server.mjs` puis ouvrir `http://127.0.0.1:4173` pour tester dans un navigateur.
+- `npm run dist -- --publish never` pour créer l’installeur Windows dans `dist/`.
 
-Les données sont stockées localement dans `localStorage` pour cette première version.
+## Écriture — version 1.3.0
 
-## Déjà inclus
+La note reste un document continu, y compris en vue papier. Sa mise en page ne découpe plus les paragraphes pendant la saisie. Le format, les marges et le zoom restent personnalisables ; la pagination finale est calculée à l’impression.
 
-- Boîtes de projet, avec mot de passe optionnel haché localement.
-- Dossiers imbriqués et notes.
-- Création de note, dossier et note rapide.
-- Tri par création, modification, alphabet ou ordre personnalisé.
-- Affichages arbre, liste et icônes.
-- Sélection multiple, déplacement et suppression.
-- Editeur riche type mini Word.
-- Vue arbre réelle de la boîte.
+- `/` au début d’un bloc : texte, titres, listes à puces ou numérotées, cases à cocher, citation, encadré, code, séparateur, saut de page. Taper pour filtrer, flèches pour choisir, Entrée pour valider, Échap pour fermer.
+- `Entrée` crée un paragraphe ; `Maj + Entrée` crée un retour simple. Entrée à la fin d’un titre revient au texte normal. Entrée dans un élément de liste vide sort de la liste.
+- `Ctrl + Entrée` insère un saut de page pour l’impression et les exports.
+- `#` à `######` suivis d’espace créent un titre ; `>` une citation ; `---` un séparateur ; trois accents graves un bloc de code. Les anciens raccourcis de listes restent disponibles.
+- Sélectionner du texte affiche une petite barre de mise en forme. Les outils complets et les palettes personnalisées restent accessibles en haut.
+- Annuler/Rétablir conserve l’emplacement du curseur, y compris entre des paragraphes vides. Les frappes consécutives sont regroupées.
 
-## Prochaines étapes
+Les anciennes feuilles indépendantes sont reprises comme des sections séparées par des sauts de page explicites. Les notes existantes et les polices personnalisées sont conservées ; l’ancienne police par défaut Georgia passe à la police système.
 
-- Stockage fichier local exportable.
-- Chiffrement complet des boîtes protégées.
-- Packaging Windows avec Tauri ou Electron.
-- Meilleur drag and drop pour réordonner précisément dans un dossier.
+## Vérification
+
+Ouvrir `http://127.0.0.1:4173/tests/editor-document.html` après avoir démarré le serveur : 14 tests de migration, sans accès aux notes utilisateur. Voir [la procédure de vérification](tests/README.md) pour les essais interactifs.
+
+## Publication
+
+Mettre à jour `package.json` et `package-lock.json`, valider les changements, créer et pousser le tag correspondant (`v1.3.0`), puis lancer `npm run release`. Le script utilise les identifiants GitHub locaux sans les écrire dans le dépôt, construit l’installeur et publie les fichiers de mise à jour.
