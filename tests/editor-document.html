@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="fr"><meta charset="utf-8"><title>Régressions du document MindSet</title>
 <style>body{font:16px/1.6 system-ui;margin:40px;max-width:960px}li{margin:8px 0}.fail{color:#b42318}.pass{color:#18704b}pre{white-space:pre-wrap}</style>
-<h1>Migration des documents — MindSet 1.3.0</h1><p id="summary">Vérification…</p><ol id="results"></ol>
+<h1>Migration des documents — MindSet 1.3.1</h1><p id="summary">Vérification…</p><ol id="results"></ol>
 <script src="../src/editor-document.js"></script>
 <script>
 const tests = [];
@@ -27,6 +27,10 @@ check('Un marqueur parasite au milieu d’une feuille ne détruit pas un retour'
 check('Les feuilles indépendantes deviennent des sauts explicites', () => {
  const doc = root('<div class="page-sheet" contenteditable="true"><p>A</p></div><div class="page-sheet" contenteditable="true"><p>B</p></div>');
  assert(doc.querySelectorAll('.note-page-break').length === 1 && !doc.querySelector('.page-sheet') && doc.textContent === 'AB');
+});
+check('Les feuilles indépendantes réellement sauvegardées gardent leur séparation', () => {
+ const doc = root('<div class="page-sheet" data-page-sheet="0"><p>A</p></div><div class="page-sheet" data-page-sheet="1"><p>B</p></div>');
+ assert(doc.querySelectorAll('.note-page-break').length === 1 && doc.textContent === 'AB');
 });
 check('Une page indépendante vide reste une section vide', () => {
  const doc = root('<div class="page-sheet" contenteditable="true"><p>A</p></div><div class="page-sheet" contenteditable="true"></div>');

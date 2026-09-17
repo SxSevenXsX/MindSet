@@ -1,4 +1,4 @@
-# 1.3.0 — Écriture fluide
+# 1.3.1 — Écriture fluide
 
 - Édition continue dans toutes les vues, sans découpage des paragraphes pendant la frappe.
 - Menu `/` avec recherche et choix au clavier pour les titres, listes, tâches, citations, annotations, code, séparateurs et sauts de page.

@@ -8,7 +8,7 @@ Application Windows de prise de notes locale : boîtes de projets, dossiers imbr
 - `node scripts/static-server.mjs` puis ouvrir `http://127.0.0.1:4173` pour tester dans un navigateur.
 - `npm run dist -- --publish never` pour créer l’installeur Windows dans `dist/`.
 
-## Écriture — version 1.3.0
+## Écriture — version 1.3.1
 
 La note reste un document continu, y compris en vue papier. Sa mise en page ne découpe plus les paragraphes pendant la saisie. Le format, les marges et le zoom restent personnalisables ; la pagination finale est calculée à l’impression.
 
@@ -23,8 +23,8 @@ Les anciennes feuilles indépendantes sont reprises comme des sections séparée
 
 ## Vérification
 
-Ouvrir `http://127.0.0.1:4173/tests/editor-document.html` après avoir démarré le serveur : 14 tests de migration, sans accès aux notes utilisateur. Voir [la procédure de vérification](tests/README.md) pour les essais interactifs.
+Ouvrir `http://127.0.0.1:4173/tests/editor-document.html` après avoir démarré le serveur : 15 tests de migration, sans accès aux notes utilisateur. Voir [la procédure de vérification](tests/README.md) pour les essais interactifs.
 
 ## Publication
 
-Mettre à jour `package.json` et `package-lock.json`, valider les changements, créer et pousser le tag correspondant (`v1.3.0`), puis lancer `npm run release`. Le script utilise les identifiants GitHub locaux sans les écrire dans le dépôt, construit l’installeur et publie les fichiers de mise à jour.
+Mettre à jour `package.json` et `package-lock.json`, valider les changements, créer et pousser le tag correspondant (`v1.3.1`), puis lancer `npm run release`. Le script utilise les identifiants GitHub locaux sans les écrire dans le dépôt, construit l’installeur et publie les fichiers de mise à jour.

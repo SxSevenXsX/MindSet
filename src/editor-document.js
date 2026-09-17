@@ -4,7 +4,10 @@
     const source = document.createElement("div");
     source.innerHTML = html || "<p><br></p>";
     const sheets = [...source.querySelectorAll(".page-sheet")];
-    const independent = sheets.some((sheet) => sheet.getAttribute("contenteditable") === "true");
+    // Saved independent sheets had their contenteditable attribute stripped.
+    // Keep their boundaries; continuation markers identify the old automatic splits.
+    const independent = sheets.length > 0 && (sheets.some((sheet) => sheet.getAttribute("contenteditable") === "true")
+      || !sheets.some((sheet) => sheet.querySelector("[data-split-continuation]")));
     for (const [index, sheet] of sheets.entries()) {
       [...sheet.children].slice(1).forEach((block) => {
         block.removeAttribute("data-split-continuation");

@@ -1,9 +1,9 @@
-# Vérification de l’éditeur 1.3.0
+# Vérification de l’éditeur 1.3.1
 
 ## Tests automatiques de migration
 
 Démarrer `node scripts/static-server.mjs` et ouvrir `/tests/editor-document.html`.
-Résultat attendu et obtenu : **14/14**. La page n’utilise pas le stockage de l’application.
+Résultat attendu et obtenu : **15/15**. La page n’utilise pas le stockage de l’application.
 
 ## Parcours interactifs vérifiés dans Chromium
 
