@@ -1,6 +1,5 @@
 name: Publish Windows release
-
-on:
+'on':
   workflow_dispatch:
     inputs:
       tag:
@@ -8,20 +7,17 @@ on:
         required: true
         default: v1.3.2
         type: string
-
 permissions:
   contents: read
-
 concurrency:
-  group: release-${{ inputs.tag }}
+  group: mindset-windows-release
   cancel-in-progress: false
-
 jobs:
-  publish:
+  build:
     runs-on: windows-latest
     timeout-minutes: 30
     permissions:
-      contents: write
+      contents: read
     env:
       RELEASE_TAG: ${{ inputs.tag }}
     steps:
@@ -31,19 +27,16 @@ jobs:
           if ($env:RELEASE_TAG -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
             throw 'Use an existing version tag such as v1.3.2.'
           }
-
       - name: Check out tagged source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ inputs.tag }}
           persist-credentials: false
-
       - name: Set up Node.js
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '24'
           package-manager-cache: false
-
       - name: Verify source version and syntax
         shell: pwsh
         run: |
@@ -53,15 +46,12 @@ jobs:
             node --check $source
             if ($LASTEXITCODE -ne 0) { throw "Syntax check failed: $source" }
           }
-
       - name: Install dependencies
         run: npm ci
-
       - name: Build Windows installer
         run: npm run dist -- --publish never
-
       - name: Keep downloadable build artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: MindSet-Windows-${{ inputs.tag }}
           path: |
@@ -71,63 +61,64 @@ jobs:
           compression-level: 0
           retention-days: 14
           if-no-files-found: error
-
-      - name: Upload and publish verified assets
-        timeout-minutes: 10
-        shell: pwsh
+  publish:
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 8
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - name: Check out tagged release notes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - name: Download Windows installer
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: MindSet-Windows-${{ inputs.tag }}
+          path: dist
+      - name: Verify and publish installer
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $names = @("MindSet-Setup-$version.exe", "MindSet-Setup-$version.exe.blockmap", 'latest.yml')
-          foreach ($name in $names) {
-            if (!(Test-Path -LiteralPath "dist/$name")) { throw "Missing artifact: $name" }
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          if [ "$RELEASE_TAG" != "v$version" ]; then
+            echo 'Tag and package version differ.' >&2
+            exit 1
+          fi
+          node <<'NODE'
+          const fs = require('node:fs');
+          const crypto = require('node:crypto');
+          const version = require('./package.json').version;
+          const manifest = fs.readFileSync('dist/latest.yml', 'utf8');
+          const file = `dist/MindSet-Setup-${version}.exe`;
+          const hash = crypto.createHash('sha512').update(fs.readFileSync(file)).digest('base64');
+          if (!manifest.split(/\r?\n/).includes(`version: ${version}`) || !manifest.includes(hash)) {
+            throw Error('Update manifest does not match installer.');
           }
-          $manifest = Get-Content dist/latest.yml -Raw
-          $hash = [Convert]::ToBase64String([Security.Cryptography.SHA512]::HashData([IO.File]::ReadAllBytes("dist/$($names[0])")))
-          if (!$manifest.Contains("version: $version") -or !$manifest.Contains($hash)) {
-            throw 'The update manifest does not match the installer.'
-          }
-          $existingJson = gh release view $env:RELEASE_TAG --json isDraft
-          if ($LASTEXITCODE -ne 0) {
-            gh release create $env:RELEASE_TAG --draft --verify-tag --title $version --notes-file CHANGELOG.md
-            if ($LASTEXITCODE -ne 0) { throw 'Could not create draft release.' }
-          } elseif (!(($existingJson | ConvertFrom-Json).isDraft)) {
-            throw 'This version is already published. Use a new version tag.'
-          }
-          $releaseList = gh api "repos/$env:GH_REPO/releases" | ConvertFrom-Json
-          $releaseData = $releaseList | Where-Object { $_.tag_name -ceq $env:RELEASE_TAG }
-          if ($LASTEXITCODE -ne 0 -or !$releaseData -or !$releaseData.draft) { throw 'Could not read draft release.' }
-          $uploadBase = $releaseData.upload_url.Split('{')[0]
-          foreach ($name in $names) {
-            $existing = @($releaseData.assets | Where-Object { $_.name -ceq $name })
-            foreach ($asset in $existing) {
-              gh api --method DELETE "repos/$env:GH_REPO/releases/assets/$($asset.id)"
-              if ($LASTEXITCODE -ne 0) { throw "Could not replace draft asset: $name" }
-            }
-            $uploadUrl = "$($uploadBase)?name=$([Uri]::EscapeDataString($name))"
-            $curlConfig = 'url = "' + $uploadUrl + '"' + "`n" + 'header = "Authorization: Bearer ' + $env:GH_TOKEN + '"' + "`n"
-            $responsePath = Join-Path $env:RUNNER_TEMP 'mindset-upload-response.json'
-            Write-Host "Uploading $name"
-            $curlConfig | curl.exe --config - --silent --show-error --fail-with-body --ipv4 --http1.1 --connect-timeout 20 --max-time 180 --request POST --data-binary "@dist/$name" --header 'Content-Type: application/octet-stream' --header 'Accept: application/vnd.github+json' --output $responsePath
-            if ($LASTEXITCODE -ne 0) {
-              Get-Content -LiteralPath $responsePath -ErrorAction SilentlyContinue
-              throw "Asset upload failed: $name; release remains unpublished."
-            }
-            $uploaded = Get-Content -LiteralPath $responsePath -Raw | ConvertFrom-Json
-            if ($uploaded.size -ne (Get-Item -LiteralPath "dist/$name").Length -or $uploaded.state -ne 'uploaded') {
-              throw "Asset upload incomplete: $name"
+          NODE
+          if gh release view "$RELEASE_TAG" --json isDraft > "$RUNNER_TEMP/mindset-release.json"; then
+            node -e 'if (!require(process.argv[1]).isDraft) throw Error("This version is already published.")' "$RUNNER_TEMP/mindset-release.json"
+          else
+            gh release create "$RELEASE_TAG" --draft --verify-tag --title "$version" --notes-file CHANGELOG.md
+          fi
+          gh release upload "$RELEASE_TAG" "dist/MindSet-Setup-$version.exe" "dist/MindSet-Setup-$version.exe.blockmap" dist/latest.yml --clobber
+          gh release view "$RELEASE_TAG" --json assets > "$RUNNER_TEMP/mindset-assets.json"
+          node <<'NODE'
+          const fs = require('node:fs');
+          const version = require('./package.json').version;
+          const { assets } = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/mindset-assets.json`, 'utf8'));
+          for (const name of [`MindSet-Setup-${version}.exe`, `MindSet-Setup-${version}.exe.blockmap`, 'latest.yml']) {
+            const matches = assets.filter(asset => asset.name === name);
+            if (matches.length !== 1 || matches[0].size !== fs.statSync(`dist/${name}`).size) {
+              throw Error(`Uploaded asset verification failed: ${name}`);
             }
           }
-          $releaseJson = gh release view $env:RELEASE_TAG --json assets
-          if ($LASTEXITCODE -ne 0) { throw 'Could not verify uploaded assets.' }
-          $assets = ($releaseJson | ConvertFrom-Json).assets
-          foreach ($name in $names) {
-            $asset = @($assets | Where-Object { $_.name -ceq $name })
-            if ($asset.Count -ne 1 -or $asset[0].size -ne (Get-Item -LiteralPath "dist/$name").Length) {
-              throw "Uploaded asset verification failed: $name"
-            }
-          }
-          gh release edit $env:RELEASE_TAG --draft=false --latest --notes-file CHANGELOG.md
-          if ($LASTEXITCODE -ne 0) { throw 'Could not publish release.' }
+          NODE
+          gh release edit "$RELEASE_TAG" --draft=false --latest --notes-file CHANGELOG.md
