@@ -27,4 +27,6 @@ Ouvrir `http://127.0.0.1:4173/tests/editor-document.html` après avoir démarré
 
 ## Publication
 
-Mettre à jour `package.json` et `package-lock.json`, valider les changements, créer et pousser le tag correspondant (`v1.3.1`), puis lancer `npm run release`. Le script utilise les identifiants GitHub locaux sans les écrire dans le dépôt, construit l’installeur et publie les fichiers de mise à jour.
+Mettre à jour `package.json`, `package-lock.json` et `CHANGELOG.md`, valider les changements, créer et pousser le tag correspondant (par exemple `v1.3.1`). Dans GitHub Actions, lancer **Publish Windows release** et renseigner ce tag. Le workflow vérifie la version, construit sous Windows, contrôle le manifeste de mise à jour et les trois fichiers distants, puis publie la release. Il refuse de remplacer une version déjà publiée.
+
+La commande locale `npm run release` reste disponible ; elle utilise les identifiants GitHub locaux sans les écrire dans le dépôt.
