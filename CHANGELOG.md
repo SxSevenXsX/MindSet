@@ -1,4 +1,4 @@
-# 1.3.1 — Écriture fluide
+# 1.3.2 — Écriture fluide
 
 - Édition continue dans toutes les vues, sans découpage des paragraphes pendant la frappe.
 - Menu `/` avec recherche et choix au clavier pour les titres, listes, tâches, citations, annotations, code, séparateurs et sauts de page.
@@ -9,5 +9,7 @@
 - Les anciennes feuilles et leurs mises en forme sont reprises ; les feuilles indépendantes deviennent des sauts de page explicites.
 - Le double-clic dans un titre sélectionne le texte. Le repli reste accessible par la flèche et les boutons dédiés.
 - Sauts de page pris en compte dans l’impression et l’export Word ; tableaux conservés au collage.
+
+- Bibliothèque de lecture des manifestes de mise à jour actualisée.
 
 Les boîtes, dossiers, onglets, signets, audio et vue graphique sont conservés. La vue papier affiche un document continu ; les coupures automatiques sont calculées lors de l’impression/PDF.

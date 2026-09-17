@@ -8,7 +8,7 @@ Application Windows de prise de notes locale : boîtes de projets, dossiers imbr
 - `node scripts/static-server.mjs` puis ouvrir `http://127.0.0.1:4173` pour tester dans un navigateur.
 - `npm run dist -- --publish never` pour créer l’installeur Windows dans `dist/`.
 
-## Écriture — version 1.3.1
+## Écriture — version 1.3.2
 
 La note reste un document continu, y compris en vue papier. Sa mise en page ne découpe plus les paragraphes pendant la saisie. Le format, les marges et le zoom restent personnalisables ; la pagination finale est calculée à l’impression.
 
@@ -27,6 +27,6 @@ Ouvrir `http://127.0.0.1:4173/tests/editor-document.html` après avoir démarré
 
 ## Publication
 
-Mettre à jour `package.json`, `package-lock.json` et `CHANGELOG.md`, valider les changements, créer et pousser le tag correspondant (par exemple `v1.3.1`). Dans GitHub Actions, lancer **Publish Windows release** et renseigner ce tag. Le workflow vérifie la version, construit sous Windows, contrôle le manifeste de mise à jour et les trois fichiers distants, puis publie la release. Il refuse de remplacer une version déjà publiée.
+Mettre à jour `package.json`, `package-lock.json` et `CHANGELOG.md`, valider les changements, créer et pousser le tag correspondant (par exemple `v1.3.2`). Dans GitHub Actions, lancer **Publish Windows release** et renseigner ce tag. Le workflow vérifie la version, construit sous Windows, contrôle le manifeste de mise à jour et les trois fichiers distants, puis publie la release. Il refuse de remplacer une version déjà publiée.
 
 La commande locale `npm run release` reste disponible ; elle utilise les identifiants GitHub locaux sans les écrire dans le dépôt.

@@ -1,4 +1,4 @@
-# Vérification de l’éditeur 1.3.1
+# Vérification de l’éditeur 1.3.2
 
 ## Tests automatiques de migration
 
