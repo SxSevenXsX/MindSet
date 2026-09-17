@@ -60,7 +60,20 @@ jobs:
       - name: Build Windows installer
         run: npm run dist -- --publish never
 
+      - name: Keep downloadable build artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: MindSet-Windows-${{ inputs.tag }}
+          path: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/latest.yml
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+
       - name: Upload and publish verified assets
+        timeout-minutes: 10
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -83,9 +96,30 @@ jobs:
           } elseif (!(($existingJson | ConvertFrom-Json).isDraft)) {
             throw 'This version is already published. Use a new version tag.'
           }
-          $paths = $names | ForEach-Object { "dist/$_" }
-          gh release upload $env:RELEASE_TAG @paths --clobber
-          if ($LASTEXITCODE -ne 0) { throw 'Asset upload failed; release remains unpublished.' }
+          $releaseList = gh api "repos/$env:GH_REPO/releases" | ConvertFrom-Json
+          $releaseData = $releaseList | Where-Object { $_.tag_name -ceq $env:RELEASE_TAG }
+          if ($LASTEXITCODE -ne 0 -or !$releaseData -or !$releaseData.draft) { throw 'Could not read draft release.' }
+          $uploadBase = $releaseData.upload_url.Split('{')[0]
+          foreach ($name in $names) {
+            $existing = @($releaseData.assets | Where-Object { $_.name -ceq $name })
+            foreach ($asset in $existing) {
+              gh api --method DELETE "repos/$env:GH_REPO/releases/assets/$($asset.id)"
+              if ($LASTEXITCODE -ne 0) { throw "Could not replace draft asset: $name" }
+            }
+            $uploadUrl = "$($uploadBase)?name=$([Uri]::EscapeDataString($name))"
+            $curlConfig = 'url = "' + $uploadUrl + '"' + "`n" + 'header = "Authorization: Bearer ' + $env:GH_TOKEN + '"' + "`n"
+            $responsePath = Join-Path $env:RUNNER_TEMP 'mindset-upload-response.json'
+            Write-Host "Uploading $name"
+            $curlConfig | curl.exe --config - --silent --show-error --fail-with-body --ipv4 --http1.1 --connect-timeout 20 --max-time 180 --request POST --data-binary "@dist/$name" --header 'Content-Type: application/octet-stream' --header 'Accept: application/vnd.github+json' --output $responsePath
+            if ($LASTEXITCODE -ne 0) {
+              Get-Content -LiteralPath $responsePath -ErrorAction SilentlyContinue
+              throw "Asset upload failed: $name; release remains unpublished."
+            }
+            $uploaded = Get-Content -LiteralPath $responsePath -Raw | ConvertFrom-Json
+            if ($uploaded.size -ne (Get-Item -LiteralPath "dist/$name").Length -or $uploaded.state -ne 'uploaded') {
+              throw "Asset upload incomplete: $name"
+            }
+          }
           $releaseJson = gh release view $env:RELEASE_TAG --json assets
           if ($LASTEXITCODE -ne 0) { throw 'Could not verify uploaded assets.' }
           $assets = ($releaseJson | ConvertFrom-Json).assets
