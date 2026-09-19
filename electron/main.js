@@ -2,11 +2,13 @@ const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require("electron")
 const { autoUpdater } = require("electron-updater");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { UpdateManager, attemptStore, updateMessage } = require("./update-manager");
+const { CloseCoordinator } = require("./close-coordinator");
+const { verifyInstaller } = require("./verify-installer");
 
 let mainWindow = null;
-let updateState = { status: "idle", message: "" };
-let closeFlushState = null;
-let closeRequestCounter = 0;
+let updateManager = null;
+let closeCoordinator = null;
 
 autoUpdater.autoDownload = false;
 autoUpdater.setFeedURL({
@@ -71,26 +73,8 @@ async function readUserFontsFolder() {
 }
 
 function sendUpdateStatus(payload) {
-  updateState = { ...updateState, ...payload };
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send("mindset:update-status", updateState);
-}
-
-function updateMessage(error) {
-  if (!error) return "Erreur inconnue.";
-  const message = error.message || String(error);
-  if (message.includes("404")) {
-    return "Mise a jour introuvable sur GitHub. Verifie que la release est publique et contient latest.yml, l'installateur .exe et le .blockmap.";
-  }
-  return message;
-}
-
-function updateAvailablePayload(info) {
-  return {
-    status: "available",
-    version: info?.version || "",
-    message: `Mise a jour ${info?.version || ""} disponible.`.replace("  ", " "),
-  };
+  mainWindow.webContents.send("mindset:update-status", payload);
 }
 
 function configureFrenchSpellChecker(webContents) {
@@ -133,21 +117,6 @@ function externalWebUrl(value) {
   }
 }
 
-function finishWindowClose() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (closeFlushState?.timer) clearTimeout(closeFlushState.timer);
-  closeFlushState = { requested: true, allow: true, timer: null };
-  mainWindow.close();
-}
-
-function cancelWindowClose(requestId, reason = "cancelled") {
-  if (!mainWindow || mainWindow.isDestroyed() || closeFlushState?.requestId !== requestId) return;
-  if (closeFlushState.timer) clearTimeout(closeFlushState.timer);
-  closeFlushState = { requested: false, allow: false, timer: null, requestId: null };
-  mainWindow.webContents.send("mindset:close-cancelled", { requestId, reason });
-  mainWindow.show();
-}
-
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -167,7 +136,9 @@ function createWindow() {
   });
 
   const webContents = mainWindow.webContents;
-  closeFlushState = { requested: false, allow: false, timer: null, requestId: null };
+  closeCoordinator = new CloseCoordinator({
+    send: (channel, payload) => { if (!webContents.isDestroyed()) webContents.send(channel, payload); },
+  });
   configureFrenchSpellChecker(webContents);
   webContents.on("context-menu", (event, params) => {
     if (!showSpellCheckerMenu(webContents, params)) return;
@@ -208,16 +179,16 @@ function createWindow() {
   });
 
   mainWindow.on("close", (event) => {
-    if (closeFlushState?.allow) return;
+    if (closeCoordinator?.allowed) return;
     event.preventDefault();
-    if (closeFlushState?.requested) return;
-    const requestId = String(++closeRequestCounter);
-    closeFlushState = { requested: true, allow: false, timer: null, requestId };
-    webContents.send("mindset:prepare-close", { requestId });
-    closeFlushState.timer = setTimeout(() => cancelWindowClose(requestId, "timeout"), 30000);
+    if (updateManager?.getState().status === "installing") return;
+    if (closeCoordinator?.pending) return;
+    closeCoordinator.request("close").then(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
+    }).catch(() => {});
   });
   mainWindow.on("unresponsive", async () => {
-    const requestId = closeFlushState?.requested ? closeFlushState.requestId : null;
+    const requestId = closeCoordinator?.pending?.requestId || null;
     if (!requestId || !mainWindow || mainWindow.isDestroyed()) return;
     const answer = await dialog.showMessageBox(mainWindow, {
       type: "warning",
@@ -229,14 +200,14 @@ function createWindow() {
       cancelId: 0,
       noLink: true,
     });
-    if (answer.response === 1 && closeFlushState?.requestId === requestId) mainWindow.destroy();
+    if (answer.response === 1 && closeCoordinator?.pending?.requestId === requestId) mainWindow.destroy();
   });
   webContents.on("render-process-gone", () => {
-    if (closeFlushState?.requested && mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
+    if (closeCoordinator?.pending && mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
   });
   mainWindow.on("closed", () => {
-    if (closeFlushState?.timer) clearTimeout(closeFlushState.timer);
-    closeFlushState = null;
+    closeCoordinator?.dispose();
+    closeCoordinator = null;
     mainWindow = null;
   });
 
@@ -247,100 +218,18 @@ function createWindow() {
   });
 }
 
-autoUpdater.on("checking-for-update", () => {
-  sendUpdateStatus({ status: "checking", percent: 0, message: "Recherche d'une mise a jour..." });
-});
-
-autoUpdater.on("update-available", (info) => {
-  sendUpdateStatus(updateAvailablePayload(info));
-});
-
-autoUpdater.on("update-not-available", (info) => {
-  sendUpdateStatus({
-    status: "not-available",
-    version: info.version,
-    percent: 0,
-    message: "MindSet est deja a jour.",
+for (const [channel, action] of Object.entries({
+  "mindset:updates:state": "getState",
+  "mindset:updates:check": "check",
+  "mindset:updates:download": "download",
+  "mindset:updates:install": "install",
+})) {
+  ipcMain.handle(channel, (event) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents
+      || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error("Fenêtre non autorisée.");
+    return updateManager[action]();
   });
-});
-
-autoUpdater.on("download-progress", (progress) => {
-  sendUpdateStatus({
-    status: "downloading",
-    percent: Math.round(progress.percent || 0),
-    message: `Telechargement : ${Math.round(progress.percent || 0)}%`,
-  });
-});
-
-autoUpdater.on("update-downloaded", (info) => {
-  sendUpdateStatus({
-    status: "downloaded",
-    version: info.version,
-    percent: 100,
-    message: "Mise a jour telechargee. Redemarre MindSet pour l'installer.",
-  });
-});
-
-autoUpdater.on("error", (error) => {
-  sendUpdateStatus({
-    status: "error",
-    message: updateMessage(error),
-  });
-});
-
-ipcMain.handle("mindset:updates:check", async () => {
-  if (!app.isPackaged) {
-    return {
-      status: "development",
-      message: "Les mises a jour se testent dans la version installee, pas dans le mode developpement.",
-    };
-  }
-
-  try {
-    const result = await autoUpdater.checkForUpdates();
-    if (result?.updateInfo?.version && result.updateInfo.version !== app.getVersion()) {
-      const payload = updateAvailablePayload(result.updateInfo);
-      updateState = { ...updateState, ...payload };
-      return payload;
-    }
-    return updateState.status === "available" ? updateState : null;
-  } catch (error) {
-    return { status: "error", message: updateMessage(error) };
-  }
-});
-
-ipcMain.handle("mindset:updates:download", async () => {
-  if (!app.isPackaged) {
-    return {
-      status: "development",
-      message: "Le telechargement de mise a jour se fait depuis l'app installee.",
-    };
-  }
-
-  try {
-    sendUpdateStatus({
-      status: "downloading",
-      percent: 0,
-      message: "Telechargement : 0%",
-    });
-    await autoUpdater.downloadUpdate();
-    return updateState.status === "downloaded" ? updateState : null;
-  } catch (error) {
-    return { status: "error", message: updateMessage(error) };
-  }
-});
-
-ipcMain.handle("mindset:updates:install", () => {
-  if (!app.isPackaged) {
-    return {
-      status: "development",
-      message: "L'installation de mise a jour se fait depuis l'app installee.",
-    };
-  }
-
-  autoUpdater.quitAndInstall(false, true);
-  return { status: "installing", message: "Installation de la mise a jour..." };
-});
+}
 
 ipcMain.handle("mindset:fonts:scan-folder", async () => {
   try {
@@ -367,18 +256,23 @@ ipcMain.on("mindset:close-ready", (event, result = {}) => {
     || mainWindow.isDestroyed()
     || event.sender !== mainWindow.webContents
     || event.senderFrame !== mainWindow.webContents.mainFrame
-    || !closeFlushState?.requested
+    || !closeCoordinator?.pending
   ) return;
   if (!result || typeof result !== "object") result = { ok: false };
-  if (String(result.requestId || "") !== closeFlushState.requestId) return;
-  if (result.ok !== true) {
-    cancelWindowClose(closeFlushState.requestId, "renderer-error");
-    return;
-  }
-  finishWindowClose();
+  closeCoordinator.acknowledge(result.requestId, result.ok === true);
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  updateManager = new UpdateManager({
+    updater: autoUpdater, installedVersion: app.getVersion(), isPackaged: app.isPackaged,
+    store: attemptStore(app.getPath("userData")), verifyInstaller,
+    prepareInstall: () => closeCoordinator.request("update"),
+    cancelInstall: () => {
+      if (closeCoordinator?.allowed || closeCoordinator?.pending?.purpose === "update") closeCoordinator.cancel("update-error");
+    },
+    publish: sendUpdateStatus,
+  });
+  await updateManager.initialize();
   createWindow();
 
   app.on("activate", () => {

@@ -1,3 +1,14 @@
+# 1.3.3 — Installation des mises à jour (en préparation)
+
+- Même parcours : rechercher, télécharger, redémarrer.
+- Sauvegarde des notes terminée avant le lancement de l’installation ; annulation si la sauvegarde échoue.
+- Vérification du fichier téléchargé et de sa signature Windows avant la fermeture.
+- Affichage de la version réellement installée et du résultat de l’installation au lancement suivant.
+- Aucune nouvelle tentative d’installation lors d’une fermeture ordinaire.
+- Publication réservée aux versions signées, avec contrôle de l’application, de l’installeur et du manifeste avant la mise en ligne.
+
+Cette version attend l’activation d’un certificat reconnu avant de pouvoir être distribuée.
+
 # 1.3.2 — Écriture fluide
 
 - Édition continue dans toutes les vues, sans découpage des paragraphes pendant la frappe.

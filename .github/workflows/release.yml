@@ -5,7 +5,7 @@ name: Publish Windows release
       tag:
         description: Existing version tag to build and publish
         required: true
-        default: v1.3.2
+        default: v1.3.3
         type: string
 permissions:
   contents: read
@@ -25,7 +25,7 @@ jobs:
         shell: pwsh
         run: |
           if ($env:RELEASE_TAG -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
-            throw 'Use an existing version tag such as v1.3.2.'
+            throw 'Use an existing version tag such as v1.3.3.'
           }
       - name: Check out tagged source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -42,14 +42,27 @@ jobs:
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           if ($env:RELEASE_TAG -cne "v$version") { throw 'Tag and package version differ.' }
-          foreach ($source in @('src/app.js', 'src/editor-blocks.js', 'src/editor-document.js', 'scripts/release.mjs')) {
+          foreach ($source in @('electron/main.js', 'electron/preload.js', 'src/app.js', 'src/editor-blocks.js', 'src/editor-document.js', 'scripts/release.mjs')) {
             node --check $source
             if ($LASTEXITCODE -ne 0) { throw "Syntax check failed: $source" }
           }
       - name: Install dependencies
         run: npm ci
-      - name: Build Windows installer
-        run: npm run dist -- --publish never
+      - name: Test update lifecycle and publication checks
+        run: npm test
+      - name: Build and verify signed Windows installer
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          SIGNING_PUBLISHER_NAME: ${{ vars.SIGNING_PUBLISHER_NAME }}
+        shell: pwsh
+        run: |
+          npm run dist:signed
+          if ($LASTEXITCODE -ne 0) { throw 'Signed build failed. Configure signing first; see docs/windows-signing.md.' }
+          node scripts/verify-windows-signatures.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Windows signature verification failed.' }
+          npm run verify:release
+          if ($LASTEXITCODE -ne 0) { throw 'Release verification failed.' }
       - name: Keep downloadable build artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -58,6 +71,7 @@ jobs:
             dist/*.exe
             dist/*.blockmap
             dist/latest.yml
+            dist/signature-verification.json
           compression-level: 0
           retention-days: 14
           if-no-files-found: error
@@ -80,6 +94,13 @@ jobs:
         with:
           name: MindSet-Windows-${{ inputs.tag }}
           path: dist
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install manifest verifier dependencies
+        run: npm ci --omit=dev --ignore-scripts
       - name: Verify and publish installer
         shell: bash
         env:
@@ -92,17 +113,7 @@ jobs:
             echo 'Tag and package version differ.' >&2
             exit 1
           fi
-          node <<'NODE'
-          const fs = require('node:fs');
-          const crypto = require('node:crypto');
-          const version = require('./package.json').version;
-          const manifest = fs.readFileSync('dist/latest.yml', 'utf8');
-          const file = `dist/MindSet-Setup-${version}.exe`;
-          const hash = crypto.createHash('sha512').update(fs.readFileSync(file)).digest('base64');
-          if (!manifest.split(/\r?\n/).includes(`version: ${version}`) || !manifest.includes(hash)) {
-            throw Error('Update manifest does not match installer.');
-          }
-          NODE
+          npm run verify:release
           if gh release view "$RELEASE_TAG" --json isDraft > "$RUNNER_TEMP/mindset-release.json"; then
             node -e 'if (!require(process.argv[1]).isDraft) throw Error("This version is already published.")' "$RUNNER_TEMP/mindset-release.json"
           else

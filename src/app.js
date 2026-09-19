@@ -2996,6 +2996,7 @@
     const percent = Number.isFinite(Number(payload.percent)) ? Number(payload.percent) : null;
     const messages = {
       idle: "Aucune recherche lancee.",
+      installed: "Mise à jour installée avec succès.",
       checking: "Recherche d'une mise a jour...",
       available: "Mise a jour trouvee. Tu peux la telecharger.",
       downloading: percent === null ? "Telechargement en cours..." : `Telechargement : ${Math.round(percent)}%`,
@@ -3009,6 +3010,7 @@
       status,
       percent,
       version: payload.version || "",
+      installedVersion: payload.installedVersion || "",
       message: payload.message || messages[status] || messages.idle,
     };
   }
@@ -3046,6 +3048,11 @@
     const message = panel.querySelector("[data-update-message]");
     if (message) message.textContent = updateStatus.message;
 
+    const installed = panel.querySelector("[data-installed-version]");
+    if (installed) {
+      installed.textContent = updateStatus.installedVersion ? `Version installée : ${updateStatus.installedVersion}` : "";
+      installed.hidden = !updateStatus.installedVersion;
+    }
     const version = panel.querySelector("[data-update-version]");
     if (version) {
       version.textContent = updateStatus.version ? `Version ${updateStatus.version}` : "";
@@ -3075,7 +3082,7 @@
   }
 
   function setUpdateStatus(payload) {
-    runtime.updateStatus = normalizeDesktopUpdateStatus(payload);
+    runtime.updateStatus = normalizeDesktopUpdateStatus({ installedVersion: runtime.updateStatus?.installedVersion, ...payload });
     paintUpdateStatus();
   }
 
@@ -3109,9 +3116,14 @@
   function bindDesktopUpdates() {
     const bridge = desktopBridge();
     if (!bridge?.onUpdateStatus) return;
+    let receivedUpdate = false;
     bridge.onUpdateStatus((payload) => {
+      receivedUpdate = true;
       setUpdateStatus(payload);
     });
+    bridge.getUpdateState?.().then((payload) => {
+      if (!receivedUpdate && payload) setUpdateStatus(payload);
+    }).catch(() => {});
   }
 
   function setActiveItem(box, id, event) {
@@ -6516,6 +6528,7 @@
               <section class="settings-section" id="settings-updates" data-settings-section data-update-panel data-update-status="${escapeHtml(updateStatus.status)}">
                 <h3>Mises a jour</h3>
                 <p class="settings-hint">${desktopReady ? "Les mises a jour seront recuperees depuis les releases GitHub de MindSet." : "Cette option apparait vraiment dans l'application Windows installee."}</p>
+                <p class="settings-hint" data-installed-version ${updateStatus.installedVersion ? "" : "hidden"}>${updateStatus.installedVersion ? `Version installée : ${escapeHtml(updateStatus.installedVersion)}` : ""}</p>
                 <div class="update-status-line">
                   <strong data-update-message>${escapeHtml(updateStatus.message)}</strong>
                   <small data-update-version ${updateStatus.version ? "" : "hidden"}>${updateStatus.version ? `Version ${escapeHtml(updateStatus.version)}` : ""}</small>

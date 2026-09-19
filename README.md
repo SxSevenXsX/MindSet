@@ -6,7 +6,8 @@ Application Windows de prise de notes locale : boîtes de projets, dossiers imbr
 
 - `npm install` puis `npm start` pour Electron.
 - `node scripts/static-server.mjs` puis ouvrir `http://127.0.0.1:4173` pour tester dans un navigateur.
-- `npm run dist -- --publish never` pour créer l’installeur Windows dans `dist/`.
+- `npm run dist -- --publish never` pour créer un installeur de développement dans `dist/`.
+- `npm test` pour vérifier le parcours de mise à jour et les contrôles de publication.
 
 ## Écriture — version 1.3.2
 
@@ -27,6 +28,6 @@ Ouvrir `http://127.0.0.1:4173/tests/editor-document.html` après avoir démarré
 
 ## Publication
 
-Mettre à jour `package.json`, `package-lock.json` et `CHANGELOG.md`, valider les changements, créer et pousser le tag correspondant (par exemple `v1.3.2`). Dans GitHub Actions, lancer **Publish Windows release** et renseigner ce tag. Le workflow vérifie la version, construit sous Windows, contrôle le manifeste de mise à jour et les trois fichiers distants, puis publie la release. Il refuse de remplacer une version déjà publiée.
+La version 1.3.3 est préparée et attend un certificat reconnu avant distribution. Les prochaines publications doivent être signées : application, installeur, horodatage et manifeste sont vérifiés avant mise en ligne.
 
-La commande locale `npm run release` reste disponible ; elle utilise les identifiants GitHub locaux sans les écrire dans le dépôt.
+Voir [la procédure de signature et de publication Windows](docs/windows-signing.md). La commande locale `npm run release` permet de signer depuis le poste du titulaire puis de publier sur GitHub. Le workflow **Publish Windows release** reste disponible avec une configuration de signature adaptée à GitHub Actions. Aucun de ces parcours ne publie une version non signée.
