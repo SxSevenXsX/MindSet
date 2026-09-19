@@ -4,11 +4,24 @@ La version 1.3.3 est préparée, mais n’est pas distribuée tant qu’un certi
 
 Le parcours de l’utilisateur reste **Rechercher → Télécharger → Redémarrer**. La signature intervient lors de la fabrication de la version. L’utilisateur qui installe une mise à jour n’a aucun compte de signature à créer.
 
+## Pourquoi une ancienne version pouvait fonctionner
+
+Windows n’exige pas systématiquement l’achat d’un certificat. [Smart App Control](https://support.microsoft.com/fr-fr/windows/security/threat-malware-protection/smart-app-control-frequently-asked-questions) peut autoriser un programme non signé quand son service de confiance le juge sûr. Un nouvel installeur constitue un nouveau fichier à évaluer ; en l’absence de verdict favorable et de signature valide, il peut être bloqué. Les journaux de l’incident confirment le refus de l’installeur 1.3.2, mais ne permettent pas de dater un éventuel changement de politique Windows ni d’expliquer le verdict des anciennes versions.
+
+Le contrôle obligatoire des signatures ajouté dans le code 1.3.3 est un choix de fiabilité du processus de publication. Cette version n’étant pas installée sur le poste concerné, ce nouveau contrôle n’est pas la cause de l’échec déjà observé. Une signature reconnue peut être fournie gratuitement dans certains programmes ; signature ne signifie pas nécessairement achat.
+
+## Pistes gratuites à examiner avant un achat
+
+- [SignPath Foundation](https://signpath.org/terms.html) propose la signature gratuite aux projets open source qu’elle accepte. Il faut notamment une licence compatible pour tous les composants, un projet publié et documenté, une réputation vérifiable, l’authentification multifacteur et une approbation de chaque version. MindSet n’est pas encore accepté. Le champ ISC de package.json ne remplace pas la vérification des licences et des conditions d’admission. Cette intégration nécessitera un parcours de construction adapté si la candidature est retenue.
+- Le [portail Microsoft d’analyse des fichiers](https://www.microsoft.com/en-us/wdsi/filesubmission) propose Smart App Control parmi les produits concernés. Un réexamen peut être demandé pour le fichier bloqué ; il ne garantit pas le déblocage, ni l’acceptation des versions futures. Vérifier la limite d’envoi affichée avant de transmettre l’installeur.
+
+Aucune demande externe n’a été déposée et aucune adhésion à ces services n’est présumée.
+
 ## Activation initiale du certificat
 
 Pour un développeur individuel en France, la configuration prévue utilise un certificat de signature de code accessible dans le magasin de certificats Windows, par exemple via le client SimplySign de Certum ou un support matériel compatible SignTool. Le certificat doit être délivré par une autorité reconnue et la clé privée doit rester chez son titulaire.
 
-[Certum Standard Code Signing](https://www.certum.eu/en/code-signing-certificates/) accepte les particuliers et affiche un prix à partir de 139 € (montant final, durée, taxes et conditions à vérifier avant toute commande). Le titulaire doit effectuer lui-même la validation d’identité et activer son moyen de signature. Aucun compte ni achat n’est créé par les scripts de ce dépôt.
+[Certum](https://shop.certum.eu/code-signing.html) accepte les particuliers, mais ses prix d’appel de 139 € en Standard et de 25 € en Open Source concernent un code pour des clients disposant déjà de la carte et du lecteur nécessaires. L’offre Open Source dans le cloud est affichée à partir de 49 € et indisponible lors de la vérification du 19 septembre 2026. Ces offres ne sont pas des droits de signature à vie : après expiration, signer de nouvelles versions demande une nouvelle période de validité. Le titulaire doit effectuer lui-même la validation d’identité et activer son moyen de signature. Aucun compte ni achat n’est créé par les scripts de ce dépôt.
 
 Le service [Microsoft Artifact Signing Public Trust](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart) ne prend actuellement en charge les particuliers qu’aux États-Unis et au Canada. Les offres dédiées aux projets open source ont leurs propres conditions d’éligibilité ; elles ne sont pas présumées acquises pour une application personnelle.
 
