@@ -1,0 +1,2 @@
+# Keep vendored browser assets byte-identical on Windows checkouts.
+src/vendor/* -text

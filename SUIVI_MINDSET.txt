@@ -409,3 +409,16 @@ Résultats vérifiés pour clôturer le lot :
   comme une mise à jour acceptée par Windows et n’a pas été installé.
 - Les fichiers du projet et de ce journal sont prêts à être committés et poussés.
   La confirmation du push, lorsqu’elle est obtenue, est ajoutée ci-dessous.
+
+Confirmation obtenue :
+- Commit des fonctions 1.3.4 : dc160f0, « Prepare 1.3.4 with portable boxes,
+  safe storage and single instance ».
+- Push de ce commit sur origin/main réussi ; dépôt GitHub mis à jour.
+- Une précision finale du journal accompagne ce lot. Les fichiers fournis par
+  DOMPurify conservent leurs octets de fin de ligne grâce à .gitattributes,
+  pour que leur contrôle fonctionne aussi après un nouveau clonage Windows.
+- Aucune nouvelle release ni aucun installeur n’a été publié. Aucun fichier
+  personnel ni sauvegarde de récupération n’a été envoyé à GitHub.
+- Blocage restant : distribution Windows acceptée sur le poste utilisateur,
+  puis validation réelle de la mise à jour en place et de la conservation des
+  données. Ce blocage est distinct des fonctions 1.3.4 déjà implémentées.
