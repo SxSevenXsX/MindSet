@@ -32,3 +32,31 @@ Vérifier également le collage enrichi et l’impression avec ses options avant
 ## Construction
 
 `node --check src/app.js`, `node --check src/editor-blocks.js`, `node --check src/editor-document.js`, puis `npm run dist -- --publish never`.
+
+## Sauvegardes et lancement — 1.3.4
+
+Tests Node : `npm test`. La suite couvre aussi l’intégrité des archives, les collisions, les audios manquants, les formats protégés, le stockage illisible et la remise au premier plan d’une instance existante.
+
+Ouvrir `/tests/archive-content.html` avec le serveur local : **6/6** contrôles du nettoyage des imports et de la conservation des mises en forme. La page ne lit pas les données de l’application.
+
+Parcours vérifiés le 19 septembre 2026, exclusivement sur des données fictives dans un profil Chromium distinct :
+
+- Import d’une boîte libre et d’une boîte protégée contenant notes, image intégrée, tableau, tâche, saut explicite et audio WAV.
+- Export de toutes les boîtes, puis comparaison des enregistrements audio : octets identiques, y compris le chiffré.
+- Réimport du même fichier : zéro boîte ajoutée, aucun écrasement, confirmation désactivée.
+- Mauvais code refusé ; bon code accepté et note importée déchiffrée.
+- Échec simulé de localStorage pendant la confirmation : aucune nouvelle boîte persistée ; seuls les nouveaux octets audio sont retirés, les anciens restent présents.
+- Stockage rendu illisible dans le profil de test : écran de protection, octets localStorage inchangés et audio encore présent après le délai du nettoyage initial.
+- Redémarrage du navigateur : boîtes conservées.
+- Ancienne suite de migration de l’éditeur : **15/15**.
+
+Parcours natif Electron vérifié avec `MINDSET_DEV_PROFILE` pointant vers un dossier de test sous `output/playwright/` :
+
+- Deux lancements réels : le second processus sort, la fenêtre réduite du premier est restaurée, une seule fenêtre reste présente.
+- Profil distinct de celui de l’application installée.
+- Le bouton de sauvegarde appelle l’enregistrement natif et produit un fichier valide. La boîte de dialogue a été remplacée par un choix de chemin de test pour automatiser ce contrôle.
+- L’annulation de cette boîte de dialogue affiche « Export annulé », sans succès mensonger.
+
+Les scénarios temporaires, captures et fichiers synthétiques se trouvent dans `output/playwright/`, exclu de Git. Ne jamais pointer ces scénarios vers un profil contenant des notes personnelles. Ces essais ne valident pas une installation signée ni le déblocage de Smart App Control : ce parcours reste à tester sur le vrai poste après disponibilité d’un installeur accepté par Windows.
+
+Compléments de fin de vérification : styles personnels et couleurs audio conservés ; annuler puis rétablir un import réussi ; le nœud racine du graphe revient effectivement dans le cadre après Recentrer. La suite Node finale compte **39 tests réussis**.

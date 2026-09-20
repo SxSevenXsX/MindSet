@@ -7,7 +7,21 @@ Application Windows de prise de notes locale : boîtes de projets, dossiers imbr
 - `npm install` puis `npm start` pour Electron.
 - `node scripts/static-server.mjs` puis ouvrir `http://127.0.0.1:4173` pour tester dans un navigateur.
 - `npm run dist -- --publish never` pour créer un installeur de développement dans `dist/`.
-- `npm test` pour vérifier le parcours de mise à jour et les contrôles de publication.
+- `npm test` pour vérifier les archives, le stockage, l’instance unique, le parcours de mise à jour et les contrôles de publication.
+
+## Boîtes et sauvegardes — version 1.3.4 en préparation
+
+L’accueil propose **Importer des boîtes** et **Sauvegarder toutes les boîtes**. Chaque carte possède aussi son bouton **Exporter**. Un fichier `.mindset` contient les boîtes, notes, images intégrées et audio ; les boîtes protégées restent chiffrées. Les préférences d’affichage et polices locales sont exclues. Limite : 256 Mo par fichier.
+
+L’import présente un résumé et ajoute uniquement les boîtes absentes. Une boîte ayant le même identifiant est conservée, sans remplacement. Le fichier est vérifié avant toute écriture. Un échec de stockage provoque le retrait des seuls nouveaux enregistrements audio. Un fichier non chiffré doit être conservé comme un document personnel.
+
+Le **Guide MindSet**, en bas de l’accueil, présente les fonctions et leurs limites. Il est ajouté aux espaces existants sans remplacer leur ancienne boîte de démarrage. Ses notes sont modifiables ; le bouton du guide le recrée s’il a été supprimé.
+
+Un second lancement de la nouvelle version ramène la fenêtre existante. Au premier passage depuis une ancienne version qui n’avait pas de verrou, fermer normalement toutes les anciennes fenêtres. `npm start` utilise `%APPDATA%/mindset-development` ; les tests peuvent choisir un profil distinct avec `MINDSET_DEV_PROFILE`. L’application installée conserve son profil habituel `%APPDATA%/mindset`.
+
+Si le stockage ne peut pas être lu, l’application suspend les écritures et le nettoyage audio. Elle propose de réessayer et, si disponibles, de copier les données illisibles pour un diagnostic local. Elle ne remplace pas ces données par une première installation.
+
+Le journal de travail et les actions restantes sont dans [SUIVI_MINDSET.txt](SUIVI_MINDSET.txt). Ne pas confondre une version préparée dans les sources avec une version publiée ou installée.
 
 ## Écriture — version 1.3.2
 
@@ -28,6 +42,6 @@ Ouvrir `http://127.0.0.1:4173/tests/editor-document.html` après avoir démarré
 
 ## Publication
 
-La version 1.3.3 est préparée et attend un certificat reconnu avant distribution. Les prochaines publications doivent être signées : application, installeur, horodatage et manifeste sont vérifiés avant mise en ligne.
+La version 1.3.4 est préparée et attend un certificat reconnu avant distribution. Les prochaines publications doivent être signées : application, installeur, horodatage et manifeste sont vérifiés avant mise en ligne.
 
 Voir [la procédure de signature et de publication Windows](docs/windows-signing.md). La commande locale `npm run release` permet de signer depuis le poste du titulaire puis de publier sur GitHub. Le workflow **Publish Windows release** reste disponible avec une configuration de signature adaptée à GitHub Actions. Aucun de ces parcours ne publie une version non signée.

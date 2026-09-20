@@ -1,3 +1,17 @@
+# 1.3.4 — Boîtes transportables et lancement fiable (en préparation)
+
+- Un second lancement ramène la fenêtre existante, y compris lorsqu’elle est réduite.
+- Le développement utilise un profil séparé de l’application installée.
+- Import `.mindset` à côté de « Nouvelle boîte », aperçu avant confirmation et conservation des boîtes déjà présentes.
+- Export d’une boîte ou de toutes les boîtes avec leur audio ; enregistrement natif sans fermer MindSet.
+- Chiffrement conservé, intégrité vérifiée, absence d’écrasement des enregistrements et retour arrière si la sauvegarde locale échoue.
+- Lecture du stockage protégée : aucun remplacement par un espace vide ni nettoyage audio si les données sont illisibles.
+- Guide MindSet organisé en cinq dossiers, séparé des projets sur l’accueil ; anciens contenus conservés.
+- Accueil plus lisible, bouton Recentrer dans la vue arbre.
+- Journal détaillé `SUIVI_MINDSET.txt` à la racine.
+
+Les préférences d’affichage et polices locales restent propres à l’ordinateur. Les fichiers `.mindset` sont limités à 256 Mo. Cette version inclut les corrections de mise à jour préparées en 1.3.3 ; aucun installeur 1.3.4 n’est encore publié. Le blocage Windows de l’ancien installeur n’est pas résolu par ces changements.
+
 # 1.3.3 — Installation des mises à jour (en préparation)
 
 - Même parcours : rechercher, télécharger, redémarrer.

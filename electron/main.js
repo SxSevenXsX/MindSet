@@ -5,10 +5,15 @@ const path = require("node:path");
 const { UpdateManager, attemptStore, updateMessage } = require("./update-manager");
 const { CloseCoordinator } = require("./close-coordinator");
 const { verifyInstaller } = require("./verify-installer");
+const { acquireSingleInstance } = require("./single-instance");
+
+// Development must never open or mutate the installed application's profile.
+if (!app.isPackaged) app.setPath("userData", path.resolve(process.env.MINDSET_DEV_PROFILE || path.join(app.getPath("appData"), "mindset-development")));
 
 let mainWindow = null;
 let updateManager = null;
 let closeCoordinator = null;
+const primaryInstance = acquireSingleInstance(app, () => mainWindow);
 
 autoUpdater.autoDownload = false;
 autoUpdater.setFeedURL({
@@ -262,7 +267,7 @@ ipcMain.on("mindset:close-ready", (event, result = {}) => {
   closeCoordinator.acknowledge(result.requestId, result.ok === true);
 });
 
-app.whenReady().then(async () => {
+if (primaryInstance) app.whenReady().then(async () => {
   updateManager = new UpdateManager({
     updater: autoUpdater, installedVersion: app.getVersion(), isPackaged: app.isPackaged,
     store: attemptStore(app.getPath("userData")), verifyInstaller,
@@ -278,6 +283,27 @@ app.whenReady().then(async () => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+ipcMain.handle("mindset:archive:save", async (event, payload) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents
+    || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error("Fenêtre non autorisée.");
+  if (!payload || typeof payload.contents !== "string" || Buffer.byteLength(payload.contents, "utf8") > 256 * 1024 * 1024) throw new Error("Sauvegarde invalide ou trop volumineuse.");
+  const name = String(payload.name || "MindSet").replace(/[^\p{L}\p{N} _.-]/gu, "_").slice(0, 100).replace(/\.mindset$/i, "") + ".mindset";
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: "Enregistrer la sauvegarde MindSet",
+    defaultPath: path.join(app.getPath("downloads"), name),
+    filters: [{ name: "Boîtes MindSet", extensions: ["mindset"] }],
+  });
+  if (result.canceled || !result.filePath) return { saved: false };
+  const temporary = result.filePath + `.writing-${process.pid}-${Date.now()}`;
+  try {
+    await fs.writeFile(temporary, payload.contents, { encoding: "utf8", flag: "wx" });
+    await fs.rename(temporary, result.filePath);
+    return { saved: true };
+  } finally {
+    await fs.unlink(temporary).catch(() => {});
+  }
 });
 
 app.on("window-all-closed", () => {

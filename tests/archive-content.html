@@ -1,0 +1,35 @@
+<!doctype html><html lang="fr"><meta charset="utf-8"><title>Contrôles du contenu importé</title><h1 id="summary">Tests en cours</h1><ul id="results"></ul>
+<script src="../src/vendor/purify.min.js"></script><script src="../src/box-archive.js"></script><script src="../src/archive-content.js"></script>
+<script>
+const tests=[];
+const check=(name,run)=>tests.push({name,run});
+const assert=value=>{if(!value)throw Error('Assertion échouée');};
+const root=html=>{const el=document.createElement('div');el.innerHTML=MindSetArchiveContent.cleanHtml(html);return el;};
+check('Scripts, événements, fenêtres intégrées et boutons de l’application retirés',()=>{
+ const el=root('<script>window.attacked=1<\/script><iframe src="https://example.invalid"></iframe><p onclick="window.attacked=1" data-action="delete-box">Texte</p><button>Action</button><svg onload="window.attacked=1"></svg>');
+ assert(!el.querySelector('script,iframe,svg,button,[onclick],[data-action]')&&!window.attacked&&el.textContent.includes('Texte'));
+});
+check('Les styles ne peuvent pas recouvrir l’application ni charger du CSS distant',()=>{
+ const el=root('<p style="position:fixed;inset:0;z-index:999999;background-image:url(https://example.invalid);color:rgb(15,107,88)">Texte</p>');
+ assert(!el.firstChild.style.position&&!el.firstChild.style.backgroundImage&&el.firstChild.style.color);
+});
+check('Titres, styles personnels, gras, couleurs et retours à la ligne conservés',()=>{
+ const el=root('<h1 class="ms-style-h1">Titre</h1><p class="ms-style-ps4" style="color: rgb(15, 107, 88)">Texte <strong>gras</strong><br>Suite</p>');
+ assert(el.querySelector('h1.ms-style-h1')&&el.querySelector('p.ms-style-ps4 strong')&&el.querySelector('br')&&el.querySelector('p').style.color);
+});
+check('Tâches, tableaux, images intégrées et sauts de page conservés',()=>{
+ const el=root('<ul class="check-list"><li data-checked="true">Oui</li></ul><hr class="note-page-break"><table><tr><td>Cellule</td></tr></table><img class="img-float-left" style="float:left" src="data:image/png;base64,AAAA">');
+ assert(el.querySelector('[data-checked="true"]')&&el.querySelector('.note-page-break').contentEditable==='false'&&el.querySelector('td').textContent==='Cellule'&&el.querySelector('img.img-float-left').style.float==='left');
+});
+check('Les liens exécutables et les classes de l’interface ne sont pas importés',()=>{
+ const el=root('<a href="javascript:alert(1)" class="modal-backdrop" id="app">Lien</a><img src="data:image/svg+xml;base64,AAAA">');
+ assert(!el.querySelector('[href],[id],.modal-backdrop')&&!el.querySelector('img').hasAttribute('src'));
+});
+check('Une boîte importée ne peut pas définir de propriétés cachées dans l’application',()=>{
+ const box=MindSetArchiveContent.cleanBox({id:'safe',name:'Test',passwordHash:'',root:{id:'root',type:'folder',title:'Test',children:[]},secretExtra:'drop'});
+ assert(!('secretExtra' in box));
+});
+let passed=0;
+for(const {name,run} of tests){const el=document.createElement('li');try{run();passed++;el.className='pass';el.textContent='✓ '+name;}catch(error){el.className='fail';el.textContent='✗ '+name+' : '+error.message;}document.querySelector('#results').append(el);}
+document.querySelector('#summary').textContent=`${passed} / ${tests.length} vérifications réussies`;
+</script></html>

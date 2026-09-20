@@ -1602,28 +1602,11 @@
   }
 
   function loadState() {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed.boxes)) {
-          if (parsed.currentBoxId) {
-            const active = parsed.boxes.find((box) => box.id === parsed.currentBoxId);
-            if (active && active.passwordHash) {
-              parsed.currentBoxId = null;
-            }
-          }
-          const normalized = normalizeStateShape(parsed);
-          normalized.currentBoxId = null;
-          return normalized;
-        }
-      } catch (error) {
-        console.warn("MindSet state reset", error);
-      }
-    }
-    const seeded = normalizeStateShape(createSeedState());
-    seeded.currentBoxId = null;
-    return seeded;
+    const result = MindSetStorage.read({ getItem: key => localStorage.getItem(key) }, STORAGE_KEY, normalizeStateShape, createSeedState);
+    runtime.storageFresh = !result.blocked && result.raw === null;
+    runtime.storageBlocked = result.blocked;
+    runtime.unreadableStorage = result.raw;
+    return result.state;
   }
 
   function saveState() {
@@ -1841,131 +1824,7 @@
   }
 
   function createSeedState() {
-    const createdAt = now();
-    const boxId = uid("box");
-    const rootId = uid("folder");
-    const quickId = uid("folder");
-    const ideasId = uid("folder");
-    const projectId = uid("folder");
-    const welcomeId = uid("note");
-    const visionId = uid("note");
-    const functionsId = uid("note");
-    const quickNoteId = uid("note");
-
-    return {
-      currentBoxId: null,
-      settings: {
-        theme: "light",
-        selectionColor: "#0f6b58",
-        todoColor: "#0f6b58",
-        rightPanelOpen: true,
-        leftPanelOpen: true,
-        lastTextColor: "#000000",
-        lastHighlightColor: "#fff0a8",
-        recentTextColors: [],
-        recentHighlightColors: [],
-        graphDirection: "up",
-        graphZoom: 1,
-        graphPanX: 0,
-        graphPanY: 0,
-        editorViewMode: "flow",
-        pageFlowMode: "continuous",
-        pageZoom: 1,
-        pageMarginPreset: "normal",
-        customPageMarginPresets: normalizePageCustomMarginPresets(),
-        pageSetup: normalizePageSetup({ sizeId: "a4", orientation: "portrait", margins: pageMarginPresets.normal.margins }, "normal"),
-        localFonts: [],
-        audioInputDeviceId: "",
-        audioIconColor: "#4b8bd4",
-      },
-      boxes: [
-        {
-          id: boxId,
-          name: "Projet MindSet",
-          passwordHash: "",
-          createdAt,
-          modifiedAt: createdAt,
-          activeItemId: welcomeId,
-          selectedIds: [welcomeId],
-          expandedIds: [rootId, quickId, ideasId, projectId],
-          viewMode: "tree",
-          sortMode: "custom",
-          customSortActive: false,
-          iconFolderId: rootId,
-          searchQuery: "",
-          bookmarkedIds: [welcomeId],
-          openTabIds: [welcomeId],
-          root: {
-            id: rootId,
-            type: "folder",
-            title: "Projet MindSet",
-            createdAt,
-            modifiedAt: createdAt,
-            children: [
-              {
-                id: quickId,
-                type: "folder",
-                title: "Notes rapides",
-                createdAt,
-                modifiedAt: createdAt,
-                children: [
-                  {
-                    id: quickNoteId,
-                    type: "note",
-                    title: "Capture du jour",
-                    createdAt,
-                    modifiedAt: createdAt,
-                    content: "<h2>Note rapide</h2><p>Une idée temporaire arrive ici avant d'être rangée dans la bonne branche.</p>",
-                  },
-                ],
-              },
-              {
-                id: ideasId,
-                type: "folder",
-                title: "Idées",
-                createdAt,
-                modifiedAt: createdAt,
-                children: [
-                  {
-                    id: projectId,
-                    type: "folder",
-                    title: "MindSet App",
-                    createdAt,
-                    modifiedAt: createdAt,
-                    children: [
-                      {
-                        id: visionId,
-                        type: "note",
-                        title: "Vision",
-                        createdAt,
-                        modifiedAt: createdAt,
-                        content: "<h1>MindSet</h1><p>Un espace local pour écrire vite, classer librement, et retrouver ses notes comme dans une sculpture mentale.</p><ul class=\"check-list\"><li>Boîtes par projet</li><li>Dossiers imbriqués</li><li>Vue arbre claire</li></ul>",
-                      },
-                      {
-                        id: functionsId,
-                        type: "note",
-                        title: "Fonctions à garder",
-                        createdAt,
-                        modifiedAt: createdAt,
-                        content: "<h2>Mini Word</h2><p>Garder les outils utiles : titres, couleurs, gras, italique, souligné, barré, surlignage et listes spéciales.</p><ul class=\"arrow-list\"><li>Rester rapide</li><li>Rester personnel</li></ul>",
-                      },
-                    ],
-                  },
-                ],
-              },
-              {
-                id: welcomeId,
-                type: "note",
-                title: "Accueil MindSet",
-                createdAt,
-                modifiedAt: createdAt,
-                content: "<h1>Bienvenue dans MindSet</h1><p>Cette première version sert à tester la sensation : une boîte, des dossiers, des notes, un éditeur et une vue arbre.</p><h2>Exemple de listes</h2><ul><li>Point classique</li></ul><ul class=\"dash-list\"><li>Tiret</li></ul><ul class=\"circle-list\"><li>Rond vide</li></ul><ul class=\"arrow-list\"><li>Flèche</li></ul><ul class=\"check-list\"><li>Case à remplir</li></ul><ul class=\"triangle-list\"><li>Triangle</li></ul><ul class=\"square-list\"><li>Carré simple</li></ul>",
-              },
-            ],
-          },
-        },
-      ],
-    };
+    return { currentBoxId: null, settings: {}, guideIntroduced: true, boxes: [MindSetGuide.create(uid, now)] };
   }
 
   function activeBox() {
@@ -2723,7 +2582,11 @@
       if (box.encrypted?.data) {
         const opened = await decryptBoxBlob(code, box.encrypted);
         if (!opened) return false;
-        const payload = JSON.parse(opened.payloadJson);
+        let payload = MindSetArchive.safeParse(opened.payloadJson);
+        if (box.archiveImported) {
+          const safe = MindSetArchiveContent.cleanBox({ ...payload, id: box.id, name: box.name, passwordHash: '' });
+          payload = protectedBoxPayload(safe);
+        }
         Object.assign(box, payload);
         normalizeUnlockedBoxShape(box);
         box.root.title = box.name;
@@ -2755,6 +2618,9 @@
       createdAt: box.createdAt,
       modifiedAt: box.modifiedAt,
       encrypted: blob,
+      archiveImported: box.archiveImported === true,
+      isGuide: box.isGuide === true,
+      guideVersion: Number.isInteger(box.guideVersion) ? box.guideVersion : 0,
     };
     Object.keys(box).forEach((key) => delete box[key]);
     Object.assign(box, keep);
@@ -2782,6 +2648,9 @@
       createdAt: box.createdAt,
       modifiedAt: box.modifiedAt,
       encrypted: blob,
+      archiveImported: box.archiveImported === true,
+      isGuide: box.isGuide === true,
+      guideVersion: Number.isInteger(box.guideVersion) ? box.guideVersion : 0,
     };
   }
 
@@ -2799,6 +2668,7 @@
   }
 
   function persistState(options = {}) {
+    if (runtime.storageBlocked) return false;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(stateForDisk()));
       runtime.storageError = false;
@@ -2891,6 +2761,7 @@
   }
 
   async function flushAppState() {
+    if (runtime.storageBlocked) return true;
     cancelDeferredEditorWork({ suppressIdleMs: 1000 });
     if (runtime.audioRecording && !(await awaitAudioRecordingStop({}, 5200))) {
       throw new Error("L'enregistrement audio ne s'est pas termine");
@@ -4147,7 +4018,139 @@
     }
   }
 
+  async function addImportedAudio(records) {
+    if (!records.length) return;
+    const db = await openAudioDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(AUDIO_STORE, 'readwrite');
+      records.forEach(record => tx.objectStore(AUDIO_STORE).add(MindSetArchive.decodeAudio(record)));
+      tx.oncomplete = resolve;
+      tx.onerror = tx.onabort = () => reject(tx.error || new Error('Import audio interrompu.'));
+    });
+  }
+
+  function archiveBusy(message) {
+    runtime.archiveBusy = true;
+    app.inert = true;
+    runtime.modal = { type: 'archive-busy', message };
+    render();
+  }
+
+  async function exportBoxes(boxId = null) {
+    if (runtime.archiveBusy || runtime.storageBlocked) return;
+    runtime.archiveBusy = true;
+    app.inert = true;
+    let locked = false;
+    try {
+      await flushAppState();
+      archiveBusy('Préparation des boîtes et de leurs enregistrements audio…');
+      locked = await lockAudioMutations();
+      if (!locked) throw new Error('Une opération audio est en cours. Réessaie dans un instant.');
+      const boxes = JSON.parse(JSON.stringify(state.boxes.filter(box => !boxId || box.id === boxId).map(boxForDisk)));
+      if (!boxes.length) throw new Error('Aucune boîte à exporter.');
+      const audio = [];
+      for (const box of boxes) {
+        let records = await audioClipsForBox(box.id);
+        if (box.root) {
+          const referenced = []; collectAudioClipIds(box.root, referenced);
+          const ids = new Set(referenced);
+          records = records.filter(record => ids.has(record.id));
+        }
+        audio.push(...records.map(MindSetArchive.encodeAudio));
+      }
+      const contents = await MindSetArchive.create({ boxes, audio });
+      unlockAudioMutations(); locked = false;
+      const label = boxId ? boxes[0].name : 'Toutes-les-boites';
+      const name = `MindSet-${label.replace(/[^\p{L}\p{N} _-]/gu, '_').slice(0, 60)}-${new Date().toISOString().slice(0, 10)}.mindset`;
+      if (window.mindsetDesktop?.saveArchive) {
+        const result = await window.mindsetDesktop.saveArchive({ name, contents });
+        setToast(result?.saved ? 'Sauvegarde enregistrée. Tes boîtes restent ouvertes dans MindSet.' : 'Export annulé.');
+      } else {
+        triggerFileDownload(new Blob([contents], { type: 'application/json' }), name);
+        setToast('Téléchargement lancé. Vérifie le fichier dans tes téléchargements.');
+      }
+    } catch (error) {
+      setToast(`Export impossible : ${error.message || 'erreur de lecture.'}`);
+    } finally {
+      if (locked) unlockAudioMutations();
+      runtime.archiveBusy = false; app.inert = false; runtime.modal = null; render();
+    }
+  }
+
+  function chooseBoxArchive() {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = '.mindset,application/json';
+    input.addEventListener('change', async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      archiveBusy('Vérification de la sauvegarde…');
+      try {
+        if (file.size > MindSetArchive.MAX_BYTES) throw new Error('Fichier trop volumineux (256 Mo maximum).');
+        const archive = await MindSetArchive.parse(await file.text());
+        const plan = MindSetArchive.planImport(archive.payload, state.boxes, await allAudioClipKeysByBox());
+        runtime.modal = { type: 'archive-preview', archive, plan, fileName: file.name };
+      } catch (error) {
+        runtime.modal = null;
+        setToast(`Import impossible : ${error.message || 'fichier illisible.'}`);
+      } finally {
+        runtime.archiveBusy = false; app.inert = false; render();
+      }
+    });
+    input.click();
+  }
+
+  async function confirmBoxImport() {
+    if (runtime.modal?.type !== 'archive-preview' || runtime.archiveBusy) return;
+    const archive = runtime.modal.archive;
+    let locked = false, inserted = false, committed = false, plan;
+    const previousBoxes = state.boxes;
+    archiveBusy('Import des boîtes et de leur audio…');
+    try {
+      await flushAppState();
+      locked = await lockAudioMutations();
+      if (!locked) throw new Error('Une opération audio est en cours. Réessaie dans un instant.');
+      plan = MindSetArchive.planImport(archive.payload, state.boxes, await allAudioClipKeysByBox());
+      const boxes = plan.boxes.map(MindSetArchiveContent.cleanBox);
+      boxes.forEach(normalizeUnlockedBoxShape);
+      const historyEntry = { label: 'Importer des boîtes', snapshot: stateSnapshot() };
+      await addImportedAudio(plan.audio); inserted = true;
+      state.boxes = [...previousBoxes, ...boxes];
+      if (!persistState()) throw new Error('Le stockage local ne permet pas de conserver ces boîtes. Libère de la place puis réessaie.');
+      committed = true;
+      runtime.undoStack.push(historyEntry);
+      if (runtime.undoStack.length > 80) runtime.undoStack.shift();
+      runtime.redoStack = [];
+      setToast(`${boxes.length} boîte${boxes.length > 1 ? 's' : ''} importée${boxes.length > 1 ? 's' : ''}. ${plan.skipped ? `${plan.skipped} déjà présente(s), conservée(s).` : ''}`);
+    } catch (error) {
+      if (!committed) {
+        state.boxes = previousBoxes;
+        if (inserted) await audioDeleteClips(plan.audio.map(record => record.id)).catch(() => {});
+      }
+      setToast(`Import impossible : ${error.message || 'aucune boîte ajoutée.'}`);
+    } finally {
+      if (locked) unlockAudioMutations();
+      runtime.archiveBusy = false; app.inert = false; runtime.modal = null; render();
+    }
+  }
+
+  function openGuide() {
+    let guide = state.boxes.find(box => box.isGuide);
+    if (!guide) {
+      guide = MindSetGuide.create(uid, now);
+      state.boxes.push(guide);
+      saveState();
+    }
+    switchBoxById(guide.id);
+  }
+
+
   function renderLobby() {
+    if (runtime.storageBlocked) return `<section class="lobby"><div class="lobby-inner storage-warning" role="alert">
+      <h1>Ton espace n’a pas pu être lu</h1><p>MindSet a suspendu les modifications pour préserver tes données. Aucun nouvel espace n’a été enregistré par-dessus.</p>
+      <p>Ferme les autres anciennes fenêtres MindSet puis réessaie. Ne désinstalle pas l’application et ne supprime pas ses données.</p>
+      <button class="button" data-action="retry-storage">Réessayer</button>
+      ${runtime.unreadableStorage ? '<button class="ghost-button" data-action="download-storage">Copier les données pour diagnostic</button>' : ''}
+    </div></section>${renderToast()}`;
     return `
       <section class="lobby">
         <div class="lobby-inner">
@@ -4157,11 +4160,21 @@
               <span class="lobby-count">${state.boxes.length} boite${state.boxes.length > 1 ? "s" : ""}</span>
               <p>Choisis une boîte ou crée un nouvel espace pour un projet, une idée, un cours ou une zone de vie.</p>
             </div>
-            <button class="button" data-action="create-box-modal">${icon("plus")} Nouvelle boîte</button>
+            <div class="lobby-actions">
+              <button class="button" data-action="create-box-modal">${icon("plus")} Nouvelle boîte</button>
+              <button class="ghost-button" data-action="import-boxes">Importer des boîtes</button>
+              <button class="ghost-button" data-action="export-boxes">Sauvegarder toutes les boîtes</button>
+            </div>
           </div>
           <div class="box-grid">
-            ${state.boxes.map(renderBoxCardV2).join("")}
+            ${state.boxes.filter(box => !box.isGuide).map(renderBoxCardV2).join("") || '<div class="lobby-empty"><h2>Un espace pour tes idées</h2><p>Crée ta première boîte ou importe une sauvegarde MindSet.</p></div>'}
           </div>
+          <section class="lobby-guide" aria-label="Aide et guide">
+            <div class="lobby-guide-heading"><div><h2>Pour bien commencer</h2><p>Écriture, organisation, audio et sauvegardes : tout est dans le guide.</p></div>
+              <button class="ghost-button" data-action="open-guide">Guide MindSet</button></div>
+            <div class="box-grid">${state.boxes.filter(box => box.isGuide).map(renderBoxCardV2).join("")}</div>
+          </section>
+          <p class="lobby-backup-hint">Les fichiers .mindset conservent les boîtes et leur audio. Les préférences d’affichage restent propres à cet ordinateur.</p>
         </div>
       </section>
       ${renderBoxContextMenu()}
@@ -4207,6 +4220,7 @@
         </div>
         <div class="box-card-footer">
           <span class="box-protection-status ${protectedBox ? "is-protected" : "is-unprotected"}">${protectedBox ? (box.encrypted || sealed ? "Chiffré" : "Protégé") : "Non protégé"}</span>
+          <button class="ghost-button tiny-button" data-action="export-box" data-box-id="${box.id}" aria-label="Exporter ${escapeHtml(box.name)}">Exporter</button>
           <button class="button" data-action="open-box" data-box-id="${box.id}">Ouvrir</button>
         </div>
       </article>
@@ -5409,6 +5423,7 @@
   // inspectables (deverrouillees) — on ne touche jamais aux clips d'une boite
   // verrouillee dont on ne connait pas l'arbre.
   async function garbageCollectAudio() {
+    if (runtime.storageBlocked || runtime.storageError) return;
     if (!window.indexedDB) return;
     const unprotectedBoxIds = state.boxes
       .filter((box) => box.root && !box.passwordHash)
@@ -5838,6 +5853,7 @@
             </div>
           </div>
           <div class="graph-control-group" aria-label="Zoom du graphe">
+            <button class="ghost-button tiny-button" data-action="graph-recenter">Recentrer</button>
             <button class="tool-button" data-action="graph-zoom-out" data-tooltip="Dezoomer" aria-label="Dezoomer">${icon("zoomOut")}</button>
             <button class="graph-zoom-value" data-action="graph-zoom-reset" data-graph-zoom-label data-tooltip="Reinitialiser le zoom" aria-label="Reinitialiser le zoom">${graphZoomLabel(zoom)}</button>
             <button class="tool-button" data-action="graph-zoom-in" data-tooltip="Zoomer" aria-label="Zoomer">${icon("zoomIn")}</button>
@@ -5991,6 +6007,18 @@
 
   function renderModal() {
     if (!runtime.modal) return "";
+    if (runtime.modal.type === 'archive-busy') return `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="Sauvegarde" aria-busy="true"><div class="modal-body"><h2>Un instant…</h2><p role="status">${escapeHtml(runtime.modal.message)}</p></div></section></div>`;
+    if (runtime.modal.type === 'archive-preview') {
+      const { plan, fileName } = runtime.modal;
+      return `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="import-title">
+        <div class="modal-head"><h2 id="import-title">Importer des boîtes</h2><button class="icon-button" data-action="close-modal" aria-label="Fermer">${icon('close')}</button></div>
+        <div class="modal-body archive-summary"><p>${escapeHtml(fileName)}</p>
+          <p><strong>${plan.boxes.length} boîte(s) à ajouter</strong> · ${plan.audio.length} clip(s) audio.</p>
+          <ul>${plan.boxes.map(box => `<li>${escapeHtml(box.name)}${box.passwordHash ? ' · protégée par code' : ''}</li>`).join('')}</ul>
+          <p>${plan.skipped} boîte(s) déjà présente(s), conservée(s) sans modification. Aucun contenu existant ne sera remplacé.</p>
+        </div><div class="modal-actions"><button class="ghost-button" data-action="close-modal">Annuler</button><button class="button" data-action="confirm-box-import" ${plan.boxes.length ? '' : 'disabled'}>Importer ${plan.boxes.length} boîte(s)</button></div>
+      </section></div>`;
+    }
     if (runtime.modal.type === "create-box") {
       return `
         <div class="modal-backdrop">
@@ -7444,6 +7472,28 @@
     event.preventDefault();
     event.stopPropagation();
     const action = event.currentTarget.dataset.action;
+    if (runtime.archiveBusy) return;
+    if (action === 'retry-storage') { window.location.reload(); return; }
+    if (action === 'download-storage') { triggerFileDownload(new Blob([runtime.unreadableStorage], { type: 'application/json' }), 'MindSet-diagnostic-local.json'); return; }
+    if (runtime.storageBlocked) return;
+    if (action === 'export-boxes' || action === 'export-box') { exportBoxes(event.currentTarget.dataset.boxId || null); return; }
+    if (action === 'import-boxes') { chooseBoxArchive(); return; }
+    if (action === 'confirm-box-import') { confirmBoxImport(); return; }
+    if (action === 'open-guide') { openGuide(); return; }
+    if (action === 'graph-recenter') {
+      state.settings.graphPanX = 0; state.settings.graphPanY = 0; state.settings.graphZoom = 1;
+      saveState(); render();
+      const canvas = app.querySelector('[data-graph-canvas]');
+      if (canvas) requestAnimationFrame(() => {
+        const root = canvas.querySelector('.graph-node.root');
+        if (!root) return;
+        const area = canvas.getBoundingClientRect();
+        const node = root.getBoundingClientRect();
+        canvas.scrollLeft += node.left + node.width / 2 - area.left - canvas.clientWidth / 2;
+        canvas.scrollTop += node.top + node.height / 2 - area.top - canvas.clientHeight / 2;
+      });
+      return;
+    }
     const box = activeBox();
 
     if (action === "create-box-modal") {
@@ -7843,6 +7893,7 @@
   }
 
   async function syncDesktopFontFolder(options = {}) {
+    if (runtime.storageBlocked) return;
     const bridge = desktopBridge();
     if (!bridge?.scanFontsFolder) return false;
     try {
@@ -11975,6 +12026,7 @@
   });
 
   document.addEventListener("keydown", (event) => {
+    if (runtime.archiveBusy || runtime.storageBlocked) return;
     if (event.defaultPrevented) return;
     const editingTarget = editableTarget(event.target);
     const editingEditor = editingTarget?.closest?.("[data-note-editor]");
@@ -12071,6 +12123,7 @@
   });
 
   window.addEventListener("popstate", (event) => {
+    if (runtime.archiveBusy || runtime.storageBlocked) return;
     if (event.state?.mindsetNav) {
       applyNavigationSnapshot(event.state.mindsetNav);
     } else {
@@ -12096,6 +12149,12 @@
   window.addEventListener("pagehide", stopAudioForPageExit);
   window.addEventListener("beforeunload", stopAudioForPageExit);
 
+  if (!runtime.storageBlocked && !state.guideIntroduced) {
+    if (!state.boxes.some(box => box.isGuide)) state.boxes.push(MindSetGuide.create(uid, now));
+    state.guideIntroduced = true;
+    persistState();
+  }
+  if (runtime.storageFresh) persistState();
   bindDesktopUpdates();
   bindDesktopCloseHandshake();
   render();

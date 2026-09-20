@@ -26,7 +26,9 @@ function safePath(urlPath) {
   const candidate = normalize(join(root, decoded === "/" ? "index.html" : decoded));
   const fromRoot = relative(root, candidate);
   const escapesRoot = fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot);
-  return escapesRoot ? null : candidate;
+  const publicPath = fromRoot.split(sep).join("/");
+  const allowed = publicPath === "index.html" || /^(src|assets|tests)\//.test(publicPath);
+  return escapesRoot || !allowed ? null : candidate;
 }
 
 createServer((request, response) => {

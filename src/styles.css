@@ -4540,3 +4540,27 @@ button:disabled {
 .audio-clip.is-dragging { opacity: 0.5; }
 .audio-clip.drop-before { box-shadow: 0 -3px 0 -1px var(--accent); }
 .audio-clip.drop-after { box-shadow: 0 3px 0 -1px var(--accent); }
+/* Backup actions remain available on the home screen without crowding the cards. */
+.lobby-header { align-items: flex-start; gap: 28px; }
+.lobby-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; max-width: 470px; flex-shrink: 0; }
+.lobby-actions .button, .lobby-actions .ghost-button { white-space: nowrap; }
+.lobby-guide { border-top: 1px solid var(--border); margin-top: 42px; padding-top: 26px; }
+.lobby-guide-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 18px; }
+.lobby-guide-heading h2 { font-size: 17px; margin: 0 0 6px; }
+.lobby-guide-heading p, .lobby-backup-hint, .lobby-empty p { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 0; }
+.lobby-backup-hint { margin-top: 26px; }
+.lobby-empty { grid-column: 1 / -1; border: 1px dashed var(--border); border-radius: 14px; padding: 30px; }
+.lobby-empty h2 { font-size: 20px; font-weight: 550; margin: 0 0 8px; }
+.box-card-footer { gap: 8px; }
+.box-card-footer .box-protection-status { margin-right: auto; }
+.archive-summary { overflow: auto; max-height: 55vh; overflow-wrap: anywhere; }
+.archive-summary li { margin: 7px 0; }
+.storage-warning { max-width: 760px; line-height: 1.7; }
+.storage-warning .ghost-button { margin-left: 10px; }
+@media (max-width: 1000px) {
+  .lobby-header { flex-direction: column; }
+  .lobby-actions { justify-content: flex-start; max-width: none; }
+}
+
+.box-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.box-protection-status.is-unprotected { color: var(--muted); }

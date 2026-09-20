@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("mindsetDesktop", {
   isDesktop: true,
+  saveArchive: (payload) => ipcRenderer.invoke("mindset:archive:save", payload),
   getUpdateState: () => ipcRenderer.invoke("mindset:updates:state"),
   checkForUpdates: () => ipcRenderer.invoke("mindset:updates:check"),
   downloadUpdate: () => ipcRenderer.invoke("mindset:updates:download"),

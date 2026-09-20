@@ -1,6 +1,6 @@
 # Signer et publier MindSet pour Windows
 
-La version 1.3.3 est préparée, mais n’est pas distribuée tant qu’un certificat de signature de code reconnu n’a pas été activé. Les versions précédentes étaient non signées ; sur un ordinateur où Smart App Control les bloque, accepter la demande d’administration ne suffit pas à les installer.
+La version 1.3.4 est préparée (y compris les corrections 1.3.3), mais n’est pas distribuée tant qu’un certificat de signature de code reconnu n’a pas été activé. Les versions précédentes étaient non signées ; sur un ordinateur où Smart App Control les bloque, accepter la demande d’administration ne suffit pas à les installer.
 
 Le parcours de l’utilisateur reste **Rechercher → Télécharger → Redémarrer**. La signature intervient lors de la fabrication de la version. L’utilisateur qui installe une mise à jour n’a aucun compte de signature à créer.
 
