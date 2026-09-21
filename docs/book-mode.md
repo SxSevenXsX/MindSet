@@ -32,3 +32,5 @@ Ajouter le titre/date/heure à l’export prend de la place : les coupures peuve
 - Les résultats PDF et cartes des paragraphes de cette suite se trouvent sous `output/book-tests`, exclu de Git et des fichiers distribués. Comparer chaque marqueur et chaque numéro de page avec un lecteur PDF, puis examiner visuellement les feuilles.
 
 Le fichier `SUIVI_MINDSET.txt` consigne les résultats réellement obtenus et les limites restantes. Le guide ajoute son nouveau chapitre une seule fois, sans remplacer les notes déjà modifiées par l’utilisateur.
+
+Après la suite Electron, `python tests/verify-book-pdfs.py` (module `pypdf` requis) vérifie les marqueurs page par page, les dimensions, l’image intégrée et l’absence de texte indicatif sur une page vide.

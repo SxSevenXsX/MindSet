@@ -563,3 +563,29 @@ Clôture des contrôles locaux 1.3.5 :
   réussis à nouveau avec cette version, sur profil séparé.
 - Sources prêtes pour validation Git ; publication via le parcours explicite
   gratuit. La confirmation distante sera ajoutée après retour de GitHub.
+
+PUBLICATION 1.3.5 CONFIRMÉE
+---------------------------
+- Commit des sources : d2531f1, « Add real book pages, stable boundary editing
+  and free personal releases ». Poussé sur origin/main.
+- Tag v1.3.5 créé sur ce commit et poussé, sans déplacer un ancien tag.
+- Publication terminée le 21 septembre 2026 à 03:31:30 UTC
+  (20 septembre au soir dans le fuseau de cette session).
+- Release publique : https://github.com/SxSevenXsX/MindSet/releases/tag/v1.3.5
+- Installeur : https://github.com/SxSevenXsX/MindSet/releases/download/v1.3.5/MindSet-Setup-1.3.5.exe
+- Construction finale NSIS réussie ; 47 tests Node réussis dans la commande de
+  publication. Application et installeur inspectés comme NotSigned, en mode
+  personnel gratuit explicite ; aucune signature invalide acceptée.
+- API GitHub : v1.3.5 est la dernière release, publiée et non en brouillon.
+- Trois fichiers distants vérifiés (tailles et SHA-256 fournis par GitHub) :
+  MindSet-Setup-1.3.5.exe : 105 152 667 octets ;
+  MindSet-Setup-1.3.5.exe.blockmap : 109 489 octets ; latest.yml : 343 octets.
+- Le lien public de l’installeur répond HTTP 200. Le manifeste public renvoie
+  version 1.3.5 et la bonne empreinte SHA-512 de l’installeur contrôlé.
+- Le parcours conseillé est Rechercher → Télécharger → Redémarrer, sans
+  désinstallation préalable. Le lien direct reste une autre possibilité.
+- Tests PDF désormais reproductibles avec tests/verify-book-pdfs.py après la
+  suite Electron ; 100/100 et 64/64 marqueurs, une image intégrée et une feuille
+  vide contenant seulement son numéro sont vérifiés automatiquement.
+- L’agent n’a pas installé cette version sur le profil personnel. La réussite
+  de cette dernière étape reste à constater après l’action de l’utilisateur.
