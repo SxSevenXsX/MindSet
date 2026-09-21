@@ -257,7 +257,8 @@
       if (!menu.contains(event.target) && !editor.contains(event.target)) close();
     });
     let frame = 0;
-    function followSelection() {
+    function followSelection(event) {
+      if (event?.type === "keyup" && event.key === "Backspace" && window.MindSetEditorBoundary?.atStart(editor)) return;
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         if (!editor.isConnected || document.activeElement !== editor) return;
@@ -266,7 +267,7 @@
         const range = selection.getRangeAt(0);
         let rect = range.getBoundingClientRect();
         if (!rect.height) rect = blockAtCaret()?.getBoundingClientRect();
-        const scroller = editor.closest(".content-area");
+        const scroller = editor.closest("[data-book-viewport], [data-page-viewport], .content-area");
         if (rect && scroller) {
           const bounds = scroller.getBoundingClientRect();
           const toolbar = scroller.querySelector(".editor-toolbar")?.getBoundingClientRect();

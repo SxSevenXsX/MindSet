@@ -73,9 +73,9 @@ test('runtime rejects a changed download before attempting signature verificatio
   await assert.rejects(verifyInstaller(path.join(f.dir, f.file), f.manifest), /a changé/);
 });
 
-test('Windows rejects an unsigned fixture without executing it', { skip: process.platform !== 'win32' }, async t => {
+test('Windows refuses a malformed executable without running it', { skip: process.platform !== 'win32' }, async t => {
   const f = fixture(t);
-  await assert.rejects(verifyInstaller(path.join(f.dir, f.file), f.manifest), { code: 'ERR_UPDATE_UNSIGNED' });
+  await assert.rejects(verifyInstaller(path.join(f.dir, f.file), f.manifest), { code: 'ERR_UPDATE_SIGNATURE_INVALID' });
 });
 
 test('installation receipt survives process restart and can be replaced and cleared', async t => {
@@ -88,4 +88,25 @@ test('installation receipt survives process restart and can be replaced and clea
   assert.equal((await store.read()).version, '1.3.4');
   await store.clear();
   assert.equal(await store.read(), null);
+});
+
+
+test('free releases require explicit unsigned mode and matching inspected artifacts', t => {
+  const f=fixture(t); f.report.mode='unsigned';
+  for(const file of f.report.files) Object.assign(file,{status:'NotSigned',publisher:'',thumbprint:'',timestamped:false});
+  fs.writeFileSync(path.join(f.dir,'signature-verification.json'),JSON.stringify(f.report));
+  assert.throws(()=>verifyRelease(f.dir,f.version),/signatures/);
+  assert.equal(verifyRelease(f.dir,f.version,{requireSignature:false}).length,3);
+  f.report.files[1].status='HashMismatch';fs.writeFileSync(path.join(f.dir,'signature-verification.json'),JSON.stringify(f.report));
+  assert.throws(()=>verifyRelease(f.dir,f.version,{requireSignature:false}),/signatures/);
+});
+test('an invalid present signature is rejected even for a personal build',async t=>{
+  const f=fixture(t);
+  for(const status of ['HashMismatch','NotTrusted','UnknownError']) await assert.rejects(verifyInstaller(path.join(f.dir,f.file),f.manifest,{signatureReader:async()=>({status})}),{code:'ERR_UPDATE_SIGNATURE_INVALID'});
+});
+
+test('an absent signature is allowed only for the personal build policy',async t=>{
+ const f=fixture(t),signatureReader=async()=>({status:'NotSigned'});
+ await verifyInstaller(path.join(f.dir,f.file),f.manifest,{signatureReader});
+ await assert.rejects(verifyInstaller(path.join(f.dir,f.file),f.manifest,{signatureReader,requireSignature:true}),{code:'ERR_UPDATE_UNSIGNED'});
 });

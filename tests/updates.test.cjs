@@ -72,7 +72,7 @@ test('repeated checking preserves an already downloaded installer', async () => 
   assert.deepEqual(f.calls, ['check', 'download']);
 });
 
-test('does not close or run an unsigned installer', async () => {
+test('does not close or run an installer rejected by verification', async () => {
   const error = Object.assign(new Error('unsigned'), { code: 'ERR_UPDATE_UNSIGNED' });
   const f = fixture({ verifyInstaller: async () => { throw error; } });
   await ready(f);

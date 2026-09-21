@@ -422,3 +422,144 @@ Confirmation obtenue :
 - Blocage restant : distribution Windows acceptée sur le poste utilisateur,
   puis validation réelle de la mise à jour en place et de la conservation des
   données. Ce blocage est distinct des fonctions 1.3.4 déjà implémentées.
+
+INTERVENTION DU 20–21 SEPTEMBRE 2026 — VERSION 1.3.5
+===================================================
+Ce chapitre actualise les conclusions précédentes ; les anciens chapitres sont
+conservés comme historique, pas comme description de l’état courant.
+
+Demande et précisions de l’utilisateur
+------------------------------------
+- La mise à jour a finalement fonctionné. L’utilisateur pense que le passage
+  depuis une boîte protégée a aidé. Cette corrélation n’est pas une cause prouvée.
+- Le package de l’application Windows installée a été lu sans le modifier :
+  version 1.3.2 confirmée. Il n’est donc plus exact de dire que ce poste est
+  toujours bloqué sur 1.2.3 ou que l’installation de 1.3.2 est impossible.
+- Le menu / fonctionne. Le défaut prioritaire restant est le déplacement de
+  la page lorsqu’on appuie sur Retour arrière au caractère zéro de la note.
+- « Tableau coupé en 2 » doit devenir « Mode livre », avec de vraies feuilles,
+  A4 par défaut, formats prédéfinis et dimensions personnalisées.
+- Précision de l’utilisateur : remplissage successif des pages, zoom comme Word
+  permettant une, deux, trois ou quatre feuilles, et non un simple livre limité
+  à deux zones indépendantes. Le document peut avoir bien plus de quatre pages.
+- Conserver la structure de MindSet. Discuter toute nouvelle idée de fonction
+  avec l’utilisateur avant de la développer. Aucun ajout de fonctions annexes
+  (IA, synchronisation, historique de versions, abonnement…) dans ce lot.
+
+Corrections et fonctionnement implémentés
+-----------------------------------------
+1. Limite du document : contrôle du début absolu dans editor-boundary.js,
+   appliqué au clavier et aux événements beforeinput. Aucune suppression ni
+   transformation du premier bloc quand il n’existe rien avant le curseur.
+   Suppr vers l’avant, suppression d’une sélection, suppression d’une ligne
+   vide précédente et saisie avec composition conservent leur fonctionnement.
+   Deuxième cause identifiée : editor-blocks.js recentrait le curseur au
+   relâchement de chaque touche, même après un Retour arrière annulé. Ce suivi
+   ignore maintenant le Retour arrière sans effet et vise le bon défilement.
+2. Mode livre : un seul éditeur et un seul texte continu. Fragmentation native
+   du moteur Electron 43 / Chromium 150, avec column-height et column-wrap.
+   Les éléments HTML ne sont pas découpés ou déplacés pendant la frappe.
+   Les feuilles, ombres, numéros et emplacements vides sont hors du contenu.
+3. A4 et deux feuilles par défaut. Sélecteur 1/2/3/4, boutons + et −, pages
+   disposées en rangées et défilement vertical pour les suivantes. Le zoom est
+   une transformation visuelle ; il ne change ni les dimensions imprimées,
+   ni les mots, ni les coupures. La hauteur visible est limitée à une rangée
+   quand celle-ci tient à l’écran. La frappe garde le curseur visible.
+4. Formats A4, A5, A6, A3, Letter US, Legal US, Executive, Poche 11 × 18 cm.
+   Format personnalisé : 8 à 60 cm, portrait/paysage, quatre marges réglables,
+   avec au moins 4 cm disponibles en largeur et en hauteur pour le texte.
+5. Le format est stocké dans note.bookSetup et accompagne la note, y compris
+   dans les boîtes protégées et les archives .mindset. Le zoom reste local.
+   Le nettoyage des imports conserve aussi les espacements des paragraphes.
+6. Le réglage historique split est migré vers book. L’écriture simple et la vue
+   papier continue restent disponibles. Les titres sont dépliés en mode livre.
+   Le papier reste lisible en thème sombre, avec les couleurs de texte choisies
+   pour l’impression plutôt que les couleurs claires de l’interface sombre.
+7. PDF : même typographie et mêmes marges que l’éditeur. Génération native dans
+   une fenêtre cachée, séparée, sans Node, sans pont privilégié ni JavaScript,
+   avec permissions refusées et accès aux fichiers locaux bloqué. Format CSS
+   respecté ; aperçu puis bouton d’enregistrement existant. Maximum 32 Mo de
+   HTML et 30 secondes de préparation, erreurs explicites, un seul PDF à la fois.
+   Les images intégrées sont conservées. Les sauts Ctrl + Entrée deviennent de
+   vraies coupures. Les en-têtes de tableau ne sont pas répétés : cela évite
+   un décalage des lignes entre la fragmentation à l’écran et celle du PDF.
+8. Guide version 2 : ajout du dossier « 06 · Mode livre » et de trois notes.
+   L’actualisation ajoute ce chapitre une seule fois ; elle ne remplace aucun
+   texte existant. Un guide chiffré est actualisé après son déverrouillage.
+   Documentation technique : docs/book-mode.md. README et CHANGELOG actualisés.
+
+Distribution gratuite et anciennes conclusions sur la signature
+----------------------------------------------------------------
+- L’obligation absolue de certificat préparée en 1.3.3 est retirée du parcours
+  personnel, conformément à la demande de rester gratuit. Aucun compte, achat,
+  abonnement ou demande à un service externe n’a été créé.
+- La vérification SHA-512 reste obligatoire avant installation. Windows est
+  interrogé : absence de signature autorisée pour une construction personnelle,
+  signature présente mais invalide ou installeur malformé toujours refusé.
+- Une variante construite avec un signataire conserve la vérification du nom
+  du signataire par electron-updater. Le mode de publication signé reste strict.
+- Publication personnelle explicite : npm run release -- --unsigned.
+  Elle teste, construit, vérifie les deux exécutables, le manifeste et les
+  fichiers distants, puis publie le brouillon. L’état NotSigned est documenté,
+  pas présenté comme une signature reconnue. Aucune protection Windows changée.
+- Le comportement ne dépend pas du code d’une boîte : les contrôles de mise à
+  jour sont globaux et la sauvegarde finale précède toujours l’installation.
+- L’utilisateur peut encore voir une demande Windows « éditeur inconnu » ; son
+  succès récent avec 1.3.2 ne garantit pas le verdict Windows pour tout futur
+  fichier. La nouvelle installation doit être constatée après sa mise à jour.
+
+Vérifications effectuées avant publication
+------------------------------------------
+- 47/47 tests Node après les changements de politique de distribution.
+- Navigateur : 15/15 migrations, 7/7 nettoyages d’import, 7/7 contrôles de limite.
+- Suite Electron réelle tests/book-electron.cjs, profils uniques et fictifs :
+  quatre niveaux de zoom, texte et pagination inchangés ; contraste en thème
+  sombre ; cinq Retours arrière répétés au début de texte, ligne vide, titre
+  et liste dans les trois vues ; Suppr avant, sélection et fusion de paragraphes ;
+  Ctrl + Entrée, Annuler/Rétablir ; curseur conservé au zoom ; dimensions
+  personnalisées et contenu conservés après réouverture ; frappe jusqu’aux
+  pages suivantes avec curseur restant visible.
+- PDF A4 : sept pages, cent paragraphes, chaque paragraphe sur la même page que
+  dans l’éditeur. Format mesuré environ 20,989 × 29,701 cm (arrondi Chromium).
+- PDF personnalisé paysage 22 × 14 cm : 23 pages, longs paragraphes, listes
+  en gras, image intégrée, tableau sur plusieurs pages et saut forcé.
+  Les 64 marqueurs de contrôle se trouvent tous sur la même page à l’écran et
+  dans le PDF. Format mesuré environ 22,013 × 14,004 cm (arrondi Chromium).
+- Rendu visuel contrôlé sur captures des feuilles, première page PDF illustrée
+  et page de tableau ; pas de texte manquant ou coupé dans ces cas.
+- Première construction NSIS 1.3.5 réussie. Application et installeur réellement
+  NotSigned, contrôle explicite du mode gratuit et du manifeste réussi.
+  Archive de l’application : version et modules livre présents ; aucun profil,
+  document Conception/PASSATION, récupération ou sauvegarde utilisateur inclus.
+- La construction finale et la publication sont consignées ci-dessous seulement
+  une fois leurs résultats obtenus. Les tests ne lancent aucun installeur sur
+  les données personnelles et n’arrêtent pas le MindSet installé de l’utilisateur.
+
+Limites et prochaine reprise
+----------------------------
+- Les tests couvrent les cas décrits, pas toute combinaison imaginable de
+  tableaux imbriqués, blocs géants, images distantes ou polices exotiques.
+- Un bloc indivisible plus haut qu’une feuille peut nécessiter une adaptation.
+  Les images sont limitées à la zone imprimable ; les lignes de tableau évitent
+  les coupures internes. Le moteur d’impression conserve ses limites natives.
+- Ajouter titre/date/heure lors de l’export décale volontairement le contenu.
+  Word utilise son propre moteur ; la référence de mise en page testée est le PDF.
+- Aucune installation 1.3.5 réelle sur les boîtes personnelles n’a été faite par
+  l’agent. Après mise à jour par l’utilisateur : constater 1.3.5, rouvrir les
+  boîtes habituelles, puis rechercher à nouveau pour vérifier « à jour ».
+- Les archives ne transportent toujours pas les polices/préférences globales.
+- Les idées futures doivent être proposées puis discutées avant réalisation.
+- Conception.docx, PASSATION.md et tmp/ restent privés et non suivis par Git ;
+  output/, dist/, profils et récupérations restent exclus du dépôt.
+
+Clôture des contrôles locaux 1.3.5 :
+- Dernière suite Electron complète réussie, dix groupes de contrôles, aucune
+  erreur de la page. PDF vide : une seule page avec uniquement son numéro,
+  sans le texte indicatif de l’éditeur.
+- Dernières comparaisons : 100/100 paragraphes A4 et 64/64 marqueurs du livre
+  illustré personnalisé sur la même page dans l’éditeur et dans le PDF.
+- Second lancement réel : processus secondaire quitté, fenêtre existante
+  restaurée, une seule fenêtre principale. Export natif de boîte et annulation
+  réussis à nouveau avec cette version, sur profil séparé.
+- Sources prêtes pour validation Git ; publication via le parcours explicite
+  gratuit. La confirmation distante sera ajoutée après retour de GitHub.

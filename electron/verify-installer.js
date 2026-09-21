@@ -24,16 +24,19 @@ async function windowsSignature(file) {
   }
 }
 
-async function verifyInstaller(file, info) {
+async function verifyInstaller(file, info, { requireSignature = false, signatureReader = windowsSignature } = {}) {
   const expected = info.files?.find(entry => /\.exe(?:$|\?)/i.test(entry.url))?.sha512 || info.sha512;
   if (!expected) throw new Error("L’empreinte de l’installeur est absente. Relance la recherche de mise à jour.");
   const hash = createHash("sha512");
   for await (const chunk of createReadStream(file)) hash.update(chunk);
   if (hash.digest("base64") !== expected) throw new Error("Le fichier téléchargé a changé. Relance le téléchargement.");
-  const signature = await windowsSignature(file);
+  const signature = await signatureReader(file);
+  // Personal builds can remain unsigned. A present but invalid signature is never accepted.
+  // electron-updater additionally checks publisher identity when the installed build defines one.
+  if (signature.status === "NotSigned" && !requireSignature) return;
   if (signature.status !== "Valid") {
     const error = new Error("La signature Windows de l’installeur n’est pas valide.");
-    error.code = "ERR_UPDATE_UNSIGNED";
+    error.code = signature.status === "NotSigned" ? "ERR_UPDATE_UNSIGNED" : "ERR_UPDATE_SIGNATURE_INVALID";
     throw error;
   }
 }

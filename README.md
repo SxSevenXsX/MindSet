@@ -9,7 +9,13 @@ Application Windows de prise de notes locale : boîtes de projets, dossiers imbr
 - `npm run dist -- --publish never` pour créer un installeur de développement dans `dist/`.
 - `npm test` pour vérifier les archives, le stockage, l’instance unique, le parcours de mise à jour et les contrôles de publication.
 
-## Boîtes et sauvegardes — version 1.3.4 en préparation
+## Mode livre — version 1.3.5
+
+Le bouton **Mode livre** affiche de vraies feuilles : deux A4 par défaut, avec texte continu vers la feuille suivante. Les commandes de zoom permettent une à quatre feuilles côte à côte. Le format, l’orientation et les marges se règlent pour chaque note, avec des dimensions personnalisées possibles. L’export PDF reprend la mise en page et les images. Retour arrière au début de la note est sans effet, y compris sur une ligne vide.
+
+Voir [le fonctionnement et les tests du mode livre](docs/book-mode.md).
+
+## Boîtes et sauvegardes
 
 L’accueil propose **Importer des boîtes** et **Sauvegarder toutes les boîtes**. Chaque carte possède aussi son bouton **Exporter**. Un fichier `.mindset` contient les boîtes, notes, images intégrées et audio ; les boîtes protégées restent chiffrées. Les préférences d’affichage et polices locales sont exclues. Limite : 256 Mo par fichier.
 
@@ -42,6 +48,6 @@ Ouvrir `http://127.0.0.1:4173/tests/editor-document.html` après avoir démarré
 
 ## Publication
 
-La version 1.3.4 est préparée et attend un certificat reconnu avant distribution. Les prochaines publications doivent être signées : application, installeur, horodatage et manifeste sont vérifiés avant mise en ligne.
+La distribution personnelle gratuite est possible avec `npm run release -- --unsigned`. Le fichier, son empreinte et son état de signature sont vérifiés ; Windows conserve ses protections et peut afficher « éditeur inconnu ». La variante signée reste disponible avec un certificat.
 
-Voir [la procédure de signature et de publication Windows](docs/windows-signing.md). La commande locale `npm run release` permet de signer depuis le poste du titulaire puis de publier sur GitHub. Le workflow **Publish Windows release** reste disponible avec une configuration de signature adaptée à GitHub Actions. Aucun de ces parcours ne publie une version non signée.
+Voir [la procédure de signature et de publication Windows](docs/windows-signing.md). La commande locale `npm run release` permet de signer depuis le poste du titulaire puis de publier sur GitHub. Le workflow **Publish Windows release** reste disponible avec une configuration de signature adaptée à GitHub Actions. Le workflow GitHub Actions reste réservé à la variante signée. Aucun certificat ni abonnement n’est nécessaire pour le parcours personnel local.

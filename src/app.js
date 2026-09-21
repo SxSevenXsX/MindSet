@@ -18,6 +18,7 @@
     dragIds: [],
     editorRange: null,
     blockTools: null,
+    bookView: null,
     editorComposing: false,
     editorSelectionSnapshot: null,
     boxMenuOpen: false,
@@ -269,7 +270,7 @@
   const state = loadState();
 
   function normalizeEditorViewMode(value) {
-    return ["pages", "split"].includes(value) ? value : "flow";
+    return value === "split" ? "book" : ["pages", "book"].includes(value) ? value : "flow";
   }
 
   function normalizePageFlowMode(value) {
@@ -596,6 +597,7 @@
   }
 
   function visibleEditorPageCount() {
+    if (runtime.bookView) return runtime.bookView.pageCount;
     return 1 + (app.querySelector("[data-note-editor]")?.querySelectorAll(".note-page-break").length || 0);
   }
 
@@ -614,7 +616,7 @@
       element.textContent = `${stats.chars} caracteres`;
     });
     app.querySelectorAll("[data-page-count]").forEach((element) => {
-      element.textContent = `${pageCount} section${pageCount > 1 ? "s" : ""}`;
+      element.textContent = `${pageCount} ${runtime.bookView ? "page" : "section"}${pageCount > 1 ? "s" : ""}`;
     });
   }
 
@@ -745,6 +747,11 @@
 
   function printableNoteDocument(note, sourceHtml, options = defaultPrintOptions(), mode = "print") {
     options = normalizePrintOptions(options);
+    if (note.bookSetup) return MindSetBookPrint.documentHtml({
+      title: escapeHtml(note.title || "Note MindSet"), content: sanitizePrintableHtml(sourceHtml),
+      setup: note.bookSetup, variables: printableHeadingCssVariables(), fonts: printableFontFaces(),
+      header: printableNoteHeader(note, options), pageNumbers: options.showPageNumbers,
+    });
     const setup = normalizePageSetup(state.settings?.pageSetup, state.settings?.pageMarginPreset, state.settings);
     const dimensions = pageSizeDimensions(setup);
     const margins = setup.margins;
@@ -1239,12 +1246,23 @@
     runtime.modal = nextModal;
   }
 
-  function openPrintableNotePdfPreview(box, note, options = defaultPrintOptions(), sourceOverride = "") {
+  async function openPrintableNotePdfPreview(box, note, options = defaultPrintOptions(), sourceOverride = "") {
     if (!box || note?.type !== "note") return;
     const sourceHtml = sourceOverride || activePrintableSource(box, note);
     flushActiveEditorContent();
     const freshNote = findItem(box, note.id) || note;
-    const printable = createPrintableNotePdf(freshNote, sourceHtml, options);
+    let printable;
+    if (freshNote.bookSetup) {
+      if (!desktopBridge()?.renderBookPdf) { openPrintableNoteWindow(box, freshNote, "system-pdf", options, sourceHtml); return; }
+      if (runtime.modal?.type === "book-pdf-busy") return;
+      const html = printableNoteDocument(freshNote, sourceHtml, options, "pdf");
+      setModal({ type: "book-pdf-busy" }); render();
+      try {
+        const result = await desktopBridge().renderBookPdf(html);
+        const bytes = Uint8Array.from(atob(result.base64), char => char.charCodeAt(0));
+        printable = { blob: new Blob([bytes], { type: "application/pdf" }), pageCount: result.pageCount, fileName: noteExportFileName(freshNote, "pdf") };
+      } catch (error) { setModal(null); render(); setToast(`PDF non créé : ${error.message || error}`); return; }
+    } else printable = createPrintableNotePdf(freshNote, sourceHtml, options);
     const pdfUrl = URL.createObjectURL(printable.blob);
     setModal({
       type: "pdf-preview",
@@ -1266,8 +1284,8 @@
   }
 
   function wordNoteDocument(note, sourceHtml) {
-    const setup = normalizePageSetup(state.settings?.pageSetup, state.settings?.pageMarginPreset, state.settings);
-    const dimensions = pageSizeDimensions(setup);
+    const setup = note.bookSetup ? MindSetBookLayout.normalize(note.bookSetup) : normalizePageSetup(state.settings?.pageSetup, state.settings?.pageMarginPreset, state.settings);
+    const dimensions = note.bookSetup ? MindSetBookLayout.dimensions(setup) : pageSizeDimensions(setup);
     const margins = setup.margins;
     const headings = state.settings?.headingPresets || headingDefaults;
     const preset = (key) => ({ ...headingDefaults[key], ...(headings[key] || {}) });
@@ -1383,7 +1401,7 @@
     const sourceHtml = sourceOverride || activePrintableSource(box, note);
     flushActiveEditorContent();
     const freshNote = findItem(box, note.id) || note;
-    if (mode === "mindset-pdf") {
+    if (mode === "mindset-pdf" && !freshNote.bookSetup) {
       openPrintableNotePdfPreview(box, freshNote, options, sourceHtml);
       return;
     }
@@ -1396,9 +1414,15 @@
     printWindow.document.write(printableNoteDocument(freshNote, sourceHtml, options, mode));
     printWindow.document.close();
     let started = false;
-    const startPrint = () => {
-      if (started) return;
+    const startPrint = async () => {
+      if (started || printWindow.closed) return;
       started = true;
+      await printWindow.document.fonts.ready;
+      await Promise.all([...printWindow.document.images].map(image => image.complete ? Promise.resolve() : new Promise(resolve => {
+        image.addEventListener("load", resolve, { once: true }); image.addEventListener("error", resolve, { once: true });
+        window.setTimeout(resolve, 10000);
+      })));
+      if (printWindow.closed) return;
       printWindow.focus();
       printWindow.print();
     };
@@ -1475,6 +1499,7 @@
       graphPanX: clampGraphPan(previousSettings.graphPanX),
       graphPanY: clampGraphPan(previousSettings.graphPanY),
       editorViewMode: normalizeEditorViewMode(previousSettings.editorViewMode),
+      bookColumns: MindSetBookLayout.geometry({}, previousSettings.bookColumns).columns,
       pageFlowMode: "continuous",
       editorRevision: 2,
       pageZoom: clampPageZoom(previousSettings.pageZoom || 1),
@@ -1582,6 +1607,7 @@
       if (!Array.isArray(node.children)) node.children = [];
       node.children.forEach((child) => normalizeItemShape(child));
     }
+    if (node.type === "note" && node.bookSetup) node.bookSetup = MindSetBookLayout.normalize(node.bookSetup);
     if (node.type === "audio") {
       if (!Array.isArray(node.clips)) node.clips = [];
       node.clips = node.clips.filter((clip) => clip && clip.id);
@@ -2588,6 +2614,7 @@
           payload = protectedBoxPayload(safe);
         }
         Object.assign(box, payload);
+        MindSetGuide.upgrade(box, uid, now);
         normalizeUnlockedBoxShape(box);
         box.root.title = box.name;
         runtime.boxCrypto.set(box.id, { key: opened.key, salt: box.encrypted.salt, blob: box.encrypted, lastPayload: null });
@@ -3988,6 +4015,8 @@
   }
 
   function render() {
+    runtime.bookView?.destroy();
+    runtime.bookView = null;
     removeImageToolbar();
     runtime.blockTools?.destroy();
     runtime.blockTools = null;
@@ -5603,12 +5632,42 @@
     refreshClipSelectionUi();
   }
 
+  function renderBookEditor(note, content) {
+    const setup = MindSetBookLayout.normalize(note.bookSetup);
+    const size = MindSetBookLayout.dimensions(setup);
+    const label = setup.sizeId === "custom" ? "Personnalisé" : MindSetBookLayout.formats.find(item => item.id === setup.sizeId).label;
+    return `<div class="book-controls" aria-label="Réglages du mode livre">
+      <div class="book-control-group"><button class="ghost-button" data-action="book-format">${icon("ruler")} Format des pages</button><span class="book-context">${label} · ${size.widthCm} × ${size.heightCm} cm</span></div>
+      <div class="book-control-group"><button class="icon-button" type="button" data-book-zoom-out aria-label="Dézoomer le livre">${icon("zoomOut")}</button>
+        <select class="toolbar-select" data-book-columns aria-label="Pages côte à côte">${[1,2,3,4].map(n => `<option value="${n}">${n} ${n === 1 ? "page" : "pages"}</option>`).join("")}</select>
+        <button class="icon-button" type="button" data-book-zoom-in aria-label="Zoomer le livre">${icon("zoomIn")}</button><span class="book-context" data-book-info aria-live="polite"></span></div>
+      </div><div class="book-viewport" data-book-viewport><div class="book-scale"><div class="book-canvas" data-book-canvas style="${escapeHtml(printableHeadingCssVariables())}"><div class="book-paper-layer" data-book-paper-layer aria-hidden="true"></div><div class="note-editor book-text" data-note-editor data-editor-note-id="${note.id}" contenteditable="true" role="textbox" aria-label="Contenu de la note" aria-multiline="true" spellcheck="true">${content}</div></div></div></div>`;
+  }
+
+  function renderBookFormatModal() {
+    const box = activeBox(), note = box && findItem(box, runtime.modal.noteId);
+    const setup = MindSetBookLayout.normalize(note?.bookSetup);
+    return `<div class="modal-backdrop"><form class="modal" data-book-format-form role="dialog" aria-modal="true" aria-labelledby="book-format-title">
+      <div class="modal-head"><h2 id="book-format-title">Format des pages</h2><button class="icon-button" type="button" data-action="close-modal" aria-label="Fermer">${icon("close")}</button></div>
+      <div class="modal-body modal-grid">
+        <label class="modal-label">Format<select class="modal-field" name="sizeId">${[...MindSetBookLayout.formats, {id:"custom",label:"Dimensions personnalisées"}].map(format => `<option value="${format.id}" ${setup.sizeId === format.id ? "selected" : ""}>${format.label}${format.widthCm ? ` · ${format.widthCm} × ${format.heightCm} cm` : ""}</option>`).join("")}</select></label>
+        <div class="book-format-dimensions" data-book-custom ${setup.sizeId !== "custom" ? "hidden" : ""}>
+          <label class="modal-label">Largeur (cm)<input class="modal-field" name="customWidthCm" type="number" min="8" max="60" step="0.01" value="${setup.customWidthCm}" required></label>
+          <label class="modal-label">Hauteur (cm)<input class="modal-field" name="customHeightCm" type="number" min="8" max="60" step="0.01" value="${setup.customHeightCm}" required></label>
+        </div>
+        <label class="modal-label">Orientation<select class="modal-field" name="orientation"><option value="portrait" ${setup.orientation === "portrait" ? "selected" : ""}>Portrait</option><option value="landscape" ${setup.orientation === "landscape" ? "selected" : ""}>Paysage</option></select></label>
+        <div class="book-format-margins">${[["top","Marge haute"],["bottom","Marge basse"],["left","Marge gauche"],["right","Marge droite"]].map(([side,label]) => `<label class="modal-label">${label} (cm)<input class="modal-field" name="${side}" type="number" min="0.1" max="55" step="0.1" value="${setup.margins[side]}" required></label>`).join("")}</div>
+        <p class="book-format-note">Ces réglages appartiennent à cette note. Le zoom change uniquement l’affichage. Les pages gardent leur format à l’impression et en PDF.</p><p class="modal-error" data-book-format-error role="alert" hidden></p>
+      </div><div class="modal-actions"><button class="ghost-button" type="button" data-action="close-modal">Annuler</button><button class="button" type="submit">Appliquer</button></div>
+    </form></div>`;
+  }
+
   function renderEditor(box, note) {
     const stats = noteStats(note);
     const bookmarked = (box.bookmarkedIds || []).includes(note.id);
     const viewMode = normalizeEditorViewMode(state.settings?.editorViewMode);
     const pageMode = viewMode === "pages";
-    const splitMode = viewMode === "split";
+    const bookMode = viewMode === "book" && MindSetBookEditor.supported();
     const pageZoom = clampPageZoom(state.settings?.pageZoom || 1);
     const settings = state.settings;
     const pageSetup = normalizePageSetup(settings?.pageSetup, settings?.pageMarginPreset, settings);
@@ -5700,13 +5759,13 @@
               </div>` : ""}
             <button class="format-button" data-editor-insert-break title="Saut de page (Ctrl + Entrée)" aria-label="Insérer un saut de page">${icon("splitPages")}</button>
             <span class="writing-hint">Écrire, puis <kbd>/</kbd> pour les blocs</span>
-            <button class="format-button ${splitMode ? "is-active" : ""}" data-action="toggle-editor-split-view" data-tooltip="${splitMode ? "Mode ecriture simple" : "Tableau coupe en 2"}" aria-label="${splitMode ? "Mode ecriture simple" : "Tableau coupe en 2"}">${icon("splitColumns")}</button>
+            <button class="format-button ${bookMode ? "is-active" : ""}" data-action="toggle-editor-book-view" data-tooltip="Mode livre" aria-label="Mode livre" aria-pressed="${bookMode}">${icon("splitColumns")}</button>
             ${pageMode ? `
               <button class="format-button" data-action="page-zoom-out" data-tooltip="Dezoomer les feuilles" aria-label="Dezoomer les feuilles">${icon("zoomOut")}</button>
               <button class="format-button" data-action="page-zoom-in" data-tooltip="Zoomer les feuilles" aria-label="Zoomer les feuilles">${icon("zoomIn")}</button>
             ` : ""}
-            <button class="format-button" data-editor-action="toggle-heading-collapse" data-tooltip="Replier / deplier le titre" aria-label="Replier / deplier le titre">${icon("collapse")}</button>
-            <button class="format-button" data-editor-action="toggle-all-headings" data-tooltip="Replier / deplier tous les titres" aria-label="Replier / deplier tous les titres">${icon("collapseIn")}</button>
+            <button class="format-button" data-editor-action="toggle-heading-collapse" ${bookMode ? 'disabled' : ''} data-tooltip="Replier / deplier le titre" aria-label="Replier / deplier le titre">${icon("collapse")}</button>
+            <button class="format-button" data-editor-action="toggle-all-headings" ${bookMode ? 'disabled' : ''} data-tooltip="Replier / deplier tous les titres" aria-label="Replier / deplier tous les titres">${icon("collapseIn")}</button>
             <button class="format-button ${bookmarked ? "is-active" : ""}" data-action="toggle-bookmark" data-tooltip="${bookmarked ? "Retirer des signets" : "Ajouter aux signets"}" aria-label="${bookmarked ? "Retirer des signets" : "Ajouter aux signets"}">${icon(bookmarked ? "bookmarkFilled" : "bookmark")}</button>
           </div>
           <div class="toolbar-stats" aria-live="polite">
@@ -5722,10 +5781,10 @@
           </div>
         </div>
         </div>
-        <section class="editor-page ${pageMode ? "is-page-mode" : ""} ${splitMode ? "is-split-mode" : ""}" style="${pageStyle}">
+        <section class="editor-page ${pageMode ? "is-page-mode" : ""} ${bookMode ? "is-book-mode" : ""}" style="${pageStyle}">
           <input class="title-input" data-note-title value="${escapeHtml(note.title)}" aria-label="Titre de la note" />
           ${pageMode ? `<p class="paper-caption">Vue papier continue · Les pages sont calculées à l’impression</p>` : ""}
-          ${pageMode
+          ${bookMode ? renderBookEditor(note, flowContent) : pageMode
             ? `<div class="page-editor-viewport" data-page-viewport><div class="page-editor-scale" data-page-scale><div class="note-editor page-document" data-note-editor data-editor-note-id="${note.id}" data-page-flow="continuous" contenteditable="true" role="textbox" aria-label="Contenu de la note" aria-multiline="true" spellcheck="true">${flowContent}</div></div></div>`
             : `<div class="note-editor" data-note-editor data-editor-note-id="${note.id}" contenteditable="true" role="textbox" aria-label="Contenu de la note" aria-multiline="true" spellcheck="true">${flowContent}</div>`}
           <div class="editor-status" aria-live="polite">
@@ -6007,6 +6066,8 @@
 
   function renderModal() {
     if (!runtime.modal) return "";
+    if (runtime.modal.type === "book-pdf-busy") return `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="Création du PDF" aria-busy="true"><div class="modal-body"><h2>Préparation des pages…</h2><p role="status">Les polices, les images et la mise en page sont conservées.</p></div></section></div>`;
+    if (runtime.modal.type === "book-format") return renderBookFormatModal();
     if (runtime.modal.type === 'archive-busy') return `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="Sauvegarde" aria-busy="true"><div class="modal-body"><h2>Un instant…</h2><p role="status">${escapeHtml(runtime.modal.message)}</p></div></section></div>`;
     if (runtime.modal.type === 'archive-preview') {
       const { plan, fileName } = runtime.modal;
@@ -6305,8 +6366,10 @@
       const mode = runtime.modal.mode === "pdf" ? "pdf" : "print";
       const options = normalizePrintOptions(runtime.modal.options);
       const title = mode === "pdf" ? "Exporter en PDF" : "Imprimer";
-      const action = mode === "pdf" ? "Apercu systeme" : "Imprimer";
-      const hint = mode === "pdf"
+      const action = mode === "pdf" ? (note?.bookSetup && desktopBridge()?.renderBookPdf ? "Créer le PDF" : "Apercu systeme") : "Imprimer";
+      const hint = note?.bookSetup
+        ? "Le format et les marges de cette note sont conservés. Ajouter le titre, la date ou l’heure décale le texte. Pour imprimer sur papier, choisis ce même format à 100 %, sans en-têtes automatiques."
+        : mode === "pdf"
         ? "L'apercu systeme est celui d'avant. Si date, heure ou adresse apparaissent, decoche les en-tetes et pieds de page dans cette fenetre."
         : "Pour l'impression, le navigateur peut encore proposer ses propres en-tetes dans sa fenetre d'impression.";
       return `
@@ -6328,7 +6391,7 @@
             </div>
             <div class="modal-actions">
               <button class="ghost-button" type="button" data-action="close-modal">Annuler</button>
-              ${mode === "pdf" ? `<button class="ghost-button" type="button" data-action="open-mindset-pdf-preview">Apercu MindSet</button>` : ""}
+              ${mode === "pdf" && !note?.bookSetup ? `<button class="ghost-button" type="button" data-action="open-mindset-pdf-preview">Apercu MindSet</button>` : ""}
               <button class="button" type="submit">${icon(mode === "pdf" ? "filePdf" : "printer")} ${action}</button>
             </div>
           </form>
@@ -6619,6 +6682,23 @@
   }
 
   function bindEvents() {
+    const bookForm = app.querySelector("[data-book-format-form]");
+    if (bookForm) {
+      bookForm.elements.sizeId.addEventListener("change", () => { bookForm.querySelector("[data-book-custom]").hidden = bookForm.elements.sizeId.value !== "custom"; });
+      bookForm.addEventListener("submit", event => {
+        event.preventDefault();
+        const values = Object.fromEntries(new FormData(bookForm));
+        values.margins = Object.fromEntries(["top","right","bottom","left"].map(side => [side, Number(values[side])]));
+        const dimensions = MindSetBookLayout.dimensions(values);
+        if (dimensions.widthCm - values.margins.left - values.margins.right < 4 || dimensions.heightCm - values.margins.top - values.margins.bottom < 4) {
+          const error = bookForm.querySelector("[data-book-format-error]"); error.hidden = false; error.textContent = "Garde au moins 4 cm de largeur et de hauteur pour le texte."; return;
+        }
+        const box = activeBox(), note = box && findItem(box, runtime.modal.noteId);
+        if (note?.type !== "note") return;
+        flushActiveEditorContent(); note.bookSetup = MindSetBookLayout.normalize(values); note.modifiedAt = now(); touchBox(box);
+        saveState(); setModal(null); render();
+      });
+    }
     app.querySelectorAll("[data-action]").forEach((button) => {
       button.addEventListener("click", handleAction);
     });
@@ -7754,22 +7834,17 @@
       saveState();
       render();
     }
-    if (action === "toggle-editor-split-view") {
-      if (normalizeEditorViewMode(state.settings.editorViewMode) === "pages") {
-        const editor = app.querySelector(".editor-page.is-page-mode [data-note-editor]");
-        const note = findItem(box, box.activeItemId);
-        if (editor && note?.type === "note") {
-          note.content = mergePageEditorHtml({ keepActiveBlankSheet: isIndependentPageFlow() });
-          note.modifiedAt = now();
-          touchBox(box);
-          saveState();
-        }
-      } else {
-        flushActiveEditorContent();
-      }
-      state.settings.editorViewMode = state.settings.editorViewMode === "split" ? "flow" : "split";
-      saveState();
-      render();
+    if (action === "toggle-editor-book-view") {
+      if (!MindSetBookEditor.supported()) { setToast("Le mode livre nécessite la dernière version de l’application MindSet."); return; }
+      flushActiveEditorContent();
+      const note = findItem(box, box.activeItemId);
+      state.settings.editorViewMode = normalizeEditorViewMode(state.settings.editorViewMode) === "book" ? "flow" : "book";
+      if (note?.type === "note" && state.settings.editorViewMode === "book" && !note.bookSetup) note.bookSetup = MindSetBookLayout.normalize();
+      saveState(); render();
+    }
+    if (action === "book-format") {
+      flushActiveEditorContent();
+      setModal({ type: "book-format", noteId: box.activeItemId }); render();
     }
     if (action === "page-zoom-out") {
       flushActiveEditorContent();
@@ -8288,7 +8363,8 @@
         if (mode === "pdf") {
           setModal(null);
           render();
-          openPrintableNoteWindow(box, note, "system-pdf", options, sourceHtml);
+          if (note.bookSetup) openPrintableNotePdfPreview(box, note, options, sourceHtml);
+          else openPrintableNoteWindow(box, note, "system-pdf", options, sourceHtml);
           return;
         }
         setModal(null);
@@ -9618,6 +9694,7 @@
       });
       boundEditor.addEventListener("beforeinput", (event) => {
         if (event.isComposing || runtime.editorComposing) return;
+        if (MindSetEditorBoundary.blockBoundaryDelete(event, boundEditor)) return;
         if (runtime.lastListAutoFormat?.noteId === note.id) runtime.lastListAutoFormat = null;
         if (event.inputType === "historyUndo" || event.inputType === "historyRedo") {
           event.preventDefault();
@@ -9678,6 +9755,17 @@
     }
 
     editors.forEach(bindSingleEditor);
+    if (editor?.closest("[data-book-viewport]")) {
+      if (!note.bookSetup) { note.bookSetup = MindSetBookLayout.normalize(); saveState(); }
+      runtime.bookView = MindSetBookEditor.mount(editor, {
+        setup: note.bookSetup, columns: state.settings.bookColumns,
+        onZoom: columns => { state.settings.bookColumns = columns; saveState(); },
+        onChange: count => app.querySelectorAll("[data-page-count]").forEach(element => {
+          element.textContent = `${count} page${count > 1 ? "s" : ""}`;
+          element.title = "Pages du document au format choisi";
+        }),
+      });
+    }
     updateEditorStats(note);
     app.querySelector("[data-editor-insert-break]")?.addEventListener("mousedown", (event) => event.preventDefault());
     app.querySelector("[data-editor-insert-break]")?.addEventListener("click", () => {
@@ -10018,6 +10106,7 @@
   }
 
   function isHeadingToggleHit(event, heading) {
+    if (heading.closest(".book-text")) return false;
     const rect = heading.getBoundingClientRect();
     return event.clientX >= rect.left - 24 && event.clientX <= rect.left;
   }
@@ -10035,11 +10124,16 @@
     syncEditorContent(editor, note, box);
   }
 
+  function isCollapsedHeading(heading) {
+    return heading?.dataset.collapsed === "true" && !heading.closest(".book-text");
+  }
+
   function syncCollapsedHeadings(editor) {
     editor.querySelectorAll("[data-collapsed-hidden]").forEach((node) => {
       delete node.dataset.collapsedHidden;
       node.style.display = "";
     });
+    if (editor.classList.contains("book-text")) return;
     editor.querySelectorAll("h1[data-collapsed='true'], h2[data-collapsed='true'], h3[data-collapsed='true'], h4[data-collapsed='true'], h5[data-collapsed='true'], h6[data-collapsed='true']").forEach((heading) => {
       if (isFoldableStyle(heading.tagName.toLowerCase())) setHeadingSectionVisibility(heading, true);
     });
@@ -10149,6 +10243,7 @@
 
   function handleEditorAutomation(event, editor, note, box, repaginateNow = null) {
     if (event.defaultPrevented || event.isComposing || runtime.editorComposing || event.keyCode === 229) return;
+    if (MindSetEditorBoundary.blockBoundaryDelete(event, editor)) return;
     if (
       runtime.lastListAutoFormat
       && event.key !== "Backspace"
@@ -10245,7 +10340,7 @@
         if (block && block !== editor && isCaretAtStartOfBlock(block)) {
           const previous = block.previousElementSibling;
           const collapsedHeading = previous
-            ? (isHeadingBlock(previous) && previous.dataset.collapsed === "true" ? previous : collapsedHeadingForHiddenBlock(previous))
+            ? (isHeadingBlock(previous) && isCollapsedHeading(previous) ? previous : collapsedHeadingForHiddenBlock(previous))
             : null;
           if (collapsedHeading) {
             event.preventDefault();
@@ -10282,7 +10377,7 @@
     if (event.key === "Delete") {
       if (window.getSelection()?.isCollapsed) {
         const block = currentEditableBlock(editor);
-        if (isHeadingBlock(block) && block.dataset.collapsed === "true" && isCaretAtEndOfBlock(block)) {
+        if (isHeadingBlock(block) && isCollapsedHeading(block) && isCaretAtEndOfBlock(block)) {
           event.preventDefault();
           toggleHeadingSection(editor, note, box, block);
           setToast("Section depliee pour proteger son contenu.");
@@ -10447,7 +10542,7 @@
     while (cursor && cursor.dataset?.collapsedHidden === "true") {
       cursor = cursor.previousElementSibling;
     }
-    return cursor && isHeadingBlock(cursor) && cursor.dataset.collapsed === "true" ? cursor : null;
+    return cursor && isHeadingBlock(cursor) && isCollapsedHeading(cursor) ? cursor : null;
   }
 
   function isCaretAtStartOfEditor(editor) {
@@ -10921,7 +11016,7 @@
     const block = currentEditableBlock(editor);
     if (!block) return;
     rememberEditorSnapshot(note, editor);
-    if (isHeadingBlock(block) && block.dataset.collapsed === "true") {
+    if (isHeadingBlock(block) && isCollapsedHeading(block)) {
       setHeadingSectionVisibility(block, false);
       block.removeAttribute("data-collapsed");
       block.classList.remove("is-heading-collapsed");
@@ -11949,7 +12044,7 @@
       if (className) list.className = className;
       targetBlocks[0].before(list);
       targetBlocks.forEach((block) => {
-        if (isHeadingBlock(block) && block.dataset.collapsed === "true") {
+        if (isHeadingBlock(block) && isCollapsedHeading(block)) {
           setHeadingSectionVisibility(block, false);
           block.removeAttribute("data-collapsed");
           block.classList.remove("is-heading-collapsed");
@@ -12154,6 +12249,7 @@
     state.guideIntroduced = true;
     persistState();
   }
+  if (!runtime.storageBlocked && state.boxes.map(box => MindSetGuide.upgrade(box, uid, now)).some(Boolean)) persistState();
   if (runtime.storageFresh) persistState();
   bindDesktopUpdates();
   bindDesktopCloseHandshake();

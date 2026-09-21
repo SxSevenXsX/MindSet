@@ -60,3 +60,7 @@ Parcours natif Electron vérifié avec `MINDSET_DEV_PROFILE` pointant vers un do
 Les scénarios temporaires, captures et fichiers synthétiques se trouvent dans `output/playwright/`, exclu de Git. Ne jamais pointer ces scénarios vers un profil contenant des notes personnelles. Ces essais ne valident pas une installation signée ni le déblocage de Smart App Control : ce parcours reste à tester sur le vrai poste après disponibilité d’un installeur accepté par Windows.
 
 Compléments de fin de vérification : styles personnels et couleurs audio conservés ; annuler puis rétablir un import réussi ; le nœud racine du graphe revient effectivement dans le cadre après Recentrer. La suite Node finale compte **39 tests réussis**.
+
+## Mode livre (1.3.5)
+
+La procédure et la suite Electron isolée sont décrites dans [docs/book-mode.md](../docs/book-mode.md). Les fixtures navigateur supplémentaires sont `archive-content.html` (dont les formats de livre importés) et `editor-boundary.html` (limite absolue du document). La suite réelle `book-electron.cjs` utilise uniquement des boîtes fictives et produit ses PDF sous `output/book-tests`.

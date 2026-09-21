@@ -6,6 +6,7 @@ const { UpdateManager, attemptStore, updateMessage } = require("./update-manager
 const { CloseCoordinator } = require("./close-coordinator");
 const { verifyInstaller } = require("./verify-installer");
 const { acquireSingleInstance } = require("./single-instance");
+const { renderBookPdf } = require("./book-pdf");
 
 // Development must never open or mutate the installed application's profile.
 if (!app.isPackaged) app.setPath("userData", path.resolve(process.env.MINDSET_DEV_PROFILE || path.join(app.getPath("appData"), "mindset-development")));
@@ -283,6 +284,12 @@ if (primaryInstance) app.whenReady().then(async () => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+ipcMain.handle("mindset:book:pdf", (event, html) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents
+    || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error("Fenêtre non autorisée.");
+  return renderBookPdf(html);
 });
 
 ipcMain.handle("mindset:archive:save", async (event, payload) => {

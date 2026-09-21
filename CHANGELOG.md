@@ -1,3 +1,16 @@
+# 1.3.5 — Mode livre et écriture stable
+
+- Retour arrière au début absolu de la note sans suppression, déplacement du curseur ni défilement parasite, y compris sur une ligne vide.
+- Mode livre à la place de l’ancien affichage en deux colonnes : feuilles distinctes, texte continu qui passe automatiquement à la suivante, défilement vertical.
+- Deux feuilles par défaut ; zoom pour afficher de une à quatre feuilles par rangée sans modifier le texte ou les coupures.
+- A4 par défaut ; A5, A6, A3, Letter, Legal, Executive, Poche et dimensions personnalisées. Orientation et marges enregistrées avec chaque note.
+- PDF avec le format, les styles et les images du livre ; format également transmis à l’export compatible Word et aux sauvegardes `.mindset`.
+- Guide enrichi d’un chapitre Mode livre, ajouté aux guides existants sans écraser leurs annotations.
+- Distribution personnelle gratuite possible sans certificat ; téléchargement vérifié, signature invalide refusée, sauvegarde avant installation et contrôle de version au redémarrage conservés.
+- Inclut les fonctions préparées en 1.3.4 : sauvegarde/import des boîtes avec l’audio, guide, profil de développement séparé et retour à la fenêtre existante au second lancement.
+
+L’impression papier nécessite le format correspondant et une échelle de 100 %. L’ajout d’un titre/date à l’export peut changer les coupures. Aucun certificat payant ni abonnement n’est nécessaire pour cette distribution ; les protections Windows restent actives.
+
 # 1.3.4 — Boîtes transportables et lancement fiable (en préparation)
 
 - Un second lancement ramène la fenêtre existante, y compris lorsqu’elle est réduite.
@@ -10,7 +23,7 @@
 - Accueil plus lisible, bouton Recentrer dans la vue arbre.
 - Journal détaillé `SUIVI_MINDSET.txt` à la racine.
 
-Les préférences d’affichage et polices locales restent propres à l’ordinateur. Les fichiers `.mindset` sont limités à 256 Mo. Cette version inclut les corrections de mise à jour préparées en 1.3.3 ; aucun installeur 1.3.4 n’est encore publié. Le blocage Windows de l’ancien installeur n’est pas résolu par ces changements.
+Les préférences d’affichage et polices locales restent propres à l’ordinateur. Les fichiers `.mindset` sont limités à 256 Mo. Cette version inclut les corrections de mise à jour préparées en 1.3.3 ; aucun installeur 1.3.4 n’est encore publié. Note historique : la mise à jour 1.3.2 a ensuite réussi. La 1.3.5 reprend ce lot et permet une distribution personnelle gratuite.
 
 # 1.3.3 — Installation des mises à jour (en préparation)
 

@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  const safeStyles = new Set(['color', 'background-color', 'font-family', 'font-size', 'font-weight', 'font-style', 'text-decoration', 'text-decoration-line', 'text-decoration-color', 'text-align', 'line-height', 'white-space', 'vertical-align', 'width', 'height', 'max-width', 'border-collapse', 'border', 'border-color', 'border-width', 'border-style', 'padding', 'padding-left', 'margin-left', 'float', '--li-marker-color']);
+  const safeStyles = new Set(['color', 'background-color', 'font-family', 'font-size', 'font-weight', 'font-style', 'text-decoration', 'text-decoration-line', 'text-decoration-color', 'text-align', 'line-height', 'white-space', 'vertical-align', 'width', 'height', 'max-width', 'border-collapse', 'border', 'border-color', 'border-width', 'border-style', 'padding', 'padding-left', 'margin-left', 'margin-top', 'margin-bottom', 'text-indent', 'float', '--li-marker-color']);
   const safeClass = /^(ms-(?:style|inline)-(?:normal|h[1-6]|ps[1-4])|(?:dash|arrow|circle|check|triangle|square)-list|is-checked|note-page-break|note-callout|image-(?:left|right|center|inline|full)|img-(?:float-left|float-right|block-center))$/;
   function cleanHtml(value) {
     const fragment = DOMPurify.sanitize(String(value || ''), {
@@ -41,7 +41,10 @@
       result.iconKind = ['none', 'default', 'emoji'].includes(source.iconKind) ? source.iconKind : 'none';
       result.emoji = typeof source.emoji === 'string' ? source.emoji.slice(0, 32) : '';
       if (source.type === 'folder') result.children = source.children.map(node);
-      if (source.type === 'note') result.content = cleanHtml(source.content);
+      if (source.type === 'note') {
+        result.content = cleanHtml(source.content);
+        if (source.bookSetup) result.bookSetup = MindSetBookLayout.normalize(source.bookSetup);
+      }
       if (source.type === 'audio') {
         result.clipSort = source.clipSort;
         result.clips = source.clips.map(clip => ({

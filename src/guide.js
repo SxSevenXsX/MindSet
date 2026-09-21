@@ -1,6 +1,6 @@
 (function (root) {
   'use strict';
-  const VERSION = 1;
+  const VERSION = 2;
   const chapters = [
     ['01 · Bien démarrer', [
       ['Bienvenue dans MindSet', '<p>MindSet est ton espace personnel : des boîtes pour séparer les projets, des dossiers pour les organiser, des notes et de l’audio pour développer tes idées. Tout est enregistré sur cet ordinateur.</p><p>Ce guide est une vraie boîte : tu peux le parcourir, le modifier ou le supprimer. Tes autres boîtes restent indépendantes. Le bouton Guide MindSet de l’accueil permet de le retrouver ou de le recréer.</p>'],
@@ -24,11 +24,25 @@
       ['Si une boîte semble manquer', '<p>Vérifie d’abord que tu utilises la même installation et le même compte Windows. Une version de développement utilise désormais un espace séparé. Le second lancement de la même installation ramène sa fenêtre existante.</p><p>Si MindSet ne peut pas lire son stockage, il affiche une erreur et bloque les écritures au lieu de créer un espace vide par-dessus. Ne supprime pas les données locales pour résoudre ce problème.</p>'],
     ]],
     ['05 · Application et nouveautés', [
-      ['Mises à jour et réinstallation', '<p>Le parcours prévu reste Rechercher → Télécharger → Redémarrer. Une mise à jour ne doit être installée qu’après la sauvegarde des données. La nouvelle gestion vérifie la version réellement installée et affiche les erreurs d’installation.</p><p>Sur cet ordinateur, Windows a bloqué un installeur non signé. Réinstaller le même fichier ne garantit pas de résoudre ce blocage. La distribution de cette nouvelle version attend une solution de confiance Windows. Aucun abonnement n’est nécessaire pour utiliser MindSet ; aucun service de signature payant n’a été souscrit.</p><p>Avant une désinstallation, garde une sauvegarde .mindset vérifiée. Ne choisis jamais une option de suppression des données si tu veux les conserver.</p>'],
+      ['Mises à jour et réinstallation', '<p>Le parcours prévu reste Rechercher → Télécharger → Redémarrer. Une mise à jour ne doit être installée qu’après la sauvegarde des données. La nouvelle gestion vérifie la version réellement installée et affiche les erreurs d’installation.</p><p>La mise à jour vers 1.3.2 a finalement réussi sur cet ordinateur. Une précédente tentative avait été bloquée par Windows ; la cause de la réussite suivante n’est pas établie. La version 1.3.5 permet à nouveau une distribution personnelle gratuite sans certificat. Les téléchargements sont vérifiés et les protections de Windows restent actives. Aucun abonnement n’est nécessaire pour utiliser MindSet ; aucun service de signature payant n’a été souscrit.</p><p>Avant une désinstallation, garde une sauvegarde .mindset vérifiée. Ne choisis jamais une option de suppression des données si tu veux les conserver.</p>'],
       ['Raccourcis utiles', '<ul><li>Ctrl + K : sélecteur de documents.</li><li>Ctrl + N dans une boîte : nouvelle note.</li><li>Ctrl + Z : annuler ; Ctrl + Y ou Ctrl + Maj + Z : rétablir.</li><li>Ctrl + C / X / V : copier, couper ou coller le texte, ou les éléments sélectionnés hors de l’éditeur.</li><li>Échap : fermer un menu ou une fenêtre de dialogue.</li><li>Suppr hors de l’éditeur : demander la suppression des éléments sélectionnés.</li></ul>'],
       ['Nouveautés préparées en 1.3.4', '<ul><li>Un seul processus principal par profil ; second lancement ramené à la fenêtre existante.</li><li>Importer et exporter des boîtes, avec leur audio.</li><li>Vérification d’intégrité des fichiers et import sans écrasement.</li><li>Guide organisé, séparé des projets sur l’accueil.</li><li>Protection du stockage en cas d’erreur de lecture.</li><li>Recentrage de la vue arbre.</li><li>Journal SUIVI_MINDSET.txt à la racine du projet.</li></ul><p>Version préparée dans les sources. Cela ne signifie pas qu’un nouvel installeur a été publié ou installé sur ton ordinateur.</p>'],
     ]],
   ];
+  const bookChapter = ['06 · Mode livre', [
+    ['Des feuilles distinctes, un seul texte', '<p>Le bouton Mode livre remplace l’ancien affichage en deux colonnes. Le document commence en A4, avec deux feuilles côte à côte. Quand une feuille est pleine, le texte se poursuit automatiquement sur la suivante. Fais défiler le document pour retrouver les pages suivantes.</p><p>Le bouton moins affiche davantage de feuilles, jusqu’à quatre par rangée. Le bouton plus revient vers une seule feuille. Le menu permet aussi de choisir directement 1, 2, 3 ou 4 pages. Le zoom ne modifie ni le texte ni la taille imprimée.</p><p>Une feuille pâle « Page suivante » est un emplacement d’aperçu : elle n’est pas ajoutée au PDF tant qu’elle ne contient rien. Au début absolu de la note, Retour arrière ne déplace plus le document.</p>'],
+    ['Format, orientation et marges', '<p>Choisis Format des pages pour sélectionner A4, A5, A6, A3, Letter, Legal, Executive ou Poche. Les dimensions personnalisées acceptent une largeur et une hauteur de 8 à 60 cm. L’orientation et les quatre marges sont réglables. Il faut garder au moins 4 cm de largeur et de hauteur pour écrire.</p><p>Le format appartient à la note et accompagne son export .mindset. Le nombre de feuilles côte à côte est une préférence de cet ordinateur. Les titres restent entièrement dépliés en mode livre pour montrer tout le contenu imprimable.</p>'],
+    ['Sauts de page et PDF', '<p>Entrée crée un paragraphe ; Maj + Entrée crée une ligne dans le même paragraphe. Pour commencer une nouvelle feuille volontairement, utilise Ctrl + Entrée, le bouton Saut de page ou le menu /.</p><p>Exporter en PDF puis Créer le PDF prépare les vraies pages, avec la mise en forme et les images. Dans l’aperçu, Enregistrer PDF sauvegarde le document. Ajouter un titre, une date ou une heure lors de l’export prend de la place et peut modifier les coupures.</p><p>Pour une impression sur papier, choisis le même format, une échelle de 100 % et désactive les en-têtes automatiques du système. L’export compatible Word reprend le format ; Word peut effectuer sa propre pagination. Un tableau ou un bloc indivisible plus haut qu’une feuille peut nécessiter une mise en forme adaptée.</p>'],
+  ]];
+  chapters.push(bookChapter);
+  function upgrade(box, uid, now) {
+    if (!box?.isGuide || !box.root || box.guideVersion >= VERSION) return false;
+    const stamp = now();
+    const notes = bookChapter[1].map(([title, content]) => ({ id:uid('note'), type:'note', title, content, createdAt:stamp, modifiedAt:stamp }));
+    box.root.children.push({ id:uid('folder'), type:'folder', title:bookChapter[0], children:notes, createdAt:stamp, modifiedAt:stamp });
+    box.guideVersion = VERSION; box.modifiedAt = stamp;
+    return true;
+  }
   function create(uid, now) {
     const stamp = now();
     const item = (type, title, extra) => ({ id: uid(type), type, title, createdAt: stamp, modifiedAt: stamp, ...extra });
@@ -36,6 +50,6 @@
     const root = item('folder', 'Guide MindSet', { children: folders });
     return { id: uid('box'), name: 'Guide MindSet', isGuide: true, guideVersion: VERSION, passwordHash: '', createdAt: stamp, modifiedAt: stamp, root, activeItemId: folders[0].children[0].id, expandedIds: [root.id, folders[0].id], selectedIds: [], bookmarkedIds: [], openTabIds: [], viewMode: 'tree', sortMode: 'custom', iconFolderId: root.id, searchQuery: '' };
   }
-  root.MindSetGuide = { create, VERSION };
+  root.MindSetGuide = { create, upgrade, VERSION };
   if (typeof module === 'object' && module.exports) module.exports = root.MindSetGuide;
 })(typeof globalThis === 'object' ? globalThis : this);

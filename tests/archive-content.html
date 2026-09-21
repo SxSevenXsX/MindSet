@@ -1,5 +1,5 @@
 <!doctype html><html lang="fr"><meta charset="utf-8"><title>Contrôles du contenu importé</title><h1 id="summary">Tests en cours</h1><ul id="results"></ul>
-<script src="../src/vendor/purify.min.js"></script><script src="../src/box-archive.js"></script><script src="../src/archive-content.js"></script>
+<script src="../src/vendor/purify.min.js"></script><script src="../src/book-layout.js"></script><script src="../src/box-archive.js"></script><script src="../src/archive-content.js"></script>
 <script>
 const tests=[];
 const check=(name,run)=>tests.push({name,run});
@@ -14,8 +14,8 @@ check('Les styles ne peuvent pas recouvrir l’application ni charger du CSS dis
  assert(!el.firstChild.style.position&&!el.firstChild.style.backgroundImage&&el.firstChild.style.color);
 });
 check('Titres, styles personnels, gras, couleurs et retours à la ligne conservés',()=>{
- const el=root('<h1 class="ms-style-h1">Titre</h1><p class="ms-style-ps4" style="color: rgb(15, 107, 88)">Texte <strong>gras</strong><br>Suite</p>');
- assert(el.querySelector('h1.ms-style-h1')&&el.querySelector('p.ms-style-ps4 strong')&&el.querySelector('br')&&el.querySelector('p').style.color);
+ const el=root('<h1 class="ms-style-h1">Titre</h1><p class="ms-style-ps4" style="color: rgb(15, 107, 88);margin-top:5px;margin-bottom:24px">Texte <strong>gras</strong><br>Suite</p>');
+ assert(el.querySelector('h1.ms-style-h1')&&el.querySelector('p.ms-style-ps4 strong')&&el.querySelector('br')&&el.querySelector('p').style.color&&el.querySelector('p').style.marginBottom==='24px');
 });
 check('Tâches, tableaux, images intégrées et sauts de page conservés',()=>{
  const el=root('<ul class="check-list"><li data-checked="true">Oui</li></ul><hr class="note-page-break"><table><tr><td>Cellule</td></tr></table><img class="img-float-left" style="float:left" src="data:image/png;base64,AAAA">');
@@ -28,6 +28,11 @@ check('Les liens exécutables et les classes de l’interface ne sont pas import
 check('Une boîte importée ne peut pas définir de propriétés cachées dans l’application',()=>{
  const box=MindSetArchiveContent.cleanBox({id:'safe',name:'Test',passwordHash:'',root:{id:'root',type:'folder',title:'Test',children:[]},secretExtra:'drop'});
  assert(!('secretExtra' in box));
+});
+check('Le format livre personnalisé est restauré sans champs inconnus',()=>{
+ const source={id:'box',name:'Livre',passwordHash:'',root:{id:'root',type:'folder',title:'Livre',children:[{id:'note',type:'note',title:'Chapitre',content:'<p>Texte</p>',bookSetup:{sizeId:'custom',customWidthCm:14,customHeightCm:22,orientation:'landscape',margins:{top:1,bottom:1,left:2,right:2},unsafe:'no'}}]}};
+ const cleaned=MindSetArchiveContent.cleanBox(source).root.children[0];
+ assert(cleaned.bookSetup.sizeId==='custom' && cleaned.bookSetup.customWidthCm===14 && cleaned.bookSetup.orientation==='landscape' && !('unsafe' in cleaned.bookSetup));
 });
 let passed=0;
 for(const {name,run} of tests){const el=document.createElement('li');try{run();passed++;el.className='pass';el.textContent='✓ '+name;}catch(error){el.className='fail';el.textContent='✗ '+name+' : '+error.message;}document.querySelector('#results').append(el);}

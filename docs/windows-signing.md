@@ -1,6 +1,6 @@
 # Signer et publier MindSet pour Windows
 
-La version 1.3.4 est préparée (y compris les corrections 1.3.3), mais n’est pas distribuée tant qu’un certificat de signature de code reconnu n’a pas été activé. Les versions précédentes étaient non signées ; sur un ordinateur où Smart App Control les bloque, accepter la demande d’administration ne suffit pas à les installer.
+Depuis la 1.3.5, MindSet peut être distribué gratuitement sans certificat, comme les premières versions. La variante signée reste disponible lorsque le titulaire dispose d’un certificat. Les versions précédentes étaient non signées ; sur un ordinateur où Smart App Control les bloque, accepter la demande d’administration ne suffit pas à les installer.
 
 Le parcours de l’utilisateur reste **Rechercher → Télécharger → Redémarrer**. La signature intervient lors de la fabrication de la version. L’utilisateur qui installe une mise à jour n’a aucun compte de signature à créer.
 
@@ -8,7 +8,21 @@ Le parcours de l’utilisateur reste **Rechercher → Télécharger → Redémar
 
 Windows n’exige pas systématiquement l’achat d’un certificat. [Smart App Control](https://support.microsoft.com/fr-fr/windows/security/threat-malware-protection/smart-app-control-frequently-asked-questions) peut autoriser un programme non signé quand son service de confiance le juge sûr. Un nouvel installeur constitue un nouveau fichier à évaluer ; en l’absence de verdict favorable et de signature valide, il peut être bloqué. Les journaux de l’incident confirment le refus de l’installeur 1.3.2, mais ne permettent pas de dater un éventuel changement de politique Windows ni d’expliquer le verdict des anciennes versions.
 
-Le contrôle obligatoire des signatures ajouté dans le code 1.3.3 est un choix de fiabilité du processus de publication. Cette version n’étant pas installée sur le poste concerné, ce nouveau contrôle n’est pas la cause de l’échec déjà observé. Une signature reconnue peut être fournie gratuitement dans certains programmes ; signature ne signifie pas nécessairement achat.
+Le contrôle obligatoire préparé en 1.3.3 n’avait pas été installé sur le poste concerné. La mise à jour 1.3.2 a finalement réussi, et la version de l’application installée a été vérifiée. Le lien supposé avec une boîte sécurisée n’est pas établi. En 1.3.5, l’absence de signature n’impose plus d’acheter un certificat ; une signature présente mais invalide reste refusée. Une signature reconnue peut être fournie gratuitement dans certains programmes ; signature ne signifie pas nécessairement achat.
+
+## Publication personnelle gratuite
+
+Après validation du code et des tests, créer et pousser le tag correspondant au `package.json`, puis exécuter :
+
+```powershell
+npm run release -- --unsigned
+```
+
+Cette commande conserve les tests, la vérification Windows de l’état réel des deux exécutables, les empreintes SHA-512 du manifeste, les tailles, le brouillon avant publication et la vérification des fichiers envoyés. Elle accepte une application et un installeur tous deux réellement non signés. Un fichier modifié, une signature invalide ou des résultats incohérents restent bloquants. Le rapport `signature-verification.json` porte le mode `unsigned`.
+
+À l’installation, Windows reste libre d’afficher « éditeur inconnu » ou de refuser le fichier. Aucun réglage Windows n’est changé. Dans une application construite avec un nom de signataire, electron-updater conserve aussi sa vérification d’identité du signataire pour les mises à jour suivantes.
+
+Pour fabriquer sans publier : `npm run dist -- --publish never`, puis `node scripts/verify-windows-signatures.cjs --unsigned` et `npm run verify:release -- --unsigned`.
 
 ## Pistes gratuites à examiner avant un achat
 
@@ -61,7 +75,7 @@ npm run verify:release
 
 Le workflow **Publish Windows release** prend en charge un certificat existant utilisable par electron-builder via `CSC_LINK` et `CSC_KEY_PASSWORD` (secrets GitHub), avec `SIGNING_PUBLISHER_NAME` comme variable du dépôt. Ne jamais placer ces secrets dans le code ou dans une conversation.
 
-Cette variante ne rend pas exportable une clé cloud ou matérielle : pour SimplySign, utiliser la publication depuis le poste connecté décrite ci-dessus. Sans configuration de signature utilisable, le workflow s’arrête avant publication. Les commandes de développement `npm run pack` et `npm run dist` ne constituent pas des versions publiables.
+Cette variante ne rend pas exportable une clé cloud ou matérielle : pour SimplySign, utiliser la publication depuis le poste connecté décrite ci-dessus. Sans configuration de signature utilisable, le workflow s’arrête avant publication. Le workflow ci-dessous reste dédié à la variante signée. La publication gratuite utilise la commande locale explicite décrite plus haut.
 
 ## Vérification avant de considérer l’incident résolu
 
@@ -69,6 +83,6 @@ Cette variante ne rend pas exportable une clé cloud ou matérielle : pour Simpl
 - Vérifier la sauvegarde des notes, l’installation et le lancement de la nouvelle version.
 - Rechercher à nouveau : la version installée doit être annoncée à jour.
 - Annuler l’installeur sur le profil de test : au lancement suivant, l’ancienne version doit être explicitement signalée, sans nouvelle installation automatique lors d’une fermeture ordinaire.
-- Sur le poste initialement bloqué, vérifier le même parcours avec le certificat reconnu et les protections Windows toujours actives.
+- Sur le poste initialement bloqué, vérifier le même parcours avec les protections Windows toujours actives.
 
 Les tests automatisés couvrent le parcours, les doubles clics, la sauvegarde et son échec, l’intégrité des fichiers, les signatures absentes, les manifestes incohérents et le résultat au lancement suivant. Ils ne remplacent pas cet essai d’installation avec le véritable certificat.
