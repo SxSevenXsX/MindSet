@@ -9,6 +9,14 @@ Application Windows de prise de notes locale : boîtes de projets, dossiers imbr
 - `npm run dist -- --publish never` pour créer un installeur de développement dans `dist/`.
 - `npm test` pour vérifier les archives, le stockage, l’instance unique, le parcours de mise à jour et les contrôles de publication.
 
+## Écriture — version 1.3.6
+
+Les documents s’ouvrent en **Note**, avec un zoom visuel par Ctrl + molette ou pincement (50 à 200 %). **Livre** remplace la vue Feuilles : une à quatre pages par rangée, adaptées en largeur et en hauteur pour rester entièrement visibles.
+
+Les couleurs et le surlignage s’appliquent directement, avec douze préréglages modifiables et trois dernières couleurs personnalisées. Un double-clic colore les marqueurs des listes. Les notes, dossiers et documents audio acceptent tous les émojis, y compris les séquences composées.
+
+Le guide intégré explique ces commandes ; [SUIVI_MINDSET.txt](SUIVI_MINDSET.txt) conserve l’historique détaillé des interventions.
+
 ## Mode livre — version 1.3.5
 
 Le bouton **Mode livre** affiche de vraies feuilles : deux A4 par défaut, avec texte continu vers la feuille suivante. Les commandes de zoom permettent une à quatre feuilles côte à côte. Le format, l’orientation et les marges se règlent pour chaque note, avec des dimensions personnalisées possibles. L’export PDF reprend la mise en page et les images. Retour arrière au début de la note est sans effet, y compris sur une ligne vide.

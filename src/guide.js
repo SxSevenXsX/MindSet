@@ -1,6 +1,6 @@
 (function (root) {
   'use strict';
-  const VERSION = 2;
+  const VERSION = 3;
   const chapters = [
     ['01 · Bien démarrer', [
       ['Bienvenue dans MindSet', '<p>MindSet est ton espace personnel : des boîtes pour séparer les projets, des dossiers pour les organiser, des notes et de l’audio pour développer tes idées. Tout est enregistré sur cet ordinateur.</p><p>Ce guide est une vraie boîte : tu peux le parcourir, le modifier ou le supprimer. Tes autres boîtes restent indépendantes. Le bouton Guide MindSet de l’accueil permet de le retrouver ou de le recréer.</p>'],
@@ -9,7 +9,7 @@
     ]],
     ['02 · Écrire et mettre en forme', [
       ['Le menu / et les annotations', '<p>Dans un paragraphe vide, tape / pour choisir un titre, une liste, une tâche, une citation, une annotation, du code, un séparateur ou un saut de page. Recherche une commande, utilise les flèches puis Entrée. Échap ferme le menu.</p><p>Sélectionne du texte pour faire apparaître la barre de mise en forme. La barre principale propose aussi polices, couleurs, surlignage, alignement et styles de titres.</p>'],
-      ['Retours à la ligne et pages', '<p>Entrée crée un paragraphe. Maj + Entrée crée un retour à la ligne dans le même paragraphe. Après un titre, Entrée permet de poursuivre en texte normal. Sur une ligne de liste vide, Entrée permet de sortir de la liste.</p><p>L’écriture reste continue, même dans la vue papier. Les pages automatiques sont calculées à l’impression : elles ne déplacent pas le curseur pendant la frappe. Pour imposer une nouvelle page, utilise le saut de page du menu /.</p>'],
+      ['Retours à la ligne et pages', '<p>Entrée crée un paragraphe. Maj + Entrée crée un retour à la ligne dans le même paragraphe. Après un titre, Entrée permet de poursuivre en texte normal. Sur une ligne de liste vide, Entrée permet de sortir de la liste.</p><p>Le mode Note reste un espace continu. Le mode Livre montre les pages et fait passer le texte automatiquement d’une feuille à la suivante. Pour imposer une nouvelle page, utilise Ctrl + Entrée ou le saut de page du menu /.</p>'],
       ['Titres, listes, images et tableaux', '<p>Les titres structurent le plan. Les listes peuvent être simples, numérotées ou à cocher. Les images et les tableaux collés sont conservés dans les notes. Ctrl + Z annule la dernière modification ; Ctrl + Y ou Ctrl + Maj + Z la rétablit.</p><p>Les paramètres permettent de personnaliser les styles, les couleurs, les marges et les polices. Les polices installées par toi restent soumises à leur propre licence.</p>'],
       ['Exporter une note', '<p>Le menu d’export propose le texte, le document compatible Word et le PDF ou l’impression. Ces exports servent à lire et partager une note. Pour restaurer une boîte entière dans MindSet, utilise un fichier .mindset depuis l’accueil.</p>'],
     ]],
@@ -35,11 +35,22 @@
     ['Sauts de page et PDF', '<p>Entrée crée un paragraphe ; Maj + Entrée crée une ligne dans le même paragraphe. Pour commencer une nouvelle feuille volontairement, utilise Ctrl + Entrée, le bouton Saut de page ou le menu /.</p><p>Exporter en PDF puis Créer le PDF prépare les vraies pages, avec la mise en forme et les images. Dans l’aperçu, Enregistrer PDF sauvegarde le document. Ajouter un titre, une date ou une heure lors de l’export prend de la place et peut modifier les coupures.</p><p>Pour une impression sur papier, choisis le même format, une échelle de 100 % et désactive les en-têtes automatiques du système. L’export compatible Word reprend le format ; Word peut effectuer sa propre pagination. Un tableau ou un bloc indivisible plus haut qu’une feuille peut nécessiter une mise en forme adaptée.</p>'],
   ]];
   chapters.push(bookChapter);
+  const writingChapter = ['07 · Écriture et couleurs · 1.3.6', [
+    ['Note et Livre', '<p>Chaque document s’ouvre en mode Note : un espace continu pour écrire. Le bouton Livre affiche les vraies feuilles et remplace entièrement l’ancienne vue Feuilles. Le format et les marges choisis pour le livre restent enregistrés dans la note.</p><p>En mode Livre, les feuilles s’adaptent à la largeur et à la hauteur disponibles : une rangée entière reste visible. Le passage de la fin d’une feuille au début de la suivante, sur la même rangée, ne demande plus de remonter. Choisis de une à quatre feuilles côte à côte ; le document défile quand tu passes à la rangée suivante.</p>'],
+    ['Zoomer sans changer la police', '<p>En mode Note, utilise Ctrl + molette ou pince le pavé tactile pour agrandir ou réduire l’affichage. Les boutons moins et plus font la même chose. Clique sur le pourcentage pour retrouver 100 %.</p><p>Le zoom visuel va de 50 % à 200 %. Il ne modifie ni la taille de police enregistrée, ni le contenu, ni l’impression. Une taille 13 reste une taille 13. Ce zoom est conservé sur cet ordinateur.</p>'],
+    ['Couleur du texte et surlignage', '<p>Sélectionne du texte, ouvre sa palette puis clique sur une couleur : elle s’applique immédiatement. Personnaliser ouvre le sélecteur de couleur ; les changements sont visibles directement. Fermer le sélecteur ou la palette conserve le dernier choix. Aucun bouton de validation supplémentaire n’est nécessaire.</p><p>Le texte et le surlignage possèdent chacun douze couleurs prédéfinies, modifiables dans Paramètres → Apparence, et trois cases de couleurs personnalisées. Les cases se remplissent dans l’ordre : 1, 2, 3, puis la nouvelle couleur remplace la case 1, et ainsi de suite. Reprendre une couleur déjà présente ne la duplique pas. Un déplacement dans le sélecteur mémorise seulement la couleur finale. Enlever le surlignage retire le fond du texte sélectionné.</p>'],
+    ['Colorer les puces et les formes', '<p>Double-clique directement sur une puce, un numéro, un tiret, une flèche, un rond, un carré, un triangle ou une case à cocher. La palette propose noir, rouge, bleu, jaune, orange, vert, violet et rose. Le texte de la ligne conserve sa propre couleur.</p><p>Suivre la couleur du texte rétablit la couleur automatique du marqueur : le dernier caractère coloré avant la liste ou l’élément précédent, puis le texte de l’élément si nécessaire. Cela permet aussi d’utiliser d’autres couleurs. Les choix accompagnent la note lors de la sauvegarde et de l’export.</p>'],
+    ['Tous les émojis', '<p>Fais un clic droit sur une note, un dossier ou un document audio. Sous les choix rapides, le champ Tous les émojis accepte un émoji collé ou choisi avec Win + . sur Windows. Valide avec Entrée ou le bouton à côté du champ.</p><p>Les drapeaux, les tons de peau et les émojis composés sont conservés en entier. L’option Sans icône retire l’émoji ; l’option d’icône par défaut retrouve le symbole du document.</p>'],
+  ]];
+  chapters.push(writingChapter);
   function upgrade(box, uid, now) {
     if (!box?.isGuide || !box.root || box.guideVersion >= VERSION) return false;
     const stamp = now();
-    const notes = bookChapter[1].map(([title, content]) => ({ id:uid('note'), type:'note', title, content, createdAt:stamp, modifiedAt:stamp }));
-    box.root.children.push({ id:uid('folder'), type:'folder', title:bookChapter[0], children:notes, createdAt:stamp, modifiedAt:stamp });
+    const additions = [...(box.guideVersion < 2 ? [bookChapter] : []), writingChapter];
+    for (const chapter of additions) {
+      const notes = chapter[1].map(([title, content]) => ({ id:uid('note'), type:'note', title, content, createdAt:stamp, modifiedAt:stamp }));
+      box.root.children.push({ id:uid('folder'), type:'folder', title:chapter[0], children:notes, createdAt:stamp, modifiedAt:stamp });
+    }
     box.guideVersion = VERSION; box.modifiedAt = stamp;
     return true;
   }

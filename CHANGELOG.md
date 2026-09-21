@@ -1,3 +1,14 @@
+# 1.3.6 — Notes, pages entières et couleurs immédiates
+
+- Les pages du livre tiennent entièrement dans la hauteur et la largeur disponibles. Le passage entre les feuilles d’une même rangée garde le défilement stable.
+- Deux modes : Note et Livre. L’ancien mode Feuilles disparaît ; chaque document s’ouvre initialement en Note.
+- Zoom visuel de la note par Ctrl + molette, pincement du pavé tactile et boutons : de 50 % à 200 %, sans changer la police enregistrée ou imprimée.
+- Tous les émojis pour les notes, dossiers et documents audio : saisie, collage ou sélecteur Windows, sans couper les familles, drapeaux et tons de peau.
+- Double-clic sur les marqueurs des listes pour choisir noir, rouge, bleu, jaune, orange, vert, violet ou rose ; retour possible à la couleur automatique du texte.
+- Texte et surlignage : application immédiate, sans bouton de validation. Fermer le choix conserve sa dernière couleur ; un seul Ctrl + Z annule le geste.
+- Douze couleurs prédéfinies modifiables dans les paramètres et trois cases de couleurs personnalisées pour chaque palette, remplacées circulairement sans doublons.
+- Guide enrichi sans remplacer les annotations personnelles, conservation des couleurs dans les sauvegardes, contrôles de l’éditeur et des PDF.
+
 # 1.3.5 — Mode livre et écriture stable
 
 - Retour arrière au début absolu de la note sans suppression, déplacement du curseur ni défilement parasite, y compris sur une ligne vide.

@@ -4564,3 +4564,30 @@ button:disabled {
 
 .box-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
 .box-protection-status.is-unprotected { color: var(--muted); }
+
+/* Writing controls: view scale is separate from document typography. */
+.mode-button { display:inline-flex; align-items:center; justify-content:center; width:auto; gap:5px; padding:0 9px; font-size:12px; }
+.note-zoom-controls { display:inline-flex; align-items:center; gap:2px; border-left:1px solid var(--border); padding-left:5px; }
+.note-zoom-value { width:55px; font-size:11px; font-variant-numeric:tabular-nums; }
+.custom-emoji { padding:8px 6px 4px; display:grid; gap:6px; }
+.custom-emoji label { font-size:12px; font-weight:650; }
+.custom-emoji > div { display:flex; gap:6px; }
+.custom-emoji input { min-width:0; width:100%; height:36px; font-size:20px; }
+.custom-emoji button { padding:6px; }
+.custom-emoji small { font-size:11px; color:var(--muted); }
+.context-menu { max-height:calc(100vh - 16px); overflow-y:auto; }
+.marker-color-panel { position:fixed; z-index:90; padding:10px; border:1px solid var(--border); border-radius:10px; background:var(--surface); box-shadow:var(--shadow); display:grid; gap:8px; }
+.marker-color-swatches { display:grid; grid-template-columns:repeat(8,24px); gap:6px; }
+.note-editor .check-list li::before { border-color:var(--li-marker-color,var(--accent)); }
+.note-editor .check-list li:is(.is-checked,[data-checked='true'])::before { background:var(--li-marker-color,var(--todo-color)); border-color:var(--li-marker-color,var(--todo-color)); }
+.quick-colors .color-section-label { font-size:11px; color:var(--muted); padding:4px 0; font-weight:500; }
+.color-custom-row { display:flex; align-items:center; gap:8px; border-top:1px solid var(--border); margin-top:6px; padding-top:9px; }
+.color-custom-row label { font-size:11px; color:var(--muted); }
+.color-custom-row input[type='color'] { width:30px; min-width:30px; }
+.color-tool-symbol { display:inline-flex; justify-content:center; align-items:center; width:20px; height:23px; font-weight:750; border-bottom:3px solid var(--tool-color); }
+.color-tool-symbol.is-highlight { background:var(--tool-color); color:#17201c; border-radius:3px; }
+.color-tool > details > summary { width:auto; min-width:44px; gap:3px; padding:0 5px; }
+.color-tool .quick-colors { min-width:202px; }
+
+.color-tool > details > summary { display:inline-flex; }
+.marker-color-swatches .quick-color { width:24px; height:24px; }

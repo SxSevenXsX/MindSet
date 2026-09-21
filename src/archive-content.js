@@ -5,11 +5,12 @@
   function cleanHtml(value) {
     const fragment = DOMPurify.sanitize(String(value || ''), {
       USE_PROFILES: { html: true }, RETURN_DOM_FRAGMENT: true,
-      ALLOW_DATA_ATTR: false, ADD_ATTR: ['data-checked'],
+      ALLOW_DATA_ATTR: false, ADD_ATTR: ['data-checked', 'data-marker-color'],
       FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select', 'video', 'audio'],
       FORBID_ATTR: ['id', 'name', 'srcset', 'contenteditable', 'autofocus', 'tabindex'],
     });
     for (const el of fragment.querySelectorAll('*')) {
+      if (el.hasAttribute('data-marker-color') && (el.tagName !== 'LI' || !/^#[0-9a-f]{6}$/i.test(el.dataset.markerColor))) el.removeAttribute('data-marker-color');
       const kept = [...el.classList].filter(value => safeClass.test(value));
       if (kept.length) el.className = kept.join(' '); else el.removeAttribute('class');
       for (const property of [...el.style]) {
@@ -39,7 +40,7 @@
     function node(source) {
       const result = pick(source, ['id', 'type', 'title', 'createdAt', 'modifiedAt']);
       result.iconKind = ['none', 'default', 'emoji'].includes(source.iconKind) ? source.iconKind : 'none';
-      result.emoji = typeof source.emoji === 'string' ? source.emoji.slice(0, 32) : '';
+      result.emoji = MindSetWriting.emoji(source.emoji);
       if (source.type === 'folder') result.children = source.children.map(node);
       if (source.type === 'note') {
         result.content = cleanHtml(source.content);

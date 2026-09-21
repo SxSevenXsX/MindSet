@@ -19,6 +19,10 @@
     editorRange: null,
     blockTools: null,
     bookView: null,
+    noteViewId: null,
+    noteZoomView: null,
+    colorTools: null,
+    markerTools: null,
     editorComposing: false,
     editorSelectionSnapshot: null,
     boxMenuOpen: false,
@@ -250,8 +254,6 @@
     "#fdf6cf", "#ffe3e3", "#ffeed8", "#e0f5e8", "#def0ff", "#ffe2ef",
   ];
 
-  const recentColorSlotCount = 6;
-
   function normalizeColorPalette(colors, fallback) {
     const source = Array.isArray(colors) ? colors : [];
     return fallback.map((def, index) => cleanColor(source[index], def));
@@ -270,7 +272,7 @@
   const state = loadState();
 
   function normalizeEditorViewMode(value) {
-    return value === "split" ? "book" : ["pages", "book"].includes(value) ? value : "flow";
+    return ["split", "book"].includes(value) ? "book" : "flow";
   }
 
   function normalizePageFlowMode(value) {
@@ -817,9 +819,9 @@
     .note-editor :is(ul,ol) :is(.circle-list,.triangle-list,.square-list) li::before{font-size:.72em;}
     .note-editor :is(ul,ol)>li>:is(ul,ol)[class]{padding-left:36px;}
     .note-editor .check-list li{position:relative;min-height:1.7em;padding-left:26px;}
-    .note-editor .check-list li::before{content:"";position:absolute;top:.45em;left:0;width:12px;height:12px;border:1.5px solid var(--accent);border-radius:3px;}
+    .note-editor .check-list li::before{content:"";position:absolute;top:.45em;left:0;width:12px;height:12px;border:1.5px solid var(--li-marker-color,var(--accent));border-radius:3px;}
     .note-editor .check-list li[data-checked="true"]{color:#657169;text-decoration:line-through;}
-    .note-editor .check-list li[data-checked="true"]::before{background:var(--todo-color);border-color:var(--todo-color);}
+    .note-editor .check-list li[data-checked="true"]::before{background:var(--li-marker-color,var(--todo-color));border-color:var(--li-marker-color,var(--todo-color));}
     .note-editor .check-list li[data-checked="true"]::after{content:"";position:absolute;top:calc(.45em + 2px);left:4px;width:4px;height:8px;border-right:2px solid #fff;border-bottom:2px solid #fff;transform:rotate(42deg);}
     .note-editor li.is-split-continuation{list-style:none;}
     .note-editor li.is-split-continuation::before{content:none !important;}
@@ -1347,9 +1349,9 @@
     .note-editor .square-list li::before{content:"□ ";font-weight:700;color:var(--li-marker-color,currentColor);}
     .note-editor ul .circle-list li::before,.note-editor ol .circle-list li::before,.note-editor ul .triangle-list li::before,.note-editor ol .triangle-list li::before,.note-editor ul .square-list li::before,.note-editor ol .square-list li::before{font-size:.72em;}
     .note-editor ul>li>ul[class],.note-editor ul>li>ol[class],.note-editor ol>li>ul[class],.note-editor ol>li>ol[class]{padding-left:36px;}
-    .note-editor .check-list li::before{content:"[ ] ";font-weight:700;color:${accentColor};}
+    .note-editor .check-list li::before{content:"[ ] ";font-weight:700;color:var(--li-marker-color,${accentColor});}
     .note-editor .check-list li[data-checked="true"]{color:#657169;text-decoration:line-through;}
-    .note-editor .check-list li[data-checked="true"]::before{content:"[x] ";color:${todoColor};}
+    .note-editor .check-list li[data-checked="true"]::before{content:"[x] ";color:var(--li-marker-color,${todoColor});}
     .note-editor li.is-split-continuation{list-style:none;}
     .note-editor li.is-split-continuation::before{content:"" !important;}
     .note-editor img{max-width:100%;height:auto;}
@@ -1440,14 +1442,8 @@
     return isHexColor(color) ? color : fallback;
   }
 
-  function normalizeRecentColors(colors) {
-    if (!Array.isArray(colors)) return [];
-    return [...new Set(colors.map((color) => cleanColor(color, "")).filter(Boolean))].slice(0, 8);
-  }
-
   function normalizeRecentColorSlots(colors) {
-    const unique = normalizeRecentColors(colors);
-    return Array.from({ length: recentColorSlotCount }, (_, index) => unique[index] || "");
+    return MindSetWriting.recentColors(colors).slots;
   }
 
   function defaultTreeGuideColor(theme) {
@@ -1478,6 +1474,8 @@
     const previousCustomMargins = normalizePageCustomMarginPresets(previousSettings.customPageMarginPresets);
     const previousMarginPreset = normalizePageMarginPreset(previousSettings.pageMarginPreset || "normal");
     const theme = previousSettings.theme === "dark" ? "dark" : "light";
+    const textHistory = MindSetWriting.recentColors(previousSettings.recentTextColors, previousSettings.recentTextColorSlot, normalizeColorPalette(previousSettings.textColorPalette, defaultTextPalette));
+    const highlightHistory = MindSetWriting.recentColors(previousSettings.recentHighlightColors, previousSettings.recentHighlightColorSlot, normalizeColorPalette(previousSettings.highlightColorPalette, defaultHighlightPalette));
     value.settings = {
       theme,
       selectionColor: previousSettings.selectionColor || "#0f6b58",
@@ -1488,10 +1486,10 @@
       navWidth: Math.min(Math.max(Number(previousSettings.navWidth) || 282, 218), 430),
       lastTextColor: cleanColor(previousSettings.lastTextColor, "#000000"),
       lastHighlightColor: cleanColor(previousSettings.lastHighlightColor, "#fff0a8"),
-      recentTextColors: normalizeRecentColorSlots(previousSettings.recentTextColors),
-      recentHighlightColors: normalizeRecentColorSlots(previousSettings.recentHighlightColors),
-      recentTextColorSlot: Math.min(Math.max(Number(previousSettings.recentTextColorSlot) || 0, 0), recentColorSlotCount - 1),
-      recentHighlightColorSlot: Math.min(Math.max(Number(previousSettings.recentHighlightColorSlot) || 0, 0), recentColorSlotCount - 1),
+      recentTextColors: textHistory.slots,
+      recentHighlightColors: highlightHistory.slots,
+      recentTextColorSlot: textHistory.next,
+      recentHighlightColorSlot: highlightHistory.next,
       textColorPalette: normalizeColorPalette(previousSettings.textColorPalette, defaultTextPalette),
       highlightColorPalette: normalizeColorPalette(previousSettings.highlightColorPalette, defaultHighlightPalette),
       graphDirection: normalizeGraphDirection(previousSettings.graphDirection),
@@ -1500,6 +1498,7 @@
       graphPanY: clampGraphPan(previousSettings.graphPanY),
       editorViewMode: normalizeEditorViewMode(previousSettings.editorViewMode),
       bookColumns: MindSetBookLayout.geometry({}, previousSettings.bookColumns).columns,
+      noteZoom: MindSetWriting.clampZoom(previousSettings.noteZoom),
       pageFlowMode: "continuous",
       editorRevision: 2,
       pageZoom: clampPageZoom(previousSettings.pageZoom || 1),
@@ -3370,7 +3369,7 @@
     if (!item || item.id === box.root.id) return;
     rememberState("Icone");
     item.iconKind = kind;
-    item.emoji = kind === "emoji" ? emoji || emojiChoices[0] : "";
+    item.emoji = kind === "emoji" ? MindSetWriting.emoji(emoji) || emojiChoices[0] : "";
     item.modifiedAt = now();
     touchBox(box);
     runtime.contextMenu = null;
@@ -4015,6 +4014,9 @@
   }
 
   function render() {
+    runtime.colorTools?.destroy(); runtime.colorTools = null;
+    runtime.markerTools?.destroy(); runtime.markerTools = null;
+    runtime.noteZoomView?.destroy(); runtime.noteZoomView = null;
     runtime.bookView?.destroy();
     runtime.bookView = null;
     removeImageToolbar();
@@ -4033,6 +4035,12 @@
       : 0;
     applyAppearance();
     const box = activeBox();
+    const item = box && findItem(box, box.activeItemId);
+    const viewId = item?.type === "note" ? `${box.id}:${item.id}` : "";
+    if (runtime.noteViewId !== viewId) {
+      runtime.noteViewId = viewId;
+      state.settings.editorViewMode = "flow";
+    }
     app.innerHTML = box ? renderApp(box) : renderLobby();
     bindEvents();
     bindGraphCanvas();
@@ -4618,16 +4626,16 @@
     ];
 
     return `
-      <div class="color-tool" data-color-tool="${kind}">
-        <div class="color-tool-main">
-          <input class="toolbar-color" type="color" value="${escapeHtml(current)}" data-color-input="${kind}" data-color-context title="${escapeHtml(label)} - clic droit : memoriser la couleur affichee" />
-          <button class="format-button color-apply" data-apply-color="${kind}" title="Appliquer ${escapeHtml(label)}" aria-label="Appliquer ${escapeHtml(label)}">${icon("check")}</button>
-          ${kind === "highlight" ? `<button class="format-button color-clear" data-clear-highlight title="Enlever le surlignage" aria-label="Enlever le surlignage">${icon("eraser")}</button>` : ""}
-        </div>
-        <details class="color-palette-menu" data-color-palette>
-          <summary aria-label="Palette ${escapeHtml(label)}" title="Palette ${escapeHtml(label)}">${icon("chevronDown")}</summary>
+      <div class="color-tool" data-color-tool="${kind}" style="--tool-color:${current}">
+        <details class="color-palette-menu" data-color-palette="${kind}">
+          <summary aria-label="Palette ${escapeHtml(label)}" title="${escapeHtml(label)}"><span class="color-tool-symbol ${kind === "highlight" ? "is-highlight" : ""}" aria-hidden="true">${kind === "highlight" ? "▰" : "A"}</span>${icon("chevronDown")}</summary>
           <div class="quick-colors" aria-label="${escapeHtml(label)}">
-            ${rows.map((row) => `<div class="quick-color-row">${row.map(renderSwatch).join("")}</div>`).join("")}
+            <div class="color-section-label">Couleurs prédéfinies</div>
+            ${rows.slice(0,2).map((row) => `<div class="quick-color-row">${row.map(renderSwatch).join("")}</div>`).join("")}
+            <div class="color-section-label">3 dernières couleurs personnalisées</div>
+            <div class="quick-color-row">${rows[2].map(renderSwatch).join("")}</div>
+            <div class="color-custom-row"><input class="toolbar-color" type="color" value="${escapeHtml(current)}" data-color-input="${kind}" aria-label="${escapeHtml(label)} personnalisée" title="Choisir une couleur · application immédiate"><label>Personnaliser<br><span data-color-code>${current}</span></label></div>
+            ${kind === "highlight" ? `<button class="menu-panel-item" type="button" data-clear-highlight>Enlever le surlignage</button>` : ""}
           </div>
         </details>
       </div>
@@ -5666,16 +5674,7 @@
     const stats = noteStats(note);
     const bookmarked = (box.bookmarkedIds || []).includes(note.id);
     const viewMode = normalizeEditorViewMode(state.settings?.editorViewMode);
-    const pageMode = viewMode === "pages";
     const bookMode = viewMode === "book" && MindSetBookEditor.supported();
-    const pageZoom = clampPageZoom(state.settings?.pageZoom || 1);
-    const settings = state.settings;
-    const pageSetup = normalizePageSetup(settings?.pageSetup, settings?.pageMarginPreset, settings);
-    const marginLabel = pageMarginLabel(state.settings);
-    const pageFlowMode = normalizePageFlowMode(state.settings?.pageFlowMode);
-    const pageStyle = pageMode
-      ? `--page-zoom:${pageZoom};${pageSetupStyle(state.settings)}`
-      : "";
     const fonts = availableFontOptions();
     const flowContent = stableDocumentHtml(note.content);
     return `
@@ -5746,24 +5745,15 @@
           </div>
           <div class="toolbar-row toolbar-secondary-row">
           <div class="toolbar-group">
-            <button class="format-button ${pageMode ? "is-active" : ""}" data-action="toggle-editor-view" data-tooltip="${pageMode ? "Mode ecriture simple" : "Mode feuilles"}" aria-label="${pageMode ? "Mode ecriture simple" : "Mode feuilles"}">${icon("bookOpen")}</button>
-            ${pageMode ? `
-              <div class="toolbar-menu" data-toolbar-menu>
-                <button class="format-button" type="button" data-menu-trigger data-page-layout-button data-tooltip="${escapeHtml(marginLabel)}" aria-label="Marges">${icon("ruler")}</button>
-                <div class="toolbar-menu-panel margin-panel">
-                  <span class="menu-panel-label">Marges</span>
-                  ${pageMarginOrder.map((id) => `<button class="menu-panel-item ${marginPresetForSetup(pageSetup, settings) === id ? "is-active" : ""}" type="button" data-page-margin-preset="${id}">${escapeHtml(pageMarginPresetLabel(id, settings))}</button>`).join("")}
-                  <span class="menu-panel-sep"></span>
-                  <button class="menu-panel-item" type="button" data-action="open-page-margins-settings">Personnaliser les marges…</button>
-                </div>
-              </div>` : ""}
+            <button class="format-button mode-button ${!bookMode ? "is-active" : ""}" data-action="editor-note-view" aria-label="Mode note" aria-pressed="${!bookMode}">${icon("note")}<span>Note</span></button>
+            <button class="format-button mode-button ${bookMode ? "is-active" : ""}" data-action="toggle-editor-book-view" aria-label="Mode livre" aria-pressed="${bookMode}">${icon("bookOpen")}<span>Livre</span></button>
             <button class="format-button" data-editor-insert-break title="Saut de page (Ctrl + Entrée)" aria-label="Insérer un saut de page">${icon("splitPages")}</button>
             <span class="writing-hint">Écrire, puis <kbd>/</kbd> pour les blocs</span>
-            <button class="format-button ${bookMode ? "is-active" : ""}" data-action="toggle-editor-book-view" data-tooltip="Mode livre" aria-label="Mode livre" aria-pressed="${bookMode}">${icon("splitColumns")}</button>
-            ${pageMode ? `
-              <button class="format-button" data-action="page-zoom-out" data-tooltip="Dezoomer les feuilles" aria-label="Dezoomer les feuilles">${icon("zoomOut")}</button>
-              <button class="format-button" data-action="page-zoom-in" data-tooltip="Zoomer les feuilles" aria-label="Zoomer les feuilles">${icon("zoomIn")}</button>
-            ` : ""}
+            ${!bookMode ? `<span class="note-zoom-controls" role="group" aria-label="Zoom visuel de la note">
+              <button class="format-button" type="button" data-note-zoom-out aria-label="Dézoomer la note">${icon("zoomOut")}</button>
+              <button class="format-button note-zoom-value" type="button" data-note-zoom-reset title="Zoom visuel · Ctrl + molette ou pincement · Cliquer pour revenir à 100 %" aria-label="Réinitialiser le zoom de la note">${Math.round(state.settings.noteZoom * 100)} %</button>
+              <button class="format-button" type="button" data-note-zoom-in aria-label="Zoomer la note">${icon("zoomIn")}</button>
+            </span>` : ""}
             <button class="format-button" data-editor-action="toggle-heading-collapse" ${bookMode ? 'disabled' : ''} data-tooltip="Replier / deplier le titre" aria-label="Replier / deplier le titre">${icon("collapse")}</button>
             <button class="format-button" data-editor-action="toggle-all-headings" ${bookMode ? 'disabled' : ''} data-tooltip="Replier / deplier tous les titres" aria-label="Replier / deplier tous les titres">${icon("collapseIn")}</button>
             <button class="format-button ${bookmarked ? "is-active" : ""}" data-action="toggle-bookmark" data-tooltip="${bookmarked ? "Retirer des signets" : "Ajouter aux signets"}" aria-label="${bookmarked ? "Retirer des signets" : "Ajouter aux signets"}">${icon(bookmarked ? "bookmarkFilled" : "bookmark")}</button>
@@ -5781,14 +5771,11 @@
           </div>
         </div>
         </div>
-        <section class="editor-page ${pageMode ? "is-page-mode" : ""} ${bookMode ? "is-book-mode" : ""}" style="${pageStyle}">
+        <section class="editor-page ${bookMode ? "is-book-mode" : "is-note-mode"}">
           <input class="title-input" data-note-title value="${escapeHtml(note.title)}" aria-label="Titre de la note" />
-          ${pageMode ? `<p class="paper-caption">Vue papier continue · Les pages sont calculées à l’impression</p>` : ""}
-          ${bookMode ? renderBookEditor(note, flowContent) : pageMode
-            ? `<div class="page-editor-viewport" data-page-viewport><div class="page-editor-scale" data-page-scale><div class="note-editor page-document" data-note-editor data-editor-note-id="${note.id}" data-page-flow="continuous" contenteditable="true" role="textbox" aria-label="Contenu de la note" aria-multiline="true" spellcheck="true">${flowContent}</div></div></div>`
-            : `<div class="note-editor" data-note-editor data-editor-note-id="${note.id}" contenteditable="true" role="textbox" aria-label="Contenu de la note" aria-multiline="true" spellcheck="true">${flowContent}</div>`}
+          ${bookMode ? renderBookEditor(note, flowContent)
+            : `<div class="note-editor" data-note-editor data-editor-note-id="${note.id}" contenteditable="true" role="textbox" aria-label="Contenu de la note" aria-multiline="true" spellcheck="true" style="zoom:${state.settings.noteZoom}">${flowContent}</div>`}
           <div class="editor-status" aria-live="polite">
-            ${pageMode && pageFlowMode === "independent" ? `<span class="page-full-notice" data-page-full-notice></span>` : ""}
             <span data-word-count>${stats.words} mots</span>
             <span data-char-count>${stats.chars} caractères</span>
           </div>
@@ -5997,7 +5984,7 @@
     const item = findItem(box, runtime.contextMenu.itemId);
     if (!item || item.id === box.root.id) return "";
     const x = Math.min(runtime.contextMenu.x || 0, Math.max(window.innerWidth - 238, 8));
-    const y = Math.min(runtime.contextMenu.y || 0, Math.max(window.innerHeight - 260, 8));
+    const y = Math.min(runtime.contextMenu.y || 0, Math.max(window.innerHeight - 470, 8));
     const defaultLabel = item.type === "folder" ? "Icone de dossier" : "Icone de note";
     return `
       <div class="context-menu" style="left:${x}px; top:${y}px" data-context-menu>
@@ -6028,12 +6015,18 @@
           ${itemIconMarkup({ ...item, iconKind: "default" })}
           <span>${defaultLabel}</span>
         </button>
-        <div class="context-label">Emoji</div>
+        <div class="context-label">Émoji</div>
         <div class="emoji-picker">
           ${emojiChoices.map((emoji) => `
             <button class="emoji-choice ${item.iconKind === "emoji" && item.emoji === emoji ? "is-active" : ""}" data-icon-choice="emoji" data-icon-emoji="${escapeHtml(emoji)}" data-icon-target="${item.id}" aria-label="Emoji ${escapeHtml(emoji)}">${escapeHtml(emoji)}</button>
           `).join("")}
         </div>
+        <form class="custom-emoji" data-custom-emoji-form data-icon-target="${item.id}">
+          <label for="custom-emoji-input">Tous les émojis</label>
+          <div><input id="custom-emoji-input" class="modal-field" name="emoji" autocomplete="off" aria-label="Émoji personnalisé" placeholder="🌱" value="${escapeHtml(item.iconKind === "emoji" ? item.emoji : "")}"><button class="ghost-button" type="submit" aria-label="Utiliser cet émoji">${icon("check")}</button></div>
+          <small>Colle un émoji ou utilise <kbd>Win + .</kbd></small>
+          <small data-emoji-error role="alert" hidden>Choisis un émoji.</small>
+        </form>
       </div>
     `;
   }
@@ -6739,6 +6732,14 @@
         if (!box) return;
         setItemIcon(box, button.dataset.iconTarget, button.dataset.iconChoice, button.dataset.iconEmoji || "");
       });
+    });
+
+    app.querySelector("[data-custom-emoji-form]")?.addEventListener("submit", event => {
+      event.preventDefault(); event.stopPropagation();
+      const form = event.currentTarget, value = MindSetWriting.emoji(form.elements.emoji.value);
+      if (!value) { form.querySelector("[data-emoji-error]").hidden = false; return; }
+      const box = activeBox();
+      if (box) setItemIcon(box, form.dataset.iconTarget, "emoji", value);
     });
 
     app.querySelectorAll("[data-settings-page]").forEach((button) => {
@@ -7801,38 +7802,8 @@
         render();
       }
     }
-    if (action === "toggle-editor-view") {
-      if (normalizeEditorViewMode(state.settings.editorViewMode) === "pages") {
-        const editor = app.querySelector(".editor-page.is-page-mode [data-note-editor]");
-        const note = findItem(box, box.activeItemId);
-        if (editor && note?.type === "note") {
-          note.content = mergePageEditorHtml({ keepActiveBlankSheet: isIndependentPageFlow() });
-          note.modifiedAt = now();
-          touchBox(box);
-          saveState();
-        }
-      } else {
-        flushActiveEditorContent();
-      }
-      state.settings.editorViewMode = state.settings.editorViewMode === "pages" ? "flow" : "pages";
-      saveState();
-      render();
-    }
-    if (action === "toggle-page-flow-mode") {
-      const editor = app.querySelector(".editor-page.is-page-mode [data-note-editor]");
-      const note = findItem(box, box.activeItemId);
-      const nextMode = isContinuousPageFlow() ? "independent" : "continuous";
-      if (editor && note?.type === "note") {
-        note.content = mergePageEditorHtml({
-          keepActiveBlankSheet: true,
-          keepSheets: nextMode === "independent",
-        });
-        note.modifiedAt = now();
-        touchBox(box);
-      }
-      state.settings.pageFlowMode = nextMode;
-      saveState();
-      render();
+    if (action === "editor-note-view") {
+      flushActiveEditorContent(); state.settings.editorViewMode = "flow"; saveState(); render();
     }
     if (action === "toggle-editor-book-view") {
       if (!MindSetBookEditor.supported()) { setToast("Le mode livre nécessite la dernière version de l’application MindSet."); return; }
@@ -7845,18 +7816,6 @@
     if (action === "book-format") {
       flushActiveEditorContent();
       setModal({ type: "book-format", noteId: box.activeItemId }); render();
-    }
-    if (action === "page-zoom-out") {
-      flushActiveEditorContent();
-      state.settings.pageZoom = clampPageZoom((state.settings.pageZoom || 1) * 0.82);
-      saveState();
-      render();
-    }
-    if (action === "page-zoom-in") {
-      flushActiveEditorContent();
-      state.settings.pageZoom = clampPageZoom((state.settings.pageZoom || 1) * 1.12);
-      saveState();
-      render();
     }
     if (action === "open-page-margins-settings") {
       flushActiveEditorContent();
@@ -9390,6 +9349,7 @@
           }
         }
         if (name === "data-checked" && tag === "LI") return;
+        if (name === "data-marker-color" && tag === "LI" && isHexColor(value)) return;
         if (tag === "A" && name === "href" && /^(https?:|mailto:)/i.test(value.trim())) return;
         if (tag === "IMG" && name === "src" && /^(https?:|data:image\/)/i.test(value.trim())) return;
         element.removeAttribute(attribute.name);
@@ -9608,11 +9568,6 @@
       title.addEventListener("blur", scheduleRenderWhenIdle);
     }
 
-    if (normalizeEditorViewMode(state.settings?.editorViewMode) === "pages") {
-      paginateNoteIntoPages(note);
-      updateEditorStats(note);
-    }
-
     const editors = [...app.querySelectorAll("[data-note-editor]")];
     const activeEditor = () => {
       const active = document.activeElement?.closest?.("[data-note-editor]");
@@ -9766,6 +9721,16 @@
         }),
       });
     }
+    if (editor && !editor.closest("[data-book-viewport]")) {
+      runtime.noteZoomView = MindSetWriting.mountZoom(editor, {
+        value: state.settings.noteZoom,
+        onChange: value => { state.settings.noteZoom = value; saveState(); },
+      });
+    }
+    runtime.markerTools = MindSetWriting.mountMarkers(editor, {
+      remember: () => rememberEditorSnapshot(note, editor),
+      changed: () => syncEditorContent(editor, note, box),
+    });
     updateEditorStats(note);
     app.querySelector("[data-editor-insert-break]")?.addEventListener("mousedown", (event) => event.preventDefault());
     app.querySelector("[data-editor-insert-break]")?.addEventListener("click", () => {
@@ -9847,81 +9812,79 @@
       });
     }
 
-    app.querySelectorAll("[data-color-input]").forEach((input) => {
-      input.addEventListener("mousedown", saveToolbarSelection);
-      input.addEventListener("focus", () => {
-        saveToolbarSelection();
-        holdEditorSelectionHighlight();
-      });
-      input.addEventListener("blur", releaseEditorSelectionHighlight);
-      input.addEventListener("input", () => {
-        const clean = setLastEditorColor(input.dataset.colorInput, input.value);
-        if (clean) input.value = clean;
-        input.dataset.selectionColor = clean || "";
-        input.closest(".color-tool")?.classList.remove("is-mixed-color");
-        paintColorTool(input.dataset.colorInput, clean);
-        saveState();
-      });
-      input.addEventListener("contextmenu", (event) => {
-        event.preventDefault();
-        const kind = input.dataset.colorInput;
-        const shown = cleanColor(input.dataset.selectionColor || input.value, "");
-        if (!shown) {
-          setToast("Aucune couleur unique a memoriser.");
-          return;
+    // A native picker can emit many input events. Keep one selection and one undo
+    // step for the entire gesture, and record only its final custom color.
+    let colorSession = null;
+    function finishColor() {
+      if (!colorSession) return;
+      const session = colorSession; colorSession = null;
+      if (session.dirty) {
+        registerRecentColor(session.kind, session.color);
+        editorHistory(note).group = null;
+        paintColorTool(session.kind, session.color); saveState();
+      }
+      releaseEditorSelectionHighlight();
+    }
+    function startColor(input) {
+      if (colorSession?.input === input) return colorSession;
+      finishColor(); saveToolbarSelection();
+      const current = activeEditor();
+      if (!current) return null;
+      colorSession = {input, editor:current, kind:input.dataset.colorInput, range:runtime.editorRange?.cloneRange(), dirty:false, color:input.value};
+      return colorSession;
+    }
+    function previewColor(input) {
+      const session = startColor(input), color = cleanColor(input.value, "");
+      if (!session || !color || (session.dirty && session.color === color)) return;
+      const current = session.editor;
+      if (!session.range || !selectionInsideEditor(current, session.range)) return;
+      if (!session.dirty) {
+        rememberEditorSnapshot(note, current);
+        session.prepared = MindSetWriting.prepareColorRange(current, session.range);
+      }
+      editorHistory(note).group = {type:"color-preview"};
+      session.dirty = true; session.color = color;
+      const property = session.kind === "highlight" ? "background-color" : "color";
+      session.prepared.spans.forEach(span => span.style.setProperty(property, color));
+      session.range = session.prepared.range;
+      runtime.editorRange = session.range.cloneRange();
+      releaseEditorSelectionHighlight();
+      setLastEditorColor(session.kind, color);
+      syncEditorContent(current, note, box); paintColorTool(session.kind, color);
+    }
+
+    app.querySelectorAll("[data-color-input]").forEach(input => {
+      input.addEventListener("mousedown", () => {finishColor();saveToolbarSelection();startColor(input);});
+      input.addEventListener("focus", () => {startColor(input);holdEditorSelectionHighlight();});
+      input.addEventListener("input", () => previewColor(input));
+      input.addEventListener("change", () => {previewColor(input);finishColor();});
+      input.addEventListener("blur", finishColor);
+    });
+    app.querySelectorAll("[data-color-palette]").forEach(palette => {
+      palette.addEventListener("toggle", () => {
+        if (!palette.open) {
+          finishColor();
+          // Closing with the palette's own control returns to the saved caret.
+          // An outside click keeps its own focus and selection.
+          if (palette.contains(document.activeElement)) restoreEditorSelection(activeEditor());
         }
-        registerRecentColor(kind, shown);
-        saveState();
-        paintColorTool(kind, shown);
-        setToast("Couleur memorisee.");
+      });
+      palette.addEventListener("keydown", event => {
+        if (event.key === "Escape") {event.preventDefault();palette.open=false;finishColor();palette.querySelector("summary").focus();}
       });
     });
-
-    app.querySelectorAll("[data-apply-color]").forEach((button) => {
-      button.addEventListener("mousedown", (event) => {
-        const current = activeEditor();
-        const selection = window.getSelection();
-        // Ne pas ecraser la selection valide deja sauvegardee par un caret effondre :
-        // apres le selecteur de couleur natif, la selection du document est perdue.
-        if (current && selection && !selection.isCollapsed) saveEditorSelection(current);
-        event.preventDefault();
-      });
+    runtime.colorTools = {destroy:finishColor};
+    app.querySelectorAll("[data-clear-highlight],[data-color-swatch]").forEach(button => {
+      button.addEventListener("mousedown", event => {finishColor();saveToolbarSelection();event.preventDefault();});
       button.addEventListener("click", () => {
-        const current = activeEditor();
-        if (!current) return;
-        const kind = button.dataset.applyColor;
-        const input = app.querySelector(`[data-color-input="${kind}"]`);
-        applyEditorColor(current, note, box, kind, input?.value || "");
-      });
-    });
-
-    app.querySelectorAll("[data-clear-highlight]").forEach((button) => {
-      button.addEventListener("mousedown", (event) => {
-        const current = activeEditor();
-        const selection = window.getSelection();
-        if (current && selection && !selection.isCollapsed) saveEditorSelection(current);
-        event.preventDefault();
-      });
-      button.addEventListener("click", () => {
-        const current = activeEditor();
-        if (current) clearEditorHighlight(current, note, box);
-      });
-    });
-
-    app.querySelectorAll("[data-color-swatch]").forEach((button) => {
-      button.addEventListener("mousedown", (event) => {
-        const current = activeEditor();
-        const selection = window.getSelection();
-        if (current && selection && !selection.isCollapsed) saveEditorSelection(current);
-        event.preventDefault();
-      });
-      button.addEventListener("click", () => {
-        const current = activeEditor();
-        if (!current) return;
-        const kind = button.dataset.colorSwatch;
-        const input = app.querySelector(`[data-color-input="${kind}"]`);
-        if (input) input.value = button.dataset.colorValue;
-        applyEditorColor(current, note, box, kind, button.dataset.colorValue);
+        const current = activeEditor(); if (!current) return;
+        if (button.hasAttribute("data-clear-highlight")) clearEditorHighlight(current, note, box);
+        else {
+          const kind = button.dataset.colorSwatch;
+          const input = app.querySelector(`[data-color-input="${kind}"]`);
+          if (input) input.value = button.dataset.colorValue;
+          applyEditorColor(current, note, box, kind, button.dataset.colorValue);
+        }
       });
     });
 
@@ -10113,7 +10076,7 @@
 
   function isChecklistToggleHit(event, li) {
     const rect = li.getBoundingClientRect();
-    return event.clientX - rect.left <= 34;
+    return MindSetWriting.markerAt(li.closest("[data-note-editor]"), event) === li;
   }
 
   function toggleCheckListItem(editor, note, box, li) {
@@ -10485,8 +10448,8 @@
   function syncListMarkerColors(editor) {
     if (!editor) return;
     editor.querySelectorAll("li").forEach((li) => {
-      if (li.closest(".check-list")) return;
-      const color = listMarkerColor(li);
+      const explicit = cleanColor(li.dataset.markerColor, "");
+      const color = explicit || listMarkerColor(li);
       if (color) {
         if (li.style.getPropertyValue("--li-marker-color") !== color) {
           li.style.setProperty("--li-marker-color", color);
@@ -11641,14 +11604,10 @@
     if (!clean) return clean;
     const recentKey = kind === "highlight" ? "recentHighlightColors" : "recentTextColors";
     const slotKey = kind === "highlight" ? "recentHighlightColorSlot" : "recentTextColorSlot";
-    const existing = normalizeRecentColorSlots(state.settings[recentKey] || []);
-    if (!existing.includes(clean)) {
-      const emptyIndex = existing.findIndex((item) => !item);
-      const targetIndex = emptyIndex >= 0 ? emptyIndex : Math.min(Math.max(Number(state.settings[slotKey]) || 0, 0), recentColorSlotCount - 1);
-      existing[targetIndex] = clean;
-      state.settings[slotKey] = (targetIndex + 1) % recentColorSlotCount;
-    }
-    state.settings[recentKey] = existing;
+    const palette = kind === "highlight" ? highlightColorPalette() : textColorPalette();
+    const result = MindSetWriting.rememberColor({slots:state.settings[recentKey],next:state.settings[slotKey]}, clean, palette);
+    state.settings[recentKey] = result.slots;
+    state.settings[slotKey] = result.next;
     return clean;
   }
 
@@ -11658,6 +11617,9 @@
     const recentKey = kind === "highlight" ? "recentHighlightColors" : "recentTextColors";
     const paletteValues = new Set(kind === "highlight" ? highlightColorPalette() : textColorPalette());
     const current = cleanColor(currentColor, "");
+    tool.style.setProperty("--tool-color", current || "transparent");
+    const code = tool.querySelector("[data-color-code]");
+    if (code) code.textContent = current || "Couleurs variées";
     const recents = normalizeRecentColorSlots(state.settings?.[recentKey]).map((color) => paletteValues.has(color) ? "" : color);
 
     tool.querySelectorAll("[data-color-swatch]").forEach((button) => {
@@ -11683,6 +11645,7 @@
     rememberEditorSnapshot(note, editor);
     restoreEditorSelection(editor);
     document.execCommand(kind === "highlight" ? "hiliteColor" : "foreColor", false, clean);
+    saveEditorSelection(editor);
     syncEditorContent(editor, note, box);
     paintColorTool(kind, clean);
   }

@@ -1,12 +1,12 @@
 # Mode livre — architecture et contrôles
 
-Le mode livre remplace l’ancien réglage `split`, migré vers `book`. L’écriture simple et la vue papier continue restent disponibles. Deux feuilles sont affichées par défaut ; les commandes +/− et le sélecteur règlent une à quatre feuilles par rangée. Le document se parcourt verticalement, sans limite de quatre pages au total.
+Depuis la version 1.3.6, seuls Note et Livre sont proposés. Chaque ouverture ou changement de document revient en Note. L’ancienne vue Feuilles est retirée de l’interface ; les anciennes structures de contenu restent migrées sans perte. Le réglage `split` est reconnu comme un livre, mais aucune préférence globale ne force les prochaines notes à s’ouvrir ainsi. Deux feuilles sont affichées par défaut ; les commandes +/− et le sélecteur règlent une à quatre feuilles par rangée. Le document se parcourt verticalement, sans limite de quatre pages au total.
 
 ## Un document, un éditeur
 
 `book-layout.js` normalise les formats en centimètres et calcule la géométrie. `book-editor.js` utilise la fragmentation native de Chromium (`column-height`, `column-wrap: wrap`, `column-fill: auto`). Le contenu reste dans un seul `contenteditable` : aucun découpage ni déplacement des paragraphes pendant la frappe. Les feuilles et leurs numéros sont des éléments frères, jamais sauvegardés dans les notes.
 
-Le zoom utilise une transformation visuelle, pas un changement de taille de police. Les rectangles des lignes et des objets permettent de compter les pages. Leur colonne est calculée par division entière ; les petits rectangles de fin de ligne ne créent pas de fausses pages. Les mesures sont regroupées par frame, avec observation des modifications, du redimensionnement, du chargement des images et des polices.
+Le zoom utilise une transformation visuelle, pas un changement de taille de police. La réduction tient compte de la largeur ET de la hauteur disponibles, avec les espacements du conteneur : chaque rangée tient entièrement à l’écran. Pendant la frappe ou les déplacements au clavier, le défilement aligne la rangée du curseur ; il ne remonte pas entre deux feuilles de cette même rangée. Les rectangles des lignes et des objets permettent de compter les pages. Leur colonne est calculée par division entière ; les petits rectangles de fin de ligne ne créent pas de fausses pages. Les mesures sont regroupées par frame, avec observation des modifications, du redimensionnement, du chargement des images et des polices.
 
 Les anciennes colonnes ne fixaient pas de hauteur physique. Le nouveau mode utilise A4 par défaut, A5/A6/A3/Letter/Legal/Executive/Poche, ou des dimensions personnalisées de 8 à 60 cm. Orientation et marges appartiennent à `note.bookSetup`, transporté dans les archives et les boîtes chiffrées. Le nombre de colonnes appartient aux préférences locales. Une feuille pâle « Page suivante » réserve l’espace d’aperçu ; elle ne crée pas de page vide dans le document.
 
@@ -34,3 +34,17 @@ Ajouter le titre/date/heure à l’export prend de la place : les coupures peuve
 Le fichier `SUIVI_MINDSET.txt` consigne les résultats réellement obtenus et les limites restantes. Le guide ajoute son nouveau chapitre une seule fois, sans remplacer les notes déjà modifiées par l’utilisateur.
 
 Après la suite Electron, `python tests/verify-book-pdfs.py` (module `pypdf` requis) vérifie les marqueurs page par page, les dimensions, l’image intégrée et l’absence de texte indicatif sur une page vide.
+
+## Mode Note, couleurs et émojis (1.3.6)
+
+`writing-tools.js` contient le zoom Note, la segmentation des émojis, la mémoire circulaire de couleurs et les interactions avec les marqueurs. Le zoom Note (50–200 %) s’applique uniquement au conteneur éditable via CSS `zoom`, en dehors du HTML sauvegardé. Ctrl/molette et les événements de pincement `wheel` avec Ctrl sont interceptés sans changer le zoom de toute l’application. La valeur est une préférence locale `noteZoom` ; les polices et le PDF gardent leur taille réelle. Les commandes +/−/100 % offrent une autre entrée.
+
+Les palettes du texte et du surlignage ont 12 couleurs personnalisables dans les paramètres et 3 cases indépendantes de couleurs récentes. Les valeurs et la prochaine case sont persistées. Réutiliser une couleur ou cliquer sur un préréglage ne tourne pas la mémoire. Les anciennes 6 cases sont réduites aux 3 dernières lorsque leur ordre est connu.
+
+Un choix natif de couleur peut émettre plusieurs `input`. Le premier enregistre l’état à annuler et prépare des spans couvrant uniquement les portions de texte sélectionnées ; les suivants modifient ces mêmes spans. Aucun focus ni `Selection.addRange` n’est imposé pendant le geste : Chromium fermerait son sélecteur. Un Range indépendant conserve la sélection. `change`, blur, fermeture de palette ou démontage terminent le geste et mémorisent seulement sa dernière couleur. Une seule annulation restaure le texte avant ce geste ; les paragraphes, gras et italiques sont conservés.
+
+Le double-clic sur la première ligne d’un marqueur ouvre huit couleurs. Le repérage tient compte du zoom et des colonnes ; un double-clic sur le texte garde sa sélection normale. La couleur explicite est `li[data-marker-color]`, hexadécimale validée à l’import et au collage. `--li-marker-color` reste le style effectif utilisé à l’écran, à l’impression et dans l’export Word. Le choix « Suivre la couleur du texte » enlève la priorité explicite et rétablit l’héritage de la couleur précédente.
+
+Les icônes personnalisées acceptent le premier graphème émoji complet, via `Intl.Segmenter`, sans liste fermée : tons de peau, familles, drapeaux et séquences ZWJ restent intacts. Leur dessin dépend des polices d’émojis de Windows. Les imports utilisent la même normalisation. Aucun service externe n’est nécessaire.
+
+`node tests/writing-electron.cjs` complète les contrôles avec un profil jetable : zoom, ouverture en Note, palette en direct, fermeture sans validation, historique circulaire, annulation, texte riche, huit familles de marqueurs, émojis, deux tailles de fenêtre et passage entre pages. Les événements du sélecteur natif et du pincement sont reproduits ; le matériel du pavé tactile n’est pas piloté par ces tests.

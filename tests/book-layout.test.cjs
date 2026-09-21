@@ -17,7 +17,12 @@ test('untrusted format values stay bounded and leave usable text area',()=>{
  }
  assert.equal(book.normalize({customWidthCm:null}).customWidthCm,21);
 });
-test('guide update appends the book chapter once without replacing user notes',()=>{
- let id=0;const uid=p=>`${p}-${++id}`,now=()=>new Date().toISOString();const box=guide.create(uid,now);box.guideVersion=1;box.root.children.pop();box.root.children[0].children[0].content='<p>Mes annotations personnelles</p>';const old=JSON.stringify(box.root.children);
- assert.equal(guide.upgrade(box,uid,now),true);assert.equal(JSON.stringify(box.root.children.slice(0,-1)),old);assert.equal(guide.upgrade(box,uid,now),false);assert.equal(guide.upgrade({isGuide:true},uid,now),false);
+test('guide upgrades append missing chapters once and preserve user annotations',()=>{
+ for (const oldVersion of [1,2]) {
+  let id=0;const uid=p=>`${p}-${++id}`,now=()=>new Date().toISOString();const box=guide.create(uid,now);
+  box.guideVersion=oldVersion;box.root.children.splice(oldVersion===1?5:6);box.root.children[0].children[0].content='<p>Mes annotations personnelles</p>';
+  const count=box.root.children.length,old=JSON.stringify(box.root.children);
+  assert.equal(guide.upgrade(box,uid,now),true);assert.equal(JSON.stringify(box.root.children.slice(0,count)),old);assert.equal(box.root.children.length,7);
+  assert.equal(guide.upgrade(box,uid,now),false);assert.equal(guide.upgrade({isGuide:true},uid,now),false);
+ }
 });

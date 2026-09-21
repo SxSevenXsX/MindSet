@@ -1,5 +1,5 @@
 <!doctype html><html lang="fr"><meta charset="utf-8"><title>Contrôles du contenu importé</title><h1 id="summary">Tests en cours</h1><ul id="results"></ul>
-<script src="../src/vendor/purify.min.js"></script><script src="../src/book-layout.js"></script><script src="../src/box-archive.js"></script><script src="../src/archive-content.js"></script>
+<script src="../src/vendor/purify.min.js"></script><script src="../src/book-layout.js"></script><script src="../src/box-archive.js"></script><script src="../src/writing-tools.js"></script><script src="../src/archive-content.js"></script>
 <script>
 const tests=[];
 const check=(name,run)=>tests.push({name,run});
@@ -33,6 +33,12 @@ check('Le format livre personnalisé est restauré sans champs inconnus',()=>{
  const source={id:'box',name:'Livre',passwordHash:'',root:{id:'root',type:'folder',title:'Livre',children:[{id:'note',type:'note',title:'Chapitre',content:'<p>Texte</p>',bookSetup:{sizeId:'custom',customWidthCm:14,customHeightCm:22,orientation:'landscape',margins:{top:1,bottom:1,left:2,right:2},unsafe:'no'}}]}};
  const cleaned=MindSetArchiveContent.cleanBox(source).root.children[0];
  assert(cleaned.bookSetup.sizeId==='custom' && cleaned.bookSetup.customWidthCm===14 && cleaned.bookSetup.orientation==='landscape' && !('unsafe' in cleaned.bookSetup));
+});
+check('Couleurs de marqueurs et émojis composés restaurés sans attributs arbitraires',()=>{
+ const el=root('<ul><li data-marker-color="#ec4899" style="--li-marker-color:#ec4899">Rose</li><li data-marker-color="url(bad)">Non</li></ul>');
+ assert(el.querySelector('li').dataset.markerColor==='#ec4899' && !el.querySelector('li:last-child').hasAttribute('data-marker-color'));
+ const box=MindSetArchiveContent.cleanBox({id:'emoji',name:'Emoji',passwordHash:'',root:{id:'root',type:'folder',title:'Emoji',children:[{id:'n',type:'note',title:'Test',content:'<p>Texte</p>',iconKind:'emoji',emoji:'👩🏽‍🚀'}]}});
+ assert(box.root.children[0].emoji==='👩🏽‍🚀');
 });
 let passed=0;
 for(const {name,run} of tests){const el=document.createElement('li');try{run();passed++;el.className='pass';el.textContent='✓ '+name;}catch(error){el.className='fail';el.textContent='✗ '+name+' : '+error.message;}document.querySelector('#results').append(el);}

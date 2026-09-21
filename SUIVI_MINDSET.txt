@@ -589,3 +589,123 @@ PUBLICATION 1.3.5 CONFIRMÉE
   vide contenant seulement son numéro sont vérifiés automatiquement.
 - L’agent n’a pas installé cette version sur le profil personnel. La réussite
   de cette dernière étape reste à constater après l’action de l’utilisateur.
+
+==========================================================================
+21 SEPTEMBRE 2026 — AJUSTEMENTS D’ÉCRITURE, VERSION PRÉPARÉE 1.3.6
+==========================================================================
+
+Demande et périmètre accepté
+----------------------------
+- Conserver une rangée entière de feuilles visible dans le livre : ne plus
+  remonter de la fin de la page 1 au haut de la page 2 en perdant le texte.
+- Retirer l’ancien mode Feuilles. Ouvrir les documents en Note, tout en gardant
+  Livre disponible. Ajouter un zoom visuel sans modifier la police réelle.
+- Autoriser tous les émojis pour notes, dossiers et fichiers audio.
+- Double-cliquer les puces/formes de listes pour les colorer avec huit bases.
+- Appliquer les couleurs et le surlignage en direct, sans « V » ; conserver
+  le choix à la fermeture ; 3 cases de couleurs personnalisées circulaires,
+  palettes prédéfinies modifiables dans les paramètres.
+- Les demandes antérieures de guide, de suivi complet et de mise à disposition
+  sur GitHub restent applicables. Aucune nouvelle fonction extérieure à ces
+  demandes n’a été ajoutée ; aucune signature payante n’est nécessaire.
+
+Implémentation
+--------------
+1. Livre : src/book-editor.js calcule maintenant le minimum du facteur de
+   largeur et du facteur de hauteur, avec les espacements réels du conteneur.
+   La hauteur est celle d’une rangée de feuilles. Le suivi au clavier aligne
+   la rangée entière du curseur, y compris après passage à une autre rangée.
+   Le début absolu et Retour arrière gardent le comportement sans mouvement.
+   Aucun découpage supplémentaire du texte ; formats, contenu et PDF inchangés.
+2. Vues : seuls Note et Livre restent dans la barre. Une identité de document
+   en mémoire réinitialise la vue sur changement de note, de boîte ou après
+   redémarrage ; une simple ouverture de paramètres conserve la vue courante.
+   La compatibilité de lecture des anciens documents à feuilles est conservée.
+   Le format livre enregistré dans chaque note n’est jamais effacé par ce choix.
+3. Zoom Note : CSS zoom sur le conteneur, pas dans le HTML de la note. Plage
+   50–200 %, Ctrl/molette et événements de pincement Ctrl/wheel, boutons plus,
+   moins et retour 100 %. La préférence noteZoom est locale ; le texte et sa
+   taille CSS effective enregistrée, les exports et l’impression ne changent pas.
+4. Émojis : champ Tous les émojis dans le menu contextuel, validation Entrée ou
+   bouton adjacent. Win + . indiqué pour le sélecteur Windows ; collage accepté.
+   Intl.Segmenter conserve un graphème complet, dont familles, ZWJ, drapeaux et
+   tons de peau. Même normalisation à l’import .mindset ; contenu toujours échappé.
+5. Marqueurs : détection géométrique tenant compte du zoom, palette au double-clic
+   limitée au marqueur sur sa première ligne. Huit couleurs de base ; aucune
+   recoloration du texte. data-marker-color est l’intention explicite, validée
+   comme hexadécimal à l’import/collage. --li-marker-color porte le rendu commun
+   écran/PDF/Word. « Suivre la couleur du texte » restaure la méthode précédente.
+   Les cases à cocher gardent leur fonctionnement ; double-clic ne change pas
+   leur état final. Le double-clic dans le texte reste une sélection de mot.
+6. Couleurs : palettes accessibles par les boutons A/surlignage ; le bouton de
+   confirmation V est supprimé. Les couleurs prédéfinies restent personnalisables
+   dans Paramètres > Apparence. Chaque palette possède ses 3 cases indépendantes.
+   Un choix déjà présent ou prédéfini ne fait pas tourner l’historique. Après
+   remplissage, C4 remplace C1, C5 remplace C2, etc. Migration des anciennes 6 cases.
+7. Sélecteur en direct : le Range de sélection reste indépendant du focus natif.
+   Les portions de texte sélectionnées sont entourées de spans réutilisés pendant
+   le geste. Le code évite execCommand/Selection.addRange pendant le glissement,
+   car Chromium déplacerait le focus et fermerait son sélecteur. Change, blur,
+   fermeture de palette ou démontage finalisent uniquement la couleur finale.
+   L’historique d’annulation regroupe le geste : un Ctrl + Z restaure l’avant.
+8. Guide : version 3, chapitre 07 ajouté. Les guides v1 reçoivent aussi le chapitre
+   Livre manquant ; les guides v2 reçoivent seulement ce nouveau chapitre.
+   Aucun chapitre ni aucune annotation personnelle existante n’est remplacé.
+   README, CHANGELOG et docs/book-mode.md décrivent les nouvelles commandes.
+
+Contrôles réalisés avant publication
+------------------------------------
+- npm test : 51 tests réussis, dont couleurs circulaires, migration 6 vers 3,
+  émojis composés et conservation des versions du guide, en plus des contrôles
+  existants de sauvegarde, stockage et mises à jour.
+- tests/writing-electron.cjs : 9 groupes de contrôles dans un profil jetable.
+  Ouverture en Note, retrait Feuilles, zoom et taille réelle inchangée, reset,
+  focus du sélecteur conservé, couleur en direct, fermeture sans validation,
+  historique circulaire, couleurs prédéfinies hors historique, surlignage et
+  retrait, annulation/rétablissement, texte riche partiellement sélectionné
+  sur plusieurs paragraphes, huit familles de marqueurs, émojis sur 3 types
+  d’éléments, deux tailles de fenêtre, page 1 -> 2 sans déplacement et rangées
+  suivantes entières, historique conservé après rechargement. Aucune erreur JS.
+- tests/book-electron.cjs : 10 groupes réussis après adaptation aux deux vues.
+  Quatre dispositions 1–4 pages, thème sombre, retours au début, saisie, sauts
+  explicites, annulation, géométrie et format personnalisé persistant, exports.
+- tests/verify-book-pdfs.py : première comparaison après ajustement réussie :
+  100/100 marqueurs sur 7 pages A4 et 64/64 sur 23 pages personnalisées, image
+  conservée, document vide d’une page ne contenant que le numéro. Dernière
+  génération de la suite finale à recontrôler avant clôture ci-dessous.
+- Pages navigateur : archive-content 8/8, editor-boundary 7/7, aucune erreur
+  de migration editor-document. Émojis et couleurs des marqueurs conservés ;
+  données inconnues/attributs exécutables toujours rejetés.
+- Captures examinées : deux feuilles entières et palette de couleurs. Correction
+  de l’alignement des boutons Note/Livre après cette inspection.
+- Deux défauts détectés pendant les essais ont été corrigés avant publication :
+  le premier montage couleur provoquait la fermeture du sélecteur et créait
+  plusieurs annulations ; la première fixture de test manquait de dates et a
+  été corrigée (ce n’était pas un défaut du document utilisateur).
+
+Limites et état de livraison à ce stade
+---------------------------------------
+- Les essais déclenchent les événements du sélecteur natif ; ils ne pilotent pas
+  physiquement un pavé tactile. Son pincement doit produire Ctrl/wheel, comme
+  dans Chromium sous Windows. Les boutons de zoom restent disponibles.
+- Le dessin de certains émojis (notamment drapeaux) dépend des polices Windows ;
+  le graphème complet est sauvegardé même si Windows affiche des lettres.
+- Les limites d’impression de 1.3.5 (blocs trop grands, Word et polices) restent.
+- Ni l’application personnelle ni ses boîtes n’ont été modifiées par les tests.
+  Aucun installeur n’a été exécuté sur le profil utilisateur.
+- Version des sources 1.3.6 préparée ; la publication effective, ses empreintes
+  et son lien seront confirmés plus bas après le retour de GitHub.
+- Fichiers privés Conception.docx, PASSATION.md et tmp/ exclus de toute validation.
+  output/ (dont profils de test et anciennes récupérations) reste ignoré et privé.
+
+Derniers compléments avant construction 1.3.6
+---------------------------------------------
+- Dernière comparaison PDF après tous les changements : 100/100 sur 7 pages,
+  64/64 sur 23 pages, image présente et PDF vide conforme.
+- Reprise de frappe après fermeture de la palette par son bouton : retour au
+  Range sauvegardé, avec la couleur choisie au curseur. Un clic extérieur garde
+  sa propre destination. Essai réel réussi avec le mot saisi dans le span coloré.
+- Double-clic sur une puce en mode Livre réduit, couleur bleue puis retour en
+  Note : couleur explicite conservée. Suite écriture complète réussie à nouveau.
+- Les nouveaux guides expliquent Note/Livre aussi dans leur chapitre initial ;
+  les anciens chapitres annotés restent conservés, avec le chapitre 07 de rappel.

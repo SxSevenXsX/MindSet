@@ -6,7 +6,7 @@
     const canvas = editor.parentElement;
     const layer = canvas.querySelector('[data-book-paper-layer]');
     const controls = viewport.previousElementSibling;
-    let geometry, scale = 1, pageCount = 1, frame = 0, destroyed = false;
+    let geometry, scale = 1, pageCount = 1, frame = 0, destroyed = false, followCaret = false;
     function setGeometry(count) {
       geometry = window.MindSetBookLayout.geometry(setup, count);
       const g = geometry;
@@ -29,7 +29,10 @@
     function measure() {
       if (destroyed || !editor.isConnected) return;
       const g = geometry;
-      scale = Math.min(1.5, Math.max(.1, (viewport.clientWidth - 36) / g.canvasWidth));
+      // Fit a complete row in both dimensions, including padding and borders.
+      const bottom = Math.min(window.innerHeight, viewport.closest('.content-area')?.getBoundingClientRect().bottom || window.innerHeight);
+      const availableHeight = Math.max(100, bottom - viewport.getBoundingClientRect().top - 24);
+      scale = Math.min(1.5, Math.max(.01, (viewport.clientWidth - 36) / g.canvasWidth), Math.max(.01, (availableHeight - 38) / g.height));
       canvas.style.transform = `scale(${scale})`;
       canvas.parentElement.style.width = `${g.canvasWidth * scale}px`;
       // Text line rectangles, not block bounds (which may cover empty columns).
@@ -50,8 +53,8 @@
       canvas.style.height = `${rows * g.height + (rows - 1) * g.gap}px`;
       canvas.parentElement.style.height = `${(rows * g.height + (rows - 1) * g.gap) * scale}px`;
       // Keep the entire row visible when possible; longer documents scroll vertically.
-      const availableHeight = Math.max(240, window.innerHeight - viewport.getBoundingClientRect().top - 35);
-      viewport.style.maxHeight = `${Math.min(availableHeight, g.height * scale + 20 + g.gap * scale / 2)}px`;
+      viewport.style.height = `${Math.ceil(g.height * scale + 38)}px`;
+      viewport.style.maxHeight = `${availableHeight}px`;
       const signature = `${slots}:${count}:${g.width}:${g.height}:${g.columns}`;
       if (layer.dataset.layout !== signature) {
         layer.replaceChildren();
@@ -72,12 +75,20 @@
         const selection = window.getSelection();
         if (selection?.isCollapsed && selection.rangeCount && editor.contains(selection.anchorNode)) {
           const caret = selection.getRangeAt(0).getBoundingClientRect(), bounds = viewport.getBoundingClientRect();
-          if (caret.height && caret.bottom > bounds.bottom - 18) viewport.scrollTop += caret.bottom - bounds.bottom + 28;
-          else if (caret.height && caret.top < bounds.top + 18) viewport.scrollTop -= bounds.top + 28 - caret.top;
+          if (caret.height && (followCaret || caret.bottom > bounds.bottom - 18 || caret.top < bounds.top + 18)) {
+            const row = Math.floor((pageAtRect(caret) - 1) / g.columns);
+            viewport.scrollTop = row * (g.height + g.gap) * scale;
+          }
         }
       }
+      followCaret = false;
     }
     function schedule() { cancelAnimationFrame(frame); frame = requestAnimationFrame(measure); }
+    function follow(event) {
+      if (event.type === 'keyup' && !['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','PageUp','PageDown','Enter','Delete','Backspace'].includes(event.key)) return;
+      if (event.key === 'Backspace' && window.MindSetEditorBoundary.atStart(editor)) return;
+      followCaret = true; schedule();
+    }
     function zoom(count) {
       const selected = window.getSelection();
       const range = selected?.rangeCount && editor.contains(selected.anchorNode) ? selected.getRangeAt(0).cloneRange() : null;
@@ -96,11 +107,12 @@
     select.addEventListener('change', change); zoomIn.addEventListener('click', closer); zoomOut.addEventListener('click', farther);
     const observer = new MutationObserver(schedule); observer.observe(editor, { subtree:true, childList:true, characterData:true, attributes:true });
     const resize = new ResizeObserver(schedule); resize.observe(viewport);
+    editor.addEventListener('input', follow); editor.addEventListener('keyup', follow);
     editor.addEventListener('load', schedule, true); window.addEventListener('resize', schedule);
     document.fonts.addEventListener('loadingdone', schedule); document.fonts.ready.then(schedule);
     setGeometry(columns); measure();
     return { get pageCount() { return pageCount; }, get geometry() { return geometry; }, measure, schedule, zoom, pageAtRect,
-      destroy() { destroyed = true; cancelAnimationFrame(frame); observer.disconnect(); resize.disconnect(); editor.removeEventListener('load',schedule,true); window.removeEventListener('resize',schedule); document.fonts.removeEventListener('loadingdone',schedule); select.removeEventListener('change',change); zoomIn.removeEventListener('click',closer); zoomOut.removeEventListener('click',farther); zoomIn.removeEventListener('mousedown',keepSelection); zoomOut.removeEventListener('mousedown',keepSelection); }
+      destroy() { destroyed = true; cancelAnimationFrame(frame); observer.disconnect(); resize.disconnect(); editor.removeEventListener('input',follow); editor.removeEventListener('keyup',follow); editor.removeEventListener('load',schedule,true); window.removeEventListener('resize',schedule); document.fonts.removeEventListener('loadingdone',schedule); select.removeEventListener('change',change); zoomIn.removeEventListener('click',closer); zoomOut.removeEventListener('click',farther); zoomIn.removeEventListener('mousedown',keepSelection); zoomOut.removeEventListener('mousedown',keepSelection); }
     };
   }
   window.MindSetBookEditor = { supported, mount };
