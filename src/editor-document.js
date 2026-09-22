@@ -48,5 +48,41 @@
     block.classList.remove("is-split-continuation");
     if (!block.className) block.removeAttribute("class");
   }
-  window.MindSetDocument = { normalize };
+  // Restore snapshots in place. Unchanged paragraphs, text and images keep their
+  // live nodes, avoiding full-document repaints and image reloads on Undo/Redo.
+  function restore(editor, html) {
+    const target = document.createElement("div");
+    target.innerHTML = normalize(html);
+    function patchNode(live, wanted) {
+      if (live.isEqualNode(wanted)) return;
+      if (live.nodeType !== wanted.nodeType || live.nodeName !== wanted.nodeName || live.namespaceURI !== wanted.namespaceURI) {
+        live.replaceWith(wanted.cloneNode(true)); return;
+      }
+      if (live.nodeType === Node.TEXT_NODE || live.nodeType === Node.COMMENT_NODE) {
+        const before = live.data, after = wanted.data;
+        let start = 0, end = 0;
+        while (start < Math.min(before.length, after.length) && before[start] === after[start]) start++;
+        while (end < Math.min(before.length, after.length) - start && before[before.length - 1 - end] === after[after.length - 1 - end]) end++;
+        live.replaceData(start, before.length - start - end, after.slice(start, after.length - end));
+        return;
+      }
+      for (const attribute of [...live.attributes]) if (!wanted.hasAttribute(attribute.name)) live.removeAttribute(attribute.name);
+      for (const attribute of wanted.attributes) if (live.getAttribute(attribute.name) !== attribute.value) live.setAttribute(attribute.name, attribute.value);
+      patchChildren(live, wanted);
+    }
+    function patchChildren(live, wanted) {
+      const before = [...live.childNodes], after = [...wanted.childNodes];
+      let first = 0, tail = 0;
+      while (first < Math.min(before.length, after.length) && before[first].isEqualNode(after[first])) first++;
+      while (tail < Math.min(before.length, after.length) - first && before[before.length - 1 - tail].isEqualNode(after[after.length - 1 - tail])) tail++;
+      const oldCount = before.length - first - tail, newCount = after.length - first - tail;
+      const shared = Math.min(oldCount, newCount);
+      for (let i = 0; i < shared; i++) patchNode(before[first + i], after[first + i]);
+      for (let i = shared; i < oldCount; i++) before[first + i].remove();
+      const anchor = tail ? before[before.length - tail] : null;
+      for (let i = shared; i < newCount; i++) live.insertBefore(after[first + i].cloneNode(true), anchor);
+    }
+    patchChildren(editor, target);
+  }
+  window.MindSetDocument = { normalize, restore };
 })();

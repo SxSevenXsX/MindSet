@@ -69,7 +69,7 @@
     const scroll = editor.closest('.content-area');
     const label = shell.querySelector('[data-note-zoom-reset]');
     const buttons = [...shell.querySelectorAll('[data-note-zoom-in],[data-note-zoom-out],[data-note-zoom-reset]')];
-    let zoom = clampZoom(value);
+    let zoom = clampZoom(value), wheelZoom = zoom, lastWheelAt = 0;
     function paint() {
       editor.style.zoom = String(zoom);
       label.textContent = `${Math.round(zoom * 100)} %`;
@@ -89,10 +89,14 @@
       if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
       const pixels = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 200 : 1);
-      set(zoom * Math.exp(-Math.max(-100, Math.min(100, pixels)) * .0025), event.clientY);
+      const time = performance.now();
+      if (time - lastWheelAt > 250) wheelZoom = zoom;
+      lastWheelAt = time;
+      wheelZoom = Math.max(.5, Math.min(2, wheelZoom * Math.exp(-Math.max(-100, Math.min(100, pixels)) * .00125)));
+      set(wheelZoom, event.clientY);
     };
     const press = event => { event.preventDefault(); };
-    const click = event => set(event.currentTarget.hasAttribute('data-note-zoom-reset') ? 1 : zoom + (event.currentTarget.hasAttribute('data-note-zoom-in') ? .1 : -.1));
+    const click = event => {set(event.currentTarget.hasAttribute('data-note-zoom-reset') ? 1 : zoom + (event.currentTarget.hasAttribute('data-note-zoom-in') ? .05 : -.05));wheelZoom = zoom;};
     surface.addEventListener('wheel', wheel, {passive:false});
     buttons.forEach(button => {button.addEventListener('mousedown',press);button.addEventListener('click',click);});
     paint();

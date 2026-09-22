@@ -1,8 +1,10 @@
 MINDSET — JOURNAL DE SUIVI DU PROJET
 ==================================
-Mise à jour de ce journal : 19 septembre 2026.
-Version des sources préparées : 1.3.4.
-État : fonctions implémentées et testées ; publication d’un installeur en attente.
+Mise à jour de ce journal : 21 septembre 2026.
+Version des sources préparées : 1.3.7. Dernière publication confirmée : 1.3.6.
+État courant : correctifs de confort implémentés, vérification et publication 1.3.7 en cours.
+Les sections anciennes gardent leur état historique ; voir les dernières entrées
+pour les conclusions et les publications effectives.
 Dépôt : https://github.com/SxSevenXsX/MindSet
 
 Ce fichier sert de mémoire de travail. À chaque nouvelle intervention, lire ce
@@ -749,3 +751,176 @@ PUBLICATION 1.3.6 CONFIRMÉE
   réintroduire Feuilles ; conserver Note par défaut, les trois cases circulaires
   et les annotations personnelles du guide. Toute nouvelle idée hors demande
   doit être discutée avec l’utilisateur avant implementation.
+
+
+==========================================================================
+21 SEPTEMBRE 2026 — SÉLECTION, ANNULATION ET ZOOM, VERSION 1.3.7
+==========================================================================
+
+Demande utilisateur
+--------------------
+- Garder le repère bleu du texte sélectionné visible quand on ouvre la couleur
+  ou le surlignage et pendant le choix ; le libérer après application.
+- Retirer l’effet de rafraîchissement perçu lors de Ctrl + Z.
+- Ajouter un cran intermédiaire entre les zooms/dézooms Note existants.
+- Compléter ce journal avec toute l’histoire disponible de l’application, les
+  changements, ajouts, fonctionnalités, validations et limites.
+
+Constats et corrections
+------------------------
+- En 1.3.6, l’ouverture de la palette ne maintenait pas de repère spécifique.
+  La première prévisualisation personnalisée retirait même le Highlight conservé.
+  Un Highlight CSS distinct « mindset-color-selection » utilise maintenant les
+  couleurs de sélection du système. Il est créé à l’ouverture, suit le Range
+  après changement de spans, et reste présent pendant chaque essai de couleur.
+  L’application d’un préréglage ou la fin du choix personnalisé libère le bleu
+  et place le point d’insertion en fin de sélection. La couleur reste appliquée.
+  Aucun changement de focus imposé pendant le glissement dans le sélecteur natif.
+- L’annulation remplaçait tous les descendants de l’éditeur par innerHTML, même
+  lorsqu’un seul caractère changeait. MindSetDocument.restore prépare la cible
+  hors écran puis modifie seulement les éléments qui diffèrent. Préfixes/suffixes
+  inchangés, paragraphes, nœuds texte et images sont conservés quand ils peuvent
+  l’être ; les modifications de structure légitimes restent possibles.
+- Le livre recalcule sa géométrie dans la même tâche après restitution du curseur,
+  avant le rendu suivant. Les tâches différées susceptibles de reconstruire
+  l’éditeur sont annulées lors de l’annulation.
+- Un autre chemin utilisait l’historique global lorsque le focus restait sur un
+  bouton de la barre. Les boutons et le sélecteur de couleur routent maintenant
+  Ctrl + Z/Y vers la note. Les autres champs gardent leur édition native.
+  Le remplacement complet et ce chemin global sont établis par lecture du code ;
+  aucun enregistrement de l’écran personnel n’a été utilisé pour prétendre isoler
+  le mécanisme exact de chaque clignotement observé par l’utilisateur.
+- Boutons de zoom : 5 points au lieu de 10, par exemple 100 → 105 → 110 %.
+  Molette/pincement : coefficient divisé par deux (0,00125), avec accumulateur
+  pour que de très petits mouvements successifs ne soient pas tous arrondis à zéro.
+  Bornes 50–200 %, remise à 100 %, taille réelle et impression conservées.
+- Guide version 4 : chapitre 08 ajouté une fois, sans remplacement des anciennes
+  annotations. Migration des guides v1/v2/v3 limitée aux chapitres manquants.
+
+Premiers résultats de validation
+---------------------------------
+- Suite réelle tests/writing-electron.cjs réussie : 10 groupes, aucune erreur JS.
+  Nouveaux contrôles : Highlight portant exactement le texte sélectionné à
+  l’ouverture et pendant les essais natifs, suppression après application,
+  focus natif conservé, Ctrl + Z depuis le champ couleur, paragraphe conservé.
+  Frappe puis annulation/rétablissement dans Note et Livre : paragraphes, nœuds
+  texte et image restent connectés sur douze images d’animation successives ;
+  aucun état de document vide n’est observé. Ce contrôle ne prétend pas mesurer
+  chaque rafraîchissement matériel de tous les écrans Windows.
+- Zoom : 105 % entre 100 et 110, retour de 110 à 105, molette testée à 113 %
+  au lieu de 128 %, accumulation de 20 petits événements testée à 101 %.
+- Capture examinée : repère bleu visible sur « Les couleurs » lorsque la palette
+  est ouverte. Les couleurs choisies et les trois cases d’historique restent.
+- Trois contrôles DOM ajoutés pour la restauration : identité des nœuds stables,
+  insertions/suppressions/changements de balises exacts et interdiction d’affecter
+  innerHTML sur le conteneur vivant. Résultats finaux consignés ci-dessous.
+- Tests effectués uniquement avec des notes fictives et un profil séparé.
+  Aucun arrêt ni modification de l’installation ou des boîtes personnelles.
+
+ARCHIVE CHRONOLOGIQUE COMPLÈTE DU DÉPÔT DISPONIBLE
+-------------------------------------------------
+Cette annexe est une transcription des commits disponibles, du premier commit
+jusqu’au dernier état publié avant la présente intervention (13ad76a).
+Elle complète les récits fonctionnels précédents. Les dates sont celles de Git,
+les intitulés sont conservés tels quels pour retrouver exactement les changements.
+Le premier état traçable date du 29 juin 2026 ; aucun travail antérieur non
+présent dans le dépôt n’est inventé. Un commit de préparation ne prouve pas à
+lui seul qu’une version a été publiée ou installée : les confirmations de release
+figurent dans les sections dédiées de ce journal.
+
+2026-06-29 | e7a81ec | Build MindSet note app
+2026-06-29 | 48d938f | Fix editor color focus and box switcher
+2026-06-29 | 32c1674 | Improve checklist and heading editing
+2026-06-29 | 8eb7e9d | Add tree guide color and highlight eraser
+2026-06-29 | c4f8695 | Add checked todo color setting
+2026-06-29 | 0f809c5 | Exit headings into normal paragraphs
+2026-06-30 | cc7c7fd | Redesign graph view as branching tree
+2026-06-30 | 2ef12b0 | Add normal text preset and editor focus fix
+2026-06-30 | e563486 | Add graph orientation and zoom controls
+2026-06-30 | 91f39ad | Stabilize editing focus
+2026-06-30 | 9d6f330 | Polish tabs page view and fonts
+2026-06-30 | 7cdb0bd | Add real page view mode
+2026-06-30 | f0b5d7e | Limit page view to two sheets per row
+2026-06-30 | bd3960f | Smooth page editor pagination
+2026-07-01 | d21c8b3 | Improve page editor flow and undo
+2026-07-01 | c9a39f1 | Enforce hard page boundaries
+2026-07-01 | 1f54bd3 | Keep page editor cursor in view
+2026-07-01 | 59e9a7c | Add printable page setup controls
+2026-07-01 | 190bfae | Fix heading collapse across pages
+2026-07-01 | 31f62f2 | Improve page flow and margin settings
+2026-07-01 | 0f1f8df | Improve graph interactions
+2026-07-01 | 180a534 | Refine page editing modes
+2026-07-01 | b403f29 | Improve graph view interactions
+2026-07-01 | 34e8374 | Smooth editor paging and graph panning
+2026-07-01 | 2052933 | Fix editor selection and page growth
+2026-07-01 | dd161fe | Smooth continuous page breaks
+2026-07-01 | e97c80f | Fix editor focus after returning home
+2026-07-01 | 8553267 | Improve page mode pagination
+2026-07-01 | c097b8b | Keep first page visible when empty
+2026-07-01 | 44680b5 | Add item clipboard shortcuts
+2026-07-01 | ef6f80c | Add note print and PDF export actions
+2026-07-01 | 9ad2ebd | Show cut items as muted
+2026-07-06 | 8157f63 | Fix editor losing text and dead clicks during background renders
+2026-07-06 | b60208a | Add lobby box drag reorder and regroup top navigation tabs
+2026-07-06 | 047f93f | Add one-command release script
+2026-07-06 | 90f95a6 | Move editor stats right, add count preferences, paged settings
+2026-07-06 | fbf3c29 | Give the settings modal a fixed size across pages
+2026-07-06 | 8c04150 | Add collapse/expand all headings button to the editor
+2026-07-06 | 1065323 | Encrypt protected boxes with AES-256-GCM derived from their code
+2026-07-06 | 4a20b42 | Sync toolbar font and size selects with the current selection
+2026-07-07 | a397292 | Overhaul the mini Word editor: paste, fonts, Tab, lists, headings
+2026-07-07 | bad3d73 | Fix PDF unicode, text export coverage, oversized-block pagination
+2026-07-07 | 1efbe80 | Depth-based bullets, image layout controls, collapsed-section safety
+2026-07-07 | a3e06ab | Line spacing menu, grouped list buttons, -- square shortcut
+2026-07-07 | 02f8c28 | Word-like list autoformat: prefix text, revert, colored bullets, ^
+2026-07-07 | af1c85b | Free font size input, style empty blocks in selection like Word
+2026-07-07 | 571fb84 | Fix size field selection loss, page-break list continuations, reflow
+2026-07-08 | 6475d9a | Enforce the page margin as a forbidden zone for text
+2026-07-08 | 3bd8f43 | Smooth caret-following scroll in page mode
+2026-07-08 | 80f4f5c | Toolbar selection guard, custom headings, palettes, nav shortcuts
+2026-07-08 | 59fe96c | Fix font size (real root cause), eraser, reflow-up, heading styles
+2026-07-08 | 240113e | Preserve span formatting on page split; real dropdowns for size/spacing
+2026-07-08 | a73b0fa | Fix the two root-caused page-break bugs (Enter grows page / Enter blocked)
+2026-07-08 | ae09e48 | Color reflection, configurable palettes, style presets, margin menu
+2026-07-09 | e9416e3 | Non-foldable heading styles apply inline (character preset) not block
+2026-07-09 | 194d919 | Fix custom color picker: don't clobber selection on apply/swatch mousedown
+2026-07-09 | bef8b1d | Add audio files: record/import multi-clip items, encrypted IndexedDB storage
+2026-07-09 | dca71d6 | Audio files v2: tree mic icon, mic input picker, clip multi-select/reorder/colors
+2026-07-09 | afab68d | Audio clips: full-card color, darker badge, grip handle, compact sort, mic color setting
+2026-07-10 | fffcfa8 | Improve editor reliability and updates
+2026-09-17 | e743a4a | Release 1.3.0: stable continuous editor and block commands
+2026-09-17 | 55404b3 | Preserve saved independent page boundaries in 1.3.1
+2026-09-17 | 3ecd5d9 | Build and publish tagged Windows releases with GitHub Actions
+2026-09-17 | 95865fe | Document verified GitHub release workflow
+2026-09-17 | 64c53af | Bound release uploads and retain installer as build artifact
+2026-09-17 | f07dec5 | Release 1.3.2 with patched update manifest parser
+2026-09-17 | 2a63d48 | Publish Windows build from Linux and restrict build permissions
+2026-09-19 | 3ce29e6 | Prepare 1.3.3 with verified update lifecycle and signed releases
+2026-09-19 | b7511eb | Clarify Windows trust diagnosis and free signing options
+2026-09-19 | dc160f0 | Prepare 1.3.4 with portable boxes, safe storage and single instance
+2026-09-19 | 6476f7b | Record 1.3.4 verification and preserve vendored asset bytes
+2026-09-20 | d2531f1 | Add real book pages, stable boundary editing and free personal releases
+2026-09-20 | fbf7db4 | Record verified 1.3.5 release and reproducible PDF checks
+2026-09-21 | b49f4ee | Improve writing views, live colors and unrestricted emoji in 1.3.6
+2026-09-21 | 13ad76a | Record verified 1.3.6 publication and writing checks
+
+Les corrections 1.3.7, leurs contrôles et la publication effective prolongent
+cette chronologie dans la présente entrée et sa clôture ci-dessous.
+
+Validation finale des sources 1.3.7 avant publication
+---------------------------------------------------
+- npm test : 51 tests réussis, zéro échec ; migrations du guide depuis les
+  versions 1, 2 et 3, conservation des annotations et absence de doublons incluses.
+- tests/editor-document.html : 18 contrôles réussis dans Chromium, dont les
+  trois contrôles de restauration du document sans remplacement complet.
+- tests/writing-electron.cjs : 10 groupes réussis, aucune erreur JavaScript.
+- tests/book-electron.cjs : 10 groupes réussis, aucune erreur JavaScript ;
+  pagination, saisie, limites de pages, formats, annulation et rétablissement.
+- Vérification des PDF : A4 sur 7 pages avec 100/100 repères concordant avec
+  l’écran ; format personnalisé sur 23 pages avec 64/64 repères concordants et
+  image présente ; document vide limité à une page avec sa seule pagination.
+- Aucune dépendance ajoutée ou mise à jour pour cette correction.
+- Guide intégré passé à la version 4 avec le chapitre 08 « Confort d’écriture ».
+- Version de l’application préparée : 1.3.7. La publication et l’installation
+  restent deux étapes distinctes ; la confirmation de publication sera ajoutée
+  après contrôle des fichiers effectivement disponibles sur GitHub.

@@ -9815,6 +9815,19 @@
     // A native picker can emit many input events. Keep one selection and one undo
     // step for the entire gesture, and record only its final custom color.
     let colorSession = null;
+    const holdColorSelection = () => holdEditorSelectionHighlight("mindset-color-selection");
+    function completeColorSelection() {
+      releaseEditorSelectionHighlight();
+      const current = activeEditor(), range = runtime.editorRange?.cloneRange();
+      if (!current || !range || !selectionInsideEditor(current, range)) return;
+      range.collapse(false);
+      runtime.editorRange = range;
+      runtime.editorSelectionSnapshot = null;
+      if (document.activeElement === current) {
+        const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range.cloneRange());
+        saveEditorSelection(current);
+      }
+    }
     function finishColor() {
       if (!colorSession) return;
       const session = colorSession; colorSession = null;
@@ -9822,6 +9835,7 @@
         registerRecentColor(session.kind, session.color);
         editorHistory(note).group = null;
         paintColorTool(session.kind, session.color); saveState();
+        completeColorSelection();
       }
       releaseEditorSelectionHighlight();
     }
@@ -9848,22 +9862,27 @@
       session.prepared.spans.forEach(span => span.style.setProperty(property, color));
       session.range = session.prepared.range;
       runtime.editorRange = session.range.cloneRange();
-      releaseEditorSelectionHighlight();
+      holdColorSelection();
       setLastEditorColor(session.kind, color);
       syncEditorContent(current, note, box); paintColorTool(session.kind, color);
     }
 
     app.querySelectorAll("[data-color-input]").forEach(input => {
       input.addEventListener("mousedown", () => {finishColor();saveToolbarSelection();startColor(input);});
-      input.addEventListener("focus", () => {startColor(input);holdEditorSelectionHighlight();});
+      input.addEventListener("focus", () => {startColor(input);holdColorSelection();});
       input.addEventListener("input", () => previewColor(input));
       input.addEventListener("change", () => {previewColor(input);finishColor();});
       input.addEventListener("blur", finishColor);
     });
     app.querySelectorAll("[data-color-palette]").forEach(palette => {
+      palette.querySelector("summary").addEventListener("mousedown", () => {
+        if (!palette.open) holdColorSelection();
+      });
       palette.addEventListener("toggle", () => {
-        if (!palette.open) {
+        if (palette.open) holdColorSelection();
+        else {
           finishColor();
+          releaseEditorSelectionHighlight();
           // Closing with the palette's own control returns to the saved caret.
           // An outside click keeps its own focus and selection.
           if (palette.contains(document.activeElement)) restoreEditorSelection(activeEditor());
@@ -9873,7 +9892,7 @@
         if (event.key === "Escape") {event.preventDefault();palette.open=false;finishColor();palette.querySelector("summary").focus();}
       });
     });
-    runtime.colorTools = {destroy:finishColor};
+    runtime.colorTools = {finish:finishColor, destroy() {finishColor();releaseEditorSelectionHighlight();}};
     app.querySelectorAll("[data-clear-highlight],[data-color-swatch]").forEach(button => {
       button.addEventListener("mousedown", event => {finishColor();saveToolbarSelection();event.preventDefault();});
       button.addEventListener("click", () => {
@@ -9885,6 +9904,7 @@
           if (input) input.value = button.dataset.colorValue;
           applyEditorColor(current, note, box, kind, button.dataset.colorValue);
         }
+        completeColorSelection();
       });
     });
 
@@ -11166,10 +11186,10 @@
     }
   }
 
-  function holdEditorSelectionHighlight() {
+  function holdEditorSelectionHighlight(name = "mindset-held-selection") {
     if (typeof Highlight === "undefined" || !CSS.highlights || !runtime.editorRange || runtime.editorRange.collapsed) return;
     try {
-      CSS.highlights.set("mindset-held-selection", new Highlight(runtime.editorRange.cloneRange()));
+      CSS.highlights.set(name, new Highlight(runtime.editorRange.cloneRange()));
     } catch (error) {
       /* surlignage indisponible : sans consequence */
     }
@@ -11177,6 +11197,7 @@
 
   function releaseEditorSelectionHighlight() {
     CSS.highlights?.delete?.("mindset-held-selection");
+    CSS.highlights?.delete?.("mindset-color-selection");
   }
 
   function restoreEditorSelection(editor) {
@@ -11326,6 +11347,9 @@
 
   function restoreEditorHistory(editor, note, box, direction) {
     if (!editor || !note || !box) return false;
+    runtime.colorTools?.finish();
+    cancelDeferredEditorWork({ suppressIdleMs: 350 });
+    releaseEditorSelectionHighlight();
     const history = editorHistory(note);
     const from = direction === "redo" ? history.redo : history.undo;
     const to = direction === "redo" ? history.undo : history.redo;
@@ -11338,13 +11362,14 @@
       note.content = target.content || "<p><br></p>";
       note.modifiedAt = now();
       touchBox(box);
-      editor.innerHTML = stableDocumentHtml(note.content);
+      MindSetDocument.restore(editor, note.content);
       prepareCollapsibleHeadings(editor, note, box);
       updateEditorStats(note);
       history.current = note.content;
       history.group = null;
       editor.focus({ preventScroll: true });
       if (!restoreSelectionBookmark(editor, target.selection)) placeCaretAtEnd(editor);
+      runtime.bookView?.measure();
       history.selection = selectionBookmark(editor);
       saveEditorSelection(editor);
       updateEditorToolbarState(editor);
@@ -12087,7 +12112,9 @@
     if (runtime.archiveBusy || runtime.storageBlocked) return;
     if (event.defaultPrevented) return;
     const editingTarget = editableTarget(event.target);
-    const editingEditor = editingTarget?.closest?.("[data-note-editor]");
+    const editingEditor = editingTarget?.closest?.("[data-note-editor]")
+      || (event.target.closest?.(".editor-toolbar") && (!editingTarget || editingTarget.matches("[data-color-input]"))
+        ? app.querySelector("[data-note-editor]") : null);
     if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && !editingTarget) {
       if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
         event.preventDefault();

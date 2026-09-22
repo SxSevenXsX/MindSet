@@ -9,6 +9,10 @@ Application Windows de prise de notes locale : boîtes de projets, dossiers imbr
 - `npm run dist -- --publish never` pour créer un installeur de développement dans `dist/`.
 - `npm test` pour vérifier les archives, le stockage, l’instance unique, le parcours de mise à jour et les contrôles de publication.
 
+## Confort d’écriture — version 1.3.7
+
+La sélection reste visible pendant le choix des couleurs et du surlignage. Annuler et rétablir conserve les éléments inchangés du document. Le zoom Note propose des pas de 5 points et une molette deux fois moins sensible. Le guide intégré et le journal du projet expliquent ces ajustements.
+
 ## Écriture — version 1.3.6
 
 Les documents s’ouvrent en **Note**, avec un zoom visuel par Ctrl + molette ou pincement (50 à 200 %). **Livre** remplace la vue Feuilles : une à quatre pages par rangée, adaptées en largeur et en hauteur pour rester entièrement visibles.

@@ -1,6 +1,6 @@
 (function (root) {
   'use strict';
-  const VERSION = 3;
+  const VERSION = 4;
   const chapters = [
     ['01 · Bien démarrer', [
       ['Bienvenue dans MindSet', '<p>MindSet est ton espace personnel : des boîtes pour séparer les projets, des dossiers pour les organiser, des notes et de l’audio pour développer tes idées. Tout est enregistré sur cet ordinateur.</p><p>Ce guide est une vraie boîte : tu peux le parcourir, le modifier ou le supprimer. Tes autres boîtes restent indépendantes. Le bouton Guide MindSet de l’accueil permet de le retrouver ou de le recréer.</p>'],
@@ -43,10 +43,16 @@
     ['Tous les émojis', '<p>Fais un clic droit sur une note, un dossier ou un document audio. Sous les choix rapides, le champ Tous les émojis accepte un émoji collé ou choisi avec Win + . sur Windows. Valide avec Entrée ou le bouton à côté du champ.</p><p>Les drapeaux, les tons de peau et les émojis composés sont conservés en entier. L’option Sans icône retire l’émoji ; l’option d’icône par défaut retrouve le symbole du document.</p>'],
   ]];
   chapters.push(writingChapter);
+  const comfortChapter = ['08 · Confort d’écriture · 1.3.7', [
+    ['Garder le texte sélectionné visible', '<p>Quand tu ouvres la palette de couleur ou de surlignage, le repère bleu reste sur le texte sélectionné. Il reste visible pendant le choix d’une couleur personnalisée, même si le sélecteur prend le focus.</p><p>Quand tu appliques une couleur prédéfinie ou termines ton choix personnalisé, ce repère disparaît pour laisser voir le résultat. La couleur continue de s’appliquer en direct, sans bouton de validation supplémentaire.</p>'],
+    ['Annuler sans rafraîchir le document', '<p>Ctrl + Z annule la dernière modification ; Ctrl + Y ou Ctrl + Maj + Z la rétablit. Les paragraphes et images qui n’ont pas changé restent en place. Le document entier n’est plus recréé lors de l’annulation.</p><p>Ces raccourcis utilisent aussi l’historique du texte quand le focus est resté sur un bouton de la barre de mise en forme ou dans son sélecteur de couleur. Les champs de saisie de taille ou de police conservent leur propre comportement.</p>'],
+    ['Des crans de zoom plus fins', '<p>En mode Note, les boutons de zoom avancent maintenant par pas de 5 points : 100 %, 105 %, 110 %, etc. Ctrl + molette et le pincement sont deux fois moins sensibles ; les petits mouvements successifs restent pris en compte.</p><p>Le zoom reste visuel, de 50 % à 200 %. La taille réelle des caractères et l’impression ne changent pas. Clique sur le pourcentage pour revenir à 100 %.</p>'],
+  ]];
+  chapters.push(comfortChapter);
   function upgrade(box, uid, now) {
     if (!box?.isGuide || !box.root || box.guideVersion >= VERSION) return false;
     const stamp = now();
-    const additions = [...(box.guideVersion < 2 ? [bookChapter] : []), writingChapter];
+    const additions = [...(box.guideVersion < 2 ? [bookChapter] : []), ...(box.guideVersion < 3 ? [writingChapter] : []), comfortChapter];
     for (const chapter of additions) {
       const notes = chapter[1].map(([title, content]) => ({ id:uid('note'), type:'note', title, content, createdAt:stamp, modifiedAt:stamp }));
       box.root.children.push({ id:uid('folder'), type:'folder', title:chapter[0], children:notes, createdAt:stamp, modifiedAt:stamp });

@@ -1,3 +1,11 @@
+# 1.3.7 — Sélection visible, annulation stable et zoom précis
+
+- Le repère bleu du texte sélectionné reste visible pendant le choix d’une couleur ou d’un surlignage, y compris dans le sélecteur personnalisé. Il est libéré quand la modification est appliquée.
+- Annulation et rétablissement sur place : les paragraphes, textes et images inchangés restent montés, sans recréer tout le document. La géométrie du livre est actualisée avant l’affichage suivant.
+- Ctrl + Z depuis la barre de mise en forme ou le sélecteur de couleur utilise l’historique du texte, sans reconstruire l’application entière.
+- Zoom Note : pas de 5 points au lieu de 10 ; sensibilité de la molette et du pincement divisée par deux, avec accumulation des gestes très fins. Aucun changement à la taille réelle des caractères.
+- Guide complété sans remplacer les annotations personnelles. Journal SUIVI_MINDSET enrichi d’une chronologie de tous les commits disponibles depuis la création du projet.
+
 # 1.3.6 — Notes, pages entières et couleurs immédiates
 
 - Les pages du livre tiennent entièrement dans la hauteur et la largeur disponibles. Le passage entre les feuilles d’une même rangée garde le défilement stable.

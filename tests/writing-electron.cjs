@@ -28,28 +28,43 @@ const root=path.resolve(__dirname,'..'),out=path.join(root,'output','writing-tes
   checks.push('Opening a document defaults to Note; the old sheets toggle is removed');
   const original=await editor.innerHTML(),font=await editor.evaluate(el=>getComputedStyle(el).fontSize);
   await editor.hover();await page.keyboard.down('Control');await page.mouse.wheel(0,-100);await page.keyboard.up('Control');await settle();
-  assert.ok(Number(await editor.evaluate(el=>el.style.zoom))>1);assert.equal(await editor.innerHTML(),original);assert.equal(await editor.evaluate(el=>getComputedStyle(el).fontSize),font);
+  assert.equal(Number(await editor.evaluate(el=>el.style.zoom)),1.13);assert.equal(await editor.innerHTML(),original);assert.equal(await editor.evaluate(el=>getComputedStyle(el).fontSize),font);
   await page.getByRole('button',{name:'Réinitialiser le zoom de la note',exact:true}).click();assert.equal(await editor.evaluate(el=>el.style.zoom),'1');
   await editor.dispatchEvent('wheel',{ctrlKey:true,deltaY:40,deltaMode:0,clientY:350});assert.ok(Number(await editor.evaluate(el=>el.style.zoom))<1);await page.getByRole('button',{name:'Réinitialiser le zoom de la note',exact:true}).click();
-  checks.push('Ctrl+wheel / pinch-style wheel changes only visual zoom and reset restores 100%');
+  await page.getByRole('button',{name:'Zoomer la note',exact:true}).click();assert.equal(await editor.evaluate(el=>el.style.zoom),'1.05');
+  await page.getByRole('button',{name:'Zoomer la note',exact:true}).click();assert.equal(await editor.evaluate(el=>el.style.zoom),'1.1');
+  await page.getByRole('button',{name:'Dézoomer la note',exact:true}).click();assert.equal(await editor.evaluate(el=>el.style.zoom),'1.05');
+  await page.getByRole('button',{name:'Réinitialiser le zoom de la note',exact:true}).click();
+  await editor.evaluate(el=>{for(let i=0;i<20;i++)el.dispatchEvent(new WheelEvent('wheel',{ctrlKey:true,deltaY:-.25,bubbles:true,cancelable:true}));});
+  assert.equal(await editor.evaluate(el=>el.style.zoom),'1.01');await page.getByRole('button',{name:'Réinitialiser le zoom de la note',exact:true}).click();
+  checks.push('Five-point zoom steps, half-speed wheel and accumulated fine pinch events preserve real typography');
   async function content(html){await editor.evaluate((el,html)=>{el.innerHTML=html;el.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertFromPaste'}));},html);await settle();}
   async function selectText(selector='p',start=0,end=8){await editor.evaluate((el,{selector,start,end})=>{const walker=document.createTreeWalker(el.querySelector(selector),NodeFilter.SHOW_TEXT);walker.nextNode();const node=walker.currentNode;el.focus({preventScroll:true});const r=document.createRange();r.setStart(node,start);r.setEnd(node,end);getSelection().removeAllRanges();getSelection().addRange(r);el.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));},{selector,start,end});}
   async function customColor(kind,colors,commit='change'){
    const palette=page.locator(`[data-color-palette="${kind}"]`);
    if(!await palette.evaluate(el=>el.open))await palette.locator('summary').click();
-   const input=page.locator(`[data-color-input="${kind}"]`);await input.focus();
+   const input=page.locator(`[data-color-input="${kind}"]`);
+   const selected=await page.evaluate(()=>getSelection()?.toString() || '');
+   if(selected) assert.equal(await page.evaluate(()=>CSS.highlights.get('mindset-color-selection')?.size>0),true,'selection cue at palette opening');
+   await input.focus();
    for(const color of colors)await input.evaluate((el,color)=>{el.value=color;el.dispatchEvent(new Event('input',{bubbles:true}));},color);
    assert.equal(await input.evaluate(el=>document.activeElement===el),true,'live picker retains focus');
+   if(selected) assert.equal(await page.evaluate(()=>[...(CSS.highlights.get('mindset-color-selection') || [])].map(r=>r.toString()).join('')),selected,'cue still covers the exact selection during live preview');
    if(commit==='change')await input.dispatchEvent('change');
    else if(commit==='close')await palette.locator('summary').click();
    await settle();
+   assert.equal(await page.evaluate(()=>CSS.highlights.has('mindset-color-selection')),false,'selection cue released after applying');
   }
   const history=kind=>page.evaluate(kind=>JSON.parse(localStorage.getItem('mindset.state.v1')).settings[kind==='text'?'recentTextColors':'recentHighlightColors'],kind);
   await content('<p>abcdefgh suite</p>');await selectText();
   await customColor('text',['#123456','#234567']);
   assert.match(await editor.innerHTML(),/#234567|rgb\(35, 69, 103\)/);assert.equal(await editor.textContent(),'abcdefgh suite');assert.deepEqual(await history('text'),['#234567','','']);
   // Entire native-picker drag is one undo step.
-  await page.locator('[data-color-palette="text"] summary').click();await editor.focus();await page.keyboard.press('Control+z');assert.equal(await editor.innerHTML(),'<p>abcdefgh suite</p>');await page.keyboard.press('Control+y');assert.match(await editor.innerHTML(),/#234567|rgb\(35, 69, 103\)/);
+  await editor.evaluate(el=>{window.undoEditor=el;window.undoParagraph=el.firstChild;});
+  await page.keyboard.press('Control+z');assert.equal(await editor.innerHTML(),'<p>abcdefgh suite</p>');
+  assert.equal(await editor.evaluate(el=>el===window.undoEditor && el.firstChild===window.undoParagraph),true,'toolbar Undo keeps the document and paragraph mounted');
+  await page.keyboard.press('Control+y');assert.match(await editor.innerHTML(),/#234567|rgb\(35, 69, 103\)/);
+  await page.locator('[data-color-palette="text"] summary').click();
   for(const color of ['#345678','#456789','#56789a','#6789ab','#789abc']){await selectText('p',0,8);await customColor('text',[color],'close');}
   assert.deepEqual(await history('text'),['#56789a','#6789ab','#789abc']);
   checks.push('Live custom text color applies to selection; closing retains it; one undo per gesture; circular three-slot history');
@@ -70,6 +85,18 @@ const root=path.resolve(__dirname,'..'),out=path.join(root,'output','writing-tes
   await content('<p>Avant </p>');await selectText('p',6,6);await customColor('text',['#789abc'],'close');
   await page.keyboard.type('suite');assert.equal((await editor.textContent()).replace(/\u200b/g,''),'Avant suite');assert.ok((await editor.locator('span').textContent()).includes('suite'));
   assert.equal(await editor.locator('span').evaluate(el=>getComputedStyle(el).color),'rgb(120, 154, 188)');
+  // Real typing Undo/Redo keeps untouched content mounted in both views.
+  for (const mode of ['note','book']) {
+   if(mode==='book')await page.getByRole('button',{name:'Mode livre',exact:true}).click();
+   await content('<p>Début stable</p><p>À modifier</p><p><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=">Fin stable</p>');
+   await selectText('p:nth-child(2)',10,10);await page.keyboard.type(' plus');
+   await editor.evaluate(el=>{window.stableNodes=[el,el.firstChild,el.children[1],el.children[1].firstChild,el.querySelector('img'),el.lastChild];window.undoFrames=[];let n=0;function watch(){window.undoFrames.push({present:window.stableNodes.every(node=>node.isConnected),nonempty:el.textContent.includes('Début stable')});if(++n<12)requestAnimationFrame(watch);}requestAnimationFrame(watch);});
+   await page.keyboard.press('Control+z');assert.equal(await editor.locator('p:nth-child(2)').textContent(),'À modifier');
+   await page.keyboard.press('Control+y');assert.equal(await editor.locator('p:nth-child(2)').textContent(),'À modifier plus');
+   await page.waitForFunction(()=>window.undoFrames.length===12);assert.equal(await page.evaluate(()=>window.undoFrames.every(f=>f.present&&f.nonempty)),true,'no detached text/image or empty frame during Undo/Redo');
+  }
+  await page.getByRole('button',{name:'Mode note',exact:true}).click();
+  checks.push('Undo/Redo preserves existing paragraphs, text nodes and images across sampled frames in Note and Book');
   // Every marker family, with actual double-click coordinates (including native markers outside li).
   for(const type of ['bullet','circle','dash','arrow','triangle','square','check','ordered']){
    const list=type==='ordered'?'ol':'ul',cls=['bullet','ordered'].includes(type)?'':` class="${type}-list"`;

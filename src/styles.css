@@ -4591,3 +4591,9 @@ button:disabled {
 
 .color-tool > details > summary { display:inline-flex; }
 .marker-color-swatches .quick-color { width:24px; height:24px; }
+
+/* Preserve the system selection cue while focus is in a color palette. */
+::highlight(mindset-color-selection) {
+  background-color: Highlight;
+  color: HighlightText;
+}

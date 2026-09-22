@@ -46,6 +46,24 @@ check('Un second chargement ne modifie plus le document', () => {
  const html = '<div class="page-sheet" contenteditable="true"><p>A</p></div><div class="page-sheet" contenteditable="true"><p>B</p></div>';
  const once = MindSetDocument.normalize(html); assert(MindSetDocument.normalize(once) === once);
 });
+check('Annulation : paragraphes, texte et images inchangés gardent leurs nœuds', () => {
+ const editor = document.createElement('div');editor.innerHTML='<p>Avant modifié</p><p><img src="data:image/png;base64,AAAA"> Image</p><p>Après</p>';
+ const paragraph=editor.firstChild,text=paragraph.firstChild,image=editor.querySelector('img'),last=editor.lastChild;
+ MindSetDocument.restore(editor,'<p>Avant</p><p><img src="data:image/png;base64,AAAA"> Image</p><p>Après</p>');
+ assert(editor.firstChild===paragraph && paragraph.firstChild===text && text.data==='Avant' && editor.querySelector('img')===image && editor.lastChild===last);
+});
+check('Annulation : insertions, retraits et changements de structure restitués exactement', () => {
+ const editor=document.createElement('div');editor.innerHTML='<p>Un</p><p>Trois</p>';const first=editor.firstChild,last=editor.lastChild;
+ for(const html of ['<p>Un</p><p>Deux</p><p>Trois</p>','<p>Un</p><p>Trois</p>','<h1>Titre</h1><ul><li>A <b>B</b></li></ul>','<p><br></p>','<p>Texte <span style="color:red">rouge</span></p>']) {
+  MindSetDocument.restore(editor,html);assert(editor.innerHTML===MindSetDocument.normalize(html));
+  if(html.includes('Trois'))assert(editor.firstChild===first && editor.lastChild===last);
+ }
+});
+check('Annulation : le conteneur vivant ne reçoit jamais un remplacement HTML complet', () => {
+ const editor=document.createElement('div');editor.innerHTML='<p>A <strong>B</strong></p><p>C</p>';
+ Object.defineProperty(editor,'innerHTML',{set(){throw Error('Remplacement complet interdit');}});
+ MindSetDocument.restore(editor,'<p>A <strong>BC</strong></p><p>C</p>');assert(editor.textContent==='A BCC');
+});
 let passed = 0;
 for (const {name, run} of tests) {
  const item = document.createElement('li');

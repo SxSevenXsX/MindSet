@@ -48,3 +48,11 @@ Le double-clic sur la première ligne d’un marqueur ouvre huit couleurs. Le re
 Les icônes personnalisées acceptent le premier graphème émoji complet, via `Intl.Segmenter`, sans liste fermée : tons de peau, familles, drapeaux et séquences ZWJ restent intacts. Leur dessin dépend des polices d’émojis de Windows. Les imports utilisent la même normalisation. Aucun service externe n’est nécessaire.
 
 `node tests/writing-electron.cjs` complète les contrôles avec un profil jetable : zoom, ouverture en Note, palette en direct, fermeture sans validation, historique circulaire, annulation, texte riche, huit familles de marqueurs, émojis, deux tailles de fenêtre et passage entre pages. Les événements du sélecteur natif et du pincement sont reproduits ; le matériel du pavé tactile n’est pas piloté par ces tests.
+
+## Ajustements de confort (1.3.7)
+
+La palette utilise un `Highlight` CSS distinct, avec les couleurs système de sélection. Son Range est actualisé après les modifications de spans du sélecteur natif. Le repère reste visible pendant `input`, puis disparaît à l’application d’un préréglage, à `change`, ou à la fermeture ; un geste terminé laisse un curseur à la fin de la sélection. Le focus du sélecteur natif reste intact pendant la prévisualisation.
+
+`MindSetDocument.restore` prépare la cible hors écran, puis rapproche les arbres DOM de manière synchrone. Les préfixes et suffixes identiques restent en place, les nœuds compatibles sont modifiés et seuls les éléments ajoutés/supprimés sont insérés/retirés. Le texte utilise `replaceData` sur sa portion différente. Les images inchangées gardent leur élément et leur source. Le mode Livre est mesuré dans la même tâche après restitution du curseur, avant le prochain rendu. Les rendus différés éventuels sont annulés. Depuis les boutons de la barre et le champ couleur, Ctrl + Z vise l’historique du document ; les autres champs conservent leur édition native.
+
+Le zoom Note avance de 0,05 par bouton. La molette utilise un coefficient de 0,00125 au lieu de 0,0025 ; son accumulateur garde les fractions avant l’arrondi au pourcentage. Le contenu, les tailles de caractères et le format imprimé restent indépendants de cette préférence.
